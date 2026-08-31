@@ -104,7 +104,7 @@ git に対して書き込みを行うのは **checkout / fetch / fast-forward �
 | git | 2.43.0.windows.1 |
 | credential.helper | `manager`（Git Credential Manager 実体あり） |
 | rustup default host | `x86_64-pc-windows-msvc` |
-| rustc / cargo | 1.81.0（Tauri v2 の要求 1.77.2+ は満たすが、`rustup update` 推奨） |
+| rustc / cargo | 1.98.0（2026-08-18）。§2.5 参照 |
 | Visual Studio | Community 2022 |
 | WebView2 Runtime | 151.0.4129.107 |
 | Node / npm | v22.13.0 / 10.9.2 |
@@ -113,6 +113,15 @@ git に対して書き込みを行うのは **checkout / fetch / fast-forward �
 
 ビルドと実行は Windows のみ。ただし**閲覧対象には Linux (CentOS / AmazonLinux) 由来のソースが
 含まれる**前提で表示を設計する（§9）。
+
+### 2.5 Rust のバージョン要件
+
+**rustc 1.81 ではビルドできない。** Tauri v2 自体の要求は 1.77.2+ だが、依存ツリーに入る
+`time 0.3.55` が edition2024 を要求するため、実際には **Rust 1.85 以上**が必要になる。
+Phase 0 の着手時点で 1.81 から 1.98.0 へ更新した。
+
+依存クレートは今後も新しい edition や MSRV を要求しうるので、ビルドが通らなくなったら
+まず `rustup update stable` を試すこと。
 
 ---
 

@@ -144,7 +144,7 @@ GIT_SSH_COMMAND=ssh -o BatchMode=yes     # 無いとパスフレーズ待ちで�
 
 縦切りで進める。**各 Phase 終了時に必ず起動して触れる状態にすること。**
 
-- [ ] **Phase 0** — Tauri v2 雛形 ＋ git 検出 ＋ git コマンドログパネル
+- [x] **Phase 0** — Tauri v2 雛形 ＋ git 検出 ＋ git コマンドログパネル
 - [ ] **Phase 1** — リポジトリ登録・一覧・切替 ＋ `git log` 全件取得とパース
 - [ ] **Phase 2** — レーン計算（テスト付き）＋ SVG グラフ ＋ 仮想スクロール ← **最初の判定ポイント**
 - [ ] **Phase 3** — ブランチ / タグツリー、ref チップ、表示 ON/OFF、ahead/behind
@@ -167,6 +167,7 @@ GIT_SSH_COMMAND=ssh -o BatchMode=yes     # 無いとパスフレーズ待ちで�
 
 - ビルド・実行は Windows のみ。ただし**閲覧対象には Linux 由来のソースが含まれる**前提で
   文字コード（UTF-8 / Shift_JIS / EUC-JP 自動判別）と改行コード（LF/CRLF 混在の警告）を扱う。
-- rustc 1.81 は Tauri v2 の要求（1.77.2+）を満たすが古い。`rustup update` 推奨。
+- **Rust は 1.85 以上が必須**（Tauri v2 自体は 1.77.2+ だが、依存の `time` が edition2024 を
+  要求する）。ビルドが通らなくなったらまず `rustup update stable`。
 - 配布はポータブル zip のみ。**Tauri の bundler に zip ターゲットは無い**ので、
   `src-tauri/target/release/Givsoner.exe` を npm script で zip 化する。

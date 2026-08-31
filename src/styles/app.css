@@ -1,0 +1,361 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow: hidden;
+}
+
+/* ---------- 共通部品 ---------- */
+
+.button {
+  padding: 4px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.button--primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.input,
+.select {
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text);
+  font: inherit;
+}
+
+.input {
+  width: 100%;
+  font-family: var(--font-mono);
+}
+
+/* ---------- アプリ全体 ---------- */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.app__name {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.app__tagline {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.app__spacer {
+  flex: 1;
+}
+
+.app__theme {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.app__main {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.app__loading {
+  padding: 32px;
+  color: var(--text-dim);
+}
+
+/* ---------- git セットアップ画面 ---------- */
+
+.setup {
+  display: flex;
+  justify-content: center;
+  padding: 48px 24px;
+}
+
+.setup__card {
+  width: min(680px, 100%);
+  padding: 24px 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+}
+
+.setup__title {
+  margin: 0 0 8px;
+  color: var(--danger);
+  font-size: 18px;
+}
+
+.setup__body {
+  margin: 0 0 20px;
+  color: var(--text-dim);
+}
+
+.setup__error {
+  margin-bottom: 20px;
+  color: var(--text-dim);
+}
+
+.setup__error pre {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.setup__install {
+  margin-bottom: 24px;
+}
+
+.setup__url {
+  display: inline-block;
+  margin-left: 12px;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  user-select: all;
+}
+
+.setup__hint {
+  margin: 8px 0 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.setup__label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.setup__row {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---------- git 検出済みの表示 (Phase 0 の暫定画面) ---------- */
+
+.ready {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 32px;
+}
+
+.ready__card {
+  max-width: 720px;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+}
+
+.ready__card--muted {
+  background: var(--bg-inset);
+}
+
+.ready__heading {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+
+.ready__facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 20px;
+  margin: 0;
+}
+
+.ready__facts dt {
+  color: var(--text-dim);
+}
+
+.ready__facts dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+.ready__note {
+  margin-bottom: 0;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* ---------- git コマンドログ ---------- */
+
+.command-log {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  height: 240px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.command-log__header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.command-log__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.command-log__meta {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.command-log__toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.command-log__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.command-log__empty {
+  margin: 0;
+  padding: 8px 14px;
+  color: var(--text-faint);
+  font-family: var(--font-sans);
+}
+
+.log-row {
+  padding: 2px 14px;
+}
+
+.log-row:hover {
+  background: var(--bg-hover);
+}
+
+.log-row__line {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.log-row__time {
+  flex: none;
+  color: var(--text-faint);
+}
+
+.log-row__command {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+
+.log-row__program {
+  color: var(--accent);
+}
+
+.log-row__fixed {
+  color: var(--text-faint);
+}
+
+.log-row__repo {
+  color: var(--text-dim);
+}
+
+.log-row__exit {
+  flex: none;
+  color: var(--ok);
+}
+
+.log-row__exit--failed {
+  color: var(--danger);
+}
+
+.log-row__duration {
+  flex: none;
+  min-width: 56px;
+  color: var(--text-faint);
+  text-align: right;
+}
+
+.log-row__stderr {
+  margin: 2px 0 4px;
+  padding: 6px 10px;
+  overflow-x: auto;
+  border-left: 2px solid var(--danger);
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-all;
+}

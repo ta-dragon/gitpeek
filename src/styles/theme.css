@@ -1,0 +1,77 @@
+/*
+ * テーマトークン。
+ *
+ * 既定は OS 追従。手動指定は :root[data-theme="light" | "dark"] が優先する
+ * （docs/DESIGN.md §6.1）。色はここ以外で直接書かないこと。
+ */
+
+:root {
+  color-scheme: light;
+
+  --bg: #f4f6f8;
+  --bg-panel: #ffffff;
+  --bg-inset: #eef1f5;
+  --bg-hover: #e7ebf1;
+
+  --border: #d5dae1;
+  --border-strong: #b9c1cb;
+
+  --text: #1b2027;
+  --text-dim: #5f6b7a;
+  --text-faint: #94a0ae;
+
+  --accent: #2f6feb;
+  --accent-contrast: #ffffff;
+  --danger: #cf222e;
+  --ok: #1a7f37;
+
+  --font-sans: "Segoe UI", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "Consolas", "Noto Sans Mono", monospace;
+
+  --radius: 6px;
+  --row-height: 28px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #13161b;
+    --bg-panel: #1a1e25;
+    --bg-inset: #101318;
+    --bg-hover: #232935;
+
+    --border: #2c323c;
+    --border-strong: #3d4553;
+
+    --text: #e3e7ee;
+    --text-dim: #8d97a5;
+    --text-faint: #626c7a;
+
+    --accent: #5b9dff;
+    --accent-contrast: #0d1117;
+    --danger: #f8737f;
+    --ok: #56d364;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #13161b;
+  --bg-panel: #1a1e25;
+  --bg-inset: #101318;
+  --bg-hover: #232935;
+
+  --border: #2c323c;
+  --border-strong: #3d4553;
+
+  --text: #e3e7ee;
+  --text-dim: #8d97a5;
+  --text-faint: #626c7a;
+
+  --accent: #5b9dff;
+  --accent-contrast: #0d1117;
+  --danger: #f8737f;
+  --ok: #56d364;
+}
