@@ -854,6 +854,9 @@ LLM プロファイルが未設定のまま AI レビューを押した場合は
 
 「レーン配列 → SVG パス文字列」の純関数のみテストする。コンポーネントテストはしない。
 
+テストランナーは **Vitest**（Vite プロジェクトなので `vite.config.ts` に `test` を足すだけで済む）。
+導入は T-06 で行う。
+
 ### 14.5 LLM
 
 OpenAI 互換のモックサーバを立ててテストし、**JSON パース失敗時の Markdown フォールバック経路を
@@ -987,9 +990,11 @@ ahead/behind は git を呼ばずメモリ上のグラフから計算する（§
 インタビューで扱わなかった、実装時に判断してよい事項。
 
 - 状態管理ライブラリ（zustand / jotai / Context のみ）
-- 仮想スクロールの実装（TanStack Virtual / 自前）
 - AI レビュー出力の Markdown レンダラ
 - CSS の手法（CSS Modules / Tailwind / vanilla-extract）
+
+なお「仮想スクロールの実装」はこの一覧から外した。**TanStack Virtual** を使うことが
+[`../task_lists.md`](../task_lists.md) の T-07 で確定している。
 - `LC_ALL=C` を git 実行時に設定するか（stderr が英語になり検索性は上がるが、ユーザーに見せる
   メッセージは日本語のままの方が読みやすい。パースは機械可読形式のみに依存しているので、
   どちらでも動作は変わらない）
