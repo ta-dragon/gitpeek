@@ -1433,4 +1433,4 @@ JSON パース失敗時に Markdown が表示され「構造化に失敗しま�
 | ID | Phase | タイトル | コミット |
 |---|---|---|---|
 | — | 0 | Tauri v2 雛形 ＋ git 検出 ＋ git コマンドログパネル | `93867ed` |
-| T-01 | 1 | 設定ストアと %APPDATA% レイアウト（settings.json / state.json） | `4684234` |
+| T-01 | 1 | 設定ストアと %APPDATA% レイアウト（settings.json / state.json） | `cf5fd37` |
