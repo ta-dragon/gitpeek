@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 
 use crate::redact::redact;
 
@@ -85,20 +85,18 @@ struct Inner {
 }
 
 impl CommandLog {
-    /// エントリを積む。マスキングと ID 採番はここで行うので、呼び出し側は何もしなくてよい。
-    pub fn push(&self, app: &AppHandle, entry: CommandLogEntry) {
-        let stored = {
-            let mut inner = self.inner.lock().expect("command log poisoned");
-            inner.next_id += 1;
-            let mut entry = entry.redacted();
-            entry.id = inner.next_id;
-            if inner.entries.len() >= CAPACITY {
-                inner.entries.pop_front();
-            }
-            inner.entries.push_back(entry.clone());
-            entry
-        };
-        let _ = app.emit(EVENT, stored);
+    /// エントリを積み、マスキングと ID 採番を済ませた実体を返す。
+    /// マスキングはここでしか行わないので、呼び出し側は何もしなくてよい。
+    pub fn record(&self, entry: CommandLogEntry) -> CommandLogEntry {
+        let mut inner = self.inner.lock().expect("command log poisoned");
+        inner.next_id += 1;
+        let mut entry = entry.redacted();
+        entry.id = inner.next_id;
+        if inner.entries.len() >= CAPACITY {
+            inner.entries.pop_front();
+        }
+        inner.entries.push_back(entry.clone());
+        entry
     }
 
     pub fn entries(&self) -> Vec<CommandLogEntry> {
@@ -109,5 +107,38 @@ impl CommandLog {
             .iter()
             .cloned()
             .collect()
+    }
+}
+
+/// git 実行の記録先。
+///
+/// `git/exec.rs` を Tauri から切り離すための境界。本番は [`EmittingLog`]（ログに積んだうえで
+/// フロントへイベントを送る）、テストは [`CommandLog`] をそのまま渡す（積むだけ）。
+pub trait LogSink {
+    fn record(&self, entry: CommandLogEntry);
+}
+
+impl LogSink for CommandLog {
+    fn record(&self, entry: CommandLogEntry) {
+        CommandLog::record(self, entry);
+    }
+}
+
+/// ログに積み、`command-log` イベントでフロントへも送る記録先。
+pub struct EmittingLog<'a, R: Runtime> {
+    app: &'a AppHandle<R>,
+    log: &'a CommandLog,
+}
+
+impl<'a, R: Runtime> EmittingLog<'a, R> {
+    pub fn new(app: &'a AppHandle<R>, log: &'a CommandLog) -> Self {
+        Self { app, log }
+    }
+}
+
+impl<R: Runtime> LogSink for EmittingLog<'_, R> {
+    fn record(&self, entry: CommandLogEntry) {
+        let stored = self.log.record(entry);
+        let _ = self.app.emit(EVENT, stored);
     }
 }

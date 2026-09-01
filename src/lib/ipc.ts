@@ -47,6 +47,59 @@ export function listCommandLog(): Promise<CommandLogEntry[]> {
   return invoke<CommandLogEntry[]>("list_command_log");
 }
 
+/* ---------- リポジトリ（`src-tauri/src/git/repo.rs`）---------- */
+
+/** HEAD の 3 状態。`kind` で判別する。 */
+export type HeadState =
+  | { kind: "branch"; name: string; sha: string }
+  | { kind: "detached"; sha: string }
+  /** コミット 0 件。ブランチ名だけが決まっている。 */
+  | { kind: "unborn"; name: string };
+
+export type RepositoryProbe = {
+  isRepository: boolean;
+  gitDir: string | null;
+  /** bare では null。 */
+  workTree: string | null;
+  isBare: boolean;
+  isShallow: boolean;
+  head: HeadState | null;
+  /** 検出するだけ。アプリからは削除しない。 */
+  indexLockPresent: boolean;
+  error: string | null;
+};
+
+/** 登録内容に実際の状態を添えたもの。`probe` が null ならパスが消えている。 */
+export type RepositoryEntry = RepositorySettings & {
+  probe: RepositoryProbe | null;
+};
+
+export function probeRepository(path: string): Promise<RepositoryProbe> {
+  return invoke<RepositoryProbe>("probe_repository", { path });
+}
+
+/** フォルダ配下の git リポジトリを探す。`maxDepth` の既定は 4。 */
+export function scanRepositories(
+  root: string,
+  maxDepth?: number,
+): Promise<string[]> {
+  return invoke<string[]>("scan_repositories", { root, maxDepth: maxDepth ?? null });
+}
+
+/** 登録する。同じパスが登録済みならその登録が返る。 */
+export function addRepository(path: string): Promise<RepositorySettings> {
+  return invoke<RepositorySettings>("add_repository", { path });
+}
+
+/** 登録を解除する。フォルダには触らない。 */
+export function removeRepository(id: string): Promise<void> {
+  return invoke<void>("remove_repository", { id });
+}
+
+export function listRepositories(): Promise<RepositoryEntry[]> {
+  return invoke<RepositoryEntry[]>("list_repositories");
+}
+
 /* ---------- settings.json（`src-tauri/src/store/settings.rs`）---------- */
 
 export type ThemePreference = "system" | "light" | "dark";

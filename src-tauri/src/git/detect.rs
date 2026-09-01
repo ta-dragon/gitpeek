@@ -4,9 +4,8 @@
 //! 見つからない場合・古すぎる場合は専用画面で導線を出す。
 
 use serde::Serialize;
-use tauri::AppHandle;
 
-use crate::commandlog::CommandLog;
+use crate::commandlog::LogSink;
 use crate::git::exec;
 
 /// 要求する最低バージョン。
@@ -36,7 +35,7 @@ impl GitStatus {
     }
 }
 
-pub fn detect(app: &AppHandle, log: &CommandLog, program: &str) -> GitStatus {
+pub fn detect(log: &dyn LogSink, program: &str) -> GitStatus {
     let min_version = format!("{MIN_MAJOR}.{MIN_MINOR}");
     let unusable = |version: Option<String>, error: String, found: bool| GitStatus {
         found,
@@ -47,7 +46,7 @@ pub fn detect(app: &AppHandle, log: &CommandLog, program: &str) -> GitStatus {
         error: Some(error),
     };
 
-    let output = match exec::run(app, log, program, None, &["--version"]) {
+    let output = match exec::run(log, program, None, &["--version"]) {
         Ok(output) => output,
         Err(error) => return unusable(None, error, false),
     };

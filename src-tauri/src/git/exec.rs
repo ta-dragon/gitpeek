@@ -9,9 +9,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
-use tauri::AppHandle;
-
-use crate::commandlog::{CommandLog, CommandLogEntry};
+use crate::commandlog::{CommandLogEntry, LogSink};
 
 /// 全 git 呼び出しに固定付与する設定。
 ///
@@ -59,8 +57,7 @@ impl GitOutput {
 /// `Err` はプロセスの起動自体に失敗した場合（git が見つからない等）。
 /// git が起動して非ゼロ終了した場合は `Ok` で返り、`GitOutput::ok()` が `false` になる。
 pub fn run(
-    app: &AppHandle,
-    log: &CommandLog,
+    log: &dyn LogSink,
     program: &str,
     repo: Option<&Path>,
     args: &[&str],
@@ -107,7 +104,7 @@ pub fn run(
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
             let exit_code = output.status.code();
-            log.push(app, make_entry(exit_code, stderr.clone()));
+            log.record(make_entry(exit_code, stderr.clone()));
             Ok(GitOutput {
                 stdout: output.stdout,
                 stderr,
@@ -116,7 +113,7 @@ pub fn run(
         }
         Err(error) => {
             let message = error.to_string();
-            log.push(app, make_entry(None, message.clone()));
+            log.record(make_entry(None, message.clone()));
             Err(message)
         }
     }

@@ -190,6 +190,12 @@ Windows 資格情報マネージャーにキャッシュする。2回目以降�
 
 エラー表示は常に「人間向けメッセージ ＋ 展開すると生 stderr」の2段構えとする。
 
+**記録先は `commandlog::LogSink` として抽象化する**（T-02 で決定）。本番は `EmittingLog`
+（リングバッファへ積み、`command-log` イベントでフロントへ送る）、テストは `CommandLog` を
+そのまま渡す（積むだけ）。こうすると `git/exec.rs` が Tauri に依存せず、git を実際に起動する
+結合テストが `AppHandle` 無しで書ける。`tauri::test::mock_app()` は Windows で
+WebView2 の解決に失敗して使えなかった。
+
 ### 3.6 異常系
 
 | 状況 | 扱い |
@@ -855,6 +861,16 @@ LLM プロファイルが未設定のまま AI レビューを押した場合は
 テスト用リポジトリを**シェルスクリプト（または Rust）で生成**する。
 手元の実リポジトリには依存しない（CI で再現可能にする）。
 
+実体は `scripts/make-test-repos.sh`（T-02 で作成）。テストは `src-tauri/tests/` に置く。
+
+- 生成先は **`%TEMP%\givsoner-test-repos`**。この gitviewer リポジトリの中に置くと、
+  「リポジトリでないパス」の判定テストが親リポジトリを拾って落ちる。
+- Windows では **git 付属の bash（`<Git>inash.exe`）で実行する**。PATH 上の `bash` は
+  WSL のことがあり、Windows のパスを渡しても解決できない。`GIT_BASH` で明示指定もできる。
+- msys の bash へ渡す引数はスラッシュ区切りにする（`\` がエスケープとして食われる）。
+- `src-tauri/src` の中では `Command::new` を git 以外に使わない（§3.1 のチョークポイント）。
+  プロセス起動を伴うテスト補助は `src-tauri/tests/` 側に書く。
+
 ### 14.4 フロントエンド
 
 「レーン配列 → SVG パス文字列」の純関数のみテストする。コンポーネントテストはしない。
@@ -981,10 +997,11 @@ gitviewer/
 | 用途 | コマンド |
 |---|---|
 | バージョン検出 | `git --version` |
-| リポジトリ判定 | `git -C <path> rev-parse --git-dir --is-bare-repository --is-shallow-repository` |
+| リポジトリ判定 | `git -C <path> rev-parse --absolute-git-dir --is-bare-repository --is-shallow-repository` |
+| 作業ツリーの場所 | `git -C <path> rev-parse --show-toplevel`（bare では呼ばない） |
 | **コミットメタ一括取得** | `git -C <path> log --branches --remotes HEAD --topo-order -z --format=<fmt>` |
 | ref 一覧 | `git -C <path> for-each-ref --format=<fmt>` |
-| HEAD 判定 | `git -C <path> symbolic-ref -q HEAD` / `git -C <path> rev-parse HEAD` |
+| HEAD 判定 | `git -C <path> symbolic-ref -q --short HEAD` / `git -C <path> rev-parse -q --verify HEAD` |
 | 作業ツリー状態 | `git -C <path> status --porcelain=v2 -z` |
 | コミット本文 | `git -C <path> show -s --format=<fmt> <sha>` |
 | 変更ファイル一覧 | `git -C <path> diff --numstat -z -M <A> <B>` |

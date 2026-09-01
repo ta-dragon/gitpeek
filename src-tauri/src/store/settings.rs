@@ -11,6 +11,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -91,7 +92,6 @@ pub struct GitSettings {
     pub path: Option<String>,
 }
 
-/// T-02 で登録処理を実装する。T-01 では形だけ確定させ、既定は空 `Vec`。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RepositorySettings {
@@ -102,6 +102,31 @@ pub struct RepositorySettings {
     pub visible_refs: VisibleRefs,
     pub default_llm_profile_id: Option<String>,
     pub repo_skills: RepoSkillTrust,
+}
+
+impl RepositorySettings {
+    /// 登録時の既定値。名前はディレクトリ名、可視 ref は全件、skill は未信頼。
+    pub fn new(id: String, path: &Path, order: u32) -> Self {
+        Self {
+            id,
+            name: display_name(path),
+            path: path.display().to_string(),
+            order,
+            ..Self::default()
+        }
+    }
+}
+
+/// 一覧に出す既定の名前。末尾のディレクトリ名を使い、取れなければパスそのもの。
+/// bare の `foo.git` は `foo` と呼ぶ方が一覧で見分けやすい。
+fn display_name(path: &Path) -> String {
+    let Some(name) = path.file_name().map(|name| name.to_string_lossy().into_owned()) else {
+        return path.display().to_string();
+    };
+    match name.strip_suffix(".git") {
+        Some(stem) if !stem.is_empty() => stem.to_string(),
+        _ => name,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

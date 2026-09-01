@@ -45,8 +45,8 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 
 | 項目 | 内容 |
 |---|---|
-| 直前に完了 | T-01 設定ストアと %APPDATA% レイアウト |
-| 次にやる | **T-02 リポジトリの登録・判定・フォルダスキャン** |
+| 直前に完了 | T-02 リポジトリの登録・判定・フォルダスキャン |
+| 次にやる | **T-03 リポジトリ一覧サイドバーと切替** |
 | 未解決の判断事項 | なし |
 
 ---
@@ -97,120 +97,6 @@ graph LR
 ---
 
 # Phase 1 — リポジトリ管理とコミット取得
-
-## - [ ] T-02 [Phase 1] リポジトリの登録・判定・フォルダスキャン
-
-**目的**: ローカルの git リポジトリを登録し、その素性（bare / shallow / detached / 空 / index.lock）を
-判定できるようにする。
-
-**参照**: DESIGN.md §3.6, §7.1, 付録 A / CLAUDE.md §2
-
-**依存**: T-01
-
-**作成・変更するファイル**
-
-| 種別 | パス | 内容 |
-|---|---|---|
-| 新規 | `src-tauri/src/git/repo.rs` | リポジトリ判定とスキャン |
-| 変更 | `src-tauri/src/git/mod.rs` | `pub mod repo;` |
-| 変更 | `src-tauri/src/store/settings.rs` | `RepositorySettings` の実装 |
-| 変更 | `src-tauri/src/lib.rs` | コマンド登録 |
-| 変更 | `src-tauri/Cargo.toml` | `uuid = { version = "1", features = ["v4"] }` |
-| 変更 | `src/lib/ipc.ts` | 型と invoke ラッパ |
-| 新規 | `scripts/make-test-repos.sh` | テスト用リポジトリ生成 |
-
-**実装内容**
-
-```rust
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RepositoryProbe {
-    pub is_repository: bool,
-    pub git_dir: Option<String>,
-    pub work_tree: Option<String>,
-    pub is_bare: bool,
-    pub is_shallow: bool,
-    pub head: Option<HeadState>,
-    pub index_lock_present: bool,
-    pub error: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-pub enum HeadState {
-    Branch { name: String, sha: String },
-    Detached { sha: String },
-    Unborn { name: String },   // コミット 0 件
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RepositorySettings {
-    pub id: String,            // UUID v4
-    pub name: String,          // 既定はディレクトリ名
-    pub path: String,
-    pub order: u32,
-    pub visible_refs: VisibleRefs,          // { mode: "all"|"custom", excluded: Vec<String> }
-    pub default_llm_profile_id: Option<String>,
-    pub repo_skills: RepoSkillTrust,        // { trusted: bool, hashes: BTreeMap<String,String> }
-}
-```
-
-判定に使う git コマンド（すべて `git::exec::run` 経由）:
-
-1. `rev-parse --git-dir --is-bare-repository --is-shallow-repository`
-   （3 行が順に返る。失敗したらリポジトリではない）
-2. bare でなければ `rev-parse --show-toplevel`（bare では失敗するので呼ばない）
-3. `symbolic-ref -q --short HEAD` → 成功ならブランチ名、exit 1 なら detached
-4. `rev-parse -q --verify HEAD` → 成功なら SHA、exit 1 なら **Unborn**（コミット 0 件）
-5. `index.lock` は **git を呼ばず** `<git_dir>/index.lock` の存在をファイルシステムで確認する
-
-スキャン:
-
-```rust
-pub fn scan(root: &Path, max_depth: usize, excluded: &[&str]) -> Vec<PathBuf>
-```
-
-- 既定 `max_depth = 4`
-- 既定除外: `node_modules`, `target`, `dist`, `build`, `out`, `vendor`, `.venv`, `.next`
-- `.git` を持つディレクトリを見つけたら**そこで打ち切る**（入れ子のリポジトリは追わない）
-
-**Tauri コマンド**
-
-```
-probe_repository(path: String)                          -> Result<RepositoryProbe, String>
-scan_repositories(root: String, maxDepth: Option<u32>)  -> Result<Vec<String>, String>
-add_repository(path: String)                            -> Result<RepositorySettings, String>
-remove_repository(id: String)                           -> Result<(), String>
-list_repositories()                                     -> Result<Vec<RepositoryEntry>, String>
-```
-
-`RepositoryEntry` は `RepositorySettings` に `probe: Option<RepositoryProbe>` を足したもの。
-パスが消えているリポジトリは `probe: None` で返し、UI 側でグレーアウトする。
-
-`scripts/make-test-repos.sh` が生成すべきリポジトリ:
-直線履歴 / 分岐と合流 / 連続マージ / オクトパスマージ（親 3 つ）/ ルートコミット 2 つ /
-日本語ファイル名を含む / 空 subject のコミット / 空リポジトリ / bare / detached HEAD。
-
-**制約**
-
-- **git 実行は必ず `src-tauri/src/git/exec.rs` の `run` を通す。** ここ以外で
-  `Command::new("git")` を書かない（CLAUDE.md §2）
-- **`.git/index.lock` を削除しない。** 検出して報告するだけ（CLAUDE.md §2）
-- bare リポジトリは登録を許可し、`is_bare` を立てる（checkout の無効化は T-18）
-
-**受け入れ条件**
-
-- ▸コマンド: `cargo test` — `scan` の深さ制限と除外 / `HeadState` の 3 状態 / リポジトリでないパス
-- ▸コマンド: `scripts/make-test-repos.sh` が生成したリポジトリに対する統合テストが通る
-- ▸コマンド: `cargo clippy --all-targets -- -D warnings`
-- ▸コマンド: `grep -rn 'Command::new' src-tauri/src` の結果が `git/exec.rs` の 1 箇所だけである
-
-**非スコープ**
-
-一覧 UI（T-03）／clone（T-19）／可視 ref の利用（T-09, T-10）／リポジトリのグループ分け（v1.1）
-
----
 
 ## - [ ] T-03 [Phase 1] リポジトリ一覧サイドバーと切替
 
@@ -1434,3 +1320,4 @@ JSON パース失敗時に Markdown が表示され「構造化に失敗しま�
 |---|---|---|---|
 | — | 0 | Tauri v2 雛形 ＋ git 検出 ＋ git コマンドログパネル | `93867ed` |
 | T-01 | 1 | 設定ストアと %APPDATA% レイアウト（settings.json / state.json） | `cf5fd37` |
+| T-02 | 1 | リポジトリの登録・判定・フォルダスキャン ＋ テスト用リポジトリ生成 | `COMMITHASH` |

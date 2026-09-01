@@ -13,13 +13,15 @@ pub mod paths;
 pub mod settings;
 pub mod state;
 
+use std::path::Path;
 use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::AppHandle;
+use uuid::Uuid;
 
 use paths::StorePaths;
-use settings::{LoadError, Settings, SettingsRecovery};
+use settings::{LoadError, RepositorySettings, Settings, SettingsRecovery};
 use state::{DebouncedWriter, UiState};
 
 /// フロントへ返す設定。退避が起きた場合はその記録を添える。
@@ -121,6 +123,54 @@ impl Store {
         Ok(())
     }
 
+    /// 登録済みリポジトリを `order` 順で返す。
+    pub fn repositories(&self) -> Result<Vec<RepositorySettings>, String> {
+        let payload = self.settings()?;
+        let mut repositories = payload.settings.repositories;
+        repositories.sort_by_key(|repository| repository.order);
+        Ok(repositories)
+    }
+
+    /// リポジトリを登録する。
+    ///
+    /// 既に同じパスが登録されていれば、重複させずにその登録をそのまま返す。
+    /// 素性の判定（bare かどうか等）はここではしない。呼び出し側が `probe` を使う。
+    pub fn add_repository(&self, path: &Path) -> Result<RepositorySettings, String> {
+        let ready = self.ready()?;
+        let mut slot = ready.settings.lock().expect("settings poisoned");
+        let settings = slot.loaded.as_mut().map_err(|error| error.clone())?;
+
+        if let Some(existing) = settings
+            .repositories
+            .iter()
+            .find(|repository| same_path(&repository.path, path))
+        {
+            return Ok(existing.clone());
+        }
+
+        let order = settings
+            .repositories
+            .iter()
+            .map(|repository| repository.order)
+            .max()
+            .map_or(0, |max| max.saturating_add(1));
+        let added = RepositorySettings::new(Uuid::new_v4().to_string(), path, order);
+
+        settings.repositories.push(added.clone());
+        settings::save(&ready.paths, settings)?;
+        Ok(added)
+    }
+
+    /// 登録を解除する。**フォルダには触らない。**
+    pub fn remove_repository(&self, id: &str) -> Result<(), String> {
+        let ready = self.ready()?;
+        let mut slot = ready.settings.lock().expect("settings poisoned");
+        let settings = slot.loaded.as_mut().map_err(|error| error.clone())?;
+
+        settings.repositories.retain(|repository| repository.id != id);
+        settings::save(&ready.paths, settings)
+    }
+
     pub fn ui_state(&self) -> Result<UiState, String> {
         let ready = self.ready()?;
         Ok(ready.ui_state.lock().expect("ui state poisoned").clone())
@@ -139,5 +189,15 @@ impl Store {
         if let Ok(ready) = &self.ready {
             let _ = ready.writer.flush();
         }
+    }
+}
+
+/// 同じフォルダを指しているか。Windows のパスは大文字小文字を区別しない。
+fn same_path(registered: &str, path: &Path) -> bool {
+    let candidate = path.display().to_string();
+    if cfg!(windows) {
+        registered.eq_ignore_ascii_case(&candidate)
+    } else {
+        registered == candidate
     }
 }
