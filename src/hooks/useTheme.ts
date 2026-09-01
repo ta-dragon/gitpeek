@@ -1,28 +1,34 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect } from "react";
 
-export type ThemePreference = "system" | "light" | "dark";
+import type { ThemePreference } from "../lib/ipc";
+import { currentSettings, updateSettings, useSettings } from "../store/settings";
+
+export type { ThemePreference };
 
 /**
  * テーマの既定は OS 追従（docs/DESIGN.md §6.1）。
  *
- * 保存先は暫定的に localStorage。Phase 9 で settings.json (`ui.theme`) へ移す。
+ * 保存先は `settings.json` の `ui.theme`。Phase 0 で暫定的に使っていた
+ * localStorage の値は、初回だけ設定へ引き継いでからキーを消す。
  */
-const STORAGE_KEY = "givsoner.theme";
+const LEGACY_STORAGE_KEY = "givsoner.theme";
 
-function readStored(): ThemePreference {
+function takeLegacyTheme(): ThemePreference | null {
   try {
-    const value = localStorage.getItem(STORAGE_KEY);
+    const value = localStorage.getItem(LEGACY_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
     if (value === "light" || value === "dark" || value === "system") {
       return value;
     }
   } catch {
-    // プライベートウィンドウ等で localStorage が使えない場合は既定へ倒す。
+    // localStorage が使えない環境では移行するものが無いのと同じ。
   }
-  return "system";
+  return null;
 }
 
 export function useTheme(): [ThemePreference, (next: ThemePreference) => void] {
-  const [theme, setThemeState] = useState<ThemePreference>(readStored);
+  const { settings, loaded } = useSettings();
+  const theme = settings.ui.theme;
 
   useEffect(() => {
     const root = document.documentElement;
@@ -34,13 +40,20 @@ export function useTheme(): [ThemePreference, (next: ThemePreference) => void] {
   }, [theme]);
 
   const setTheme = useCallback((next: ThemePreference) => {
-    setThemeState(next);
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      // 保存できなくても表示は成立する。
-    }
+    void updateSettings((current) => ({
+      ...current,
+      ui: { ...current.ui, theme: next },
+    }));
   }, []);
+
+  // 設定を読み終えてから 1 度だけ移行する。既に設定側で選んであるなら触らない。
+  useEffect(() => {
+    if (!loaded) return;
+    const legacy = takeLegacyTheme();
+    if (legacy && legacy !== "system" && currentSettings().ui.theme === "system") {
+      setTheme(legacy);
+    }
+  }, [loaded, setTheme]);
 
   return [theme, setTheme];
 }

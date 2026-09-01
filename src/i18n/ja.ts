@@ -41,6 +41,14 @@ export const ja = {
     errorLabel: "エラー",
   },
 
+  settings: {
+    recoveredTitle: "settings.json を読み込めなかったため既定値で起動しました",
+    recoveredDetail: (backupPath: string, reason: string) =>
+      `元の内容は ${backupPath} へ退避しました（${reason}）。`,
+    loadFailedTitle: "設定を読み込めませんでした",
+    saveFailedTitle: "設定を保存できませんでした",
+  },
+
   status: {
     version: "バージョン",
     path: "パス",

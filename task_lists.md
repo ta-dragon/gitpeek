@@ -45,8 +45,8 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 
 | 項目 | 内容 |
 |---|---|
-| 直前に完了 | Phase 0（Tauri 雛形 ＋ git 検出 ＋ コマンドログ） — `93867ed` |
-| 次にやる | **T-01 設定ストアと %APPDATA% レイアウト** |
+| 直前に完了 | T-01 設定ストアと %APPDATA% レイアウト |
+| 次にやる | **T-02 リポジトリの登録・判定・フォルダスキャン** |
 | 未解決の判断事項 | なし |
 
 ---
@@ -97,113 +97,6 @@ graph LR
 ---
 
 # Phase 1 — リポジトリ管理とコミット取得
-
-## - [ ] T-01 [Phase 1] 設定ストアと %APPDATA% レイアウト
-
-**目的**: `settings.json` / `state.json` の読み書きを確立し、以降のタスクが永続化の詳細を
-気にしなくてよい状態にする。
-
-**参照**: DESIGN.md §12.1〜12.3 / CLAUDE.md §5
-
-**依存**: なし
-
-**作成・変更するファイル**
-
-| 種別 | パス | 内容 |
-|---|---|---|
-| 新規 | `src-tauri/src/store/mod.rs` | モジュール定義 |
-| 新規 | `src-tauri/src/store/paths.rs` | %APPDATA% レイアウトの解決 |
-| 新規 | `src-tauri/src/store/settings.rs` | `Settings` の型と読み書き |
-| 新規 | `src-tauri/src/store/state.rs` | `UiState` の型と読み書き |
-| 変更 | `src-tauri/src/lib.rs` | `AppState` へ追加、コマンド登録 |
-| 変更 | `src-tauri/Cargo.toml` | `[dev-dependencies] tempfile = "3"` |
-| 変更 | `src/lib/ipc.ts` | 型定義と invoke ラッパ |
-| 新規 | `src/store/settings.ts` | フロント側の設定状態 |
-| 変更 | `src/hooks/useTheme.ts` | localStorage から settings.json へ移行 |
-
-**実装内容**
-
-```rust
-// store/settings.rs
-pub const SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Settings {
-    pub schema_version: u32,
-    pub git: GitSettings,                       // { path: Option<String> }
-    pub workspace_root: Option<String>,
-    pub repositories: Vec<RepositorySettings>,  // T-02 で使う。ここでは空 Vec
-    pub llm_profiles: Vec<LlmProfile>,          // T-20 で使う。ここでは空 Vec
-    pub ui: UiSettings,
-    pub fetch: FetchSettings,                   // { stale_warning_days: u32 }  既定 7
-    pub review: ReviewSettings,                 // { concurrency: u8, context_lines: u8 }  既定 1, 10
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UiSettings {
-    pub theme: String,          // "system" | "light" | "dark"
-    pub date_format: String,    // "relative" | "absolute"
-    pub diff_layout: String,    // "side-by-side" | "unified"
-    pub context_lines: u8,      // 既定 3
-    pub ignore_whitespace: bool,
-    pub show_line_endings: bool,
-    pub commit_order: String,   // "topo" | "date"
-}
-```
-
-`UiState`（`state.json`）は DESIGN.md §12.3 の構造にそのまま従う。
-
-- **パス解決**: `app.path().app_data_dir()` を使う。存在しなければ作成する。
-  `settings.json` / `state.json` / `skills/` / `reviews/` / `logs/` のパスを返す関数を用意する。
-- **読み込み**: ファイルが無ければ既定値を生成して書き出す。
-  - `settings.json` が壊れていたら **`settings.json.bak` へ退避してから**既定値で再生成し、
-    警告をフロントへ通知する（手編集を想定しているので黙って捨ててはいけない）
-  - `state.json` が壊れていたら**黙って捨てて再生成**してよい
-- **schemaVersion**: 読み込んだ版が `SCHEMA_VERSION` より大きければ読まずにエラーを返す
-  （将来版の設定を古いアプリが壊さないため）。小さければマイグレーション（v1 のみなので現状は何もしない）。
-- **書き込みはアトミック**: 同ディレクトリの一時ファイルへ書いてから `rename` する。
-- **`state.json` の書き込みはデバウンス 300ms**（スクロール位置など高頻度の更新があるため）。
-
-**Tauri コマンド**
-
-```
-load_settings()                       -> Result<Settings, String>
-save_settings(settings: Settings)     -> Result<(), String>
-load_ui_state()                       -> Result<UiState, String>
-save_ui_state(state: UiState)         -> Result<(), String>
-app_data_dir()                        -> Result<String, String>
-```
-
-**制約**
-
-- **OneDrive 配下に設定を置かない**（CLAUDE.md §5）。パスは必ず `app_data_dir()` から解決する
-- **`settings.json` に API キーを書かない。** `LlmProfile` には `credential_key: String` のみを持たせ、
-  `api_key` フィールドを作ってはいけない（CLAUDE.md §4）
-- `schemaVersion` 必須（CLAUDE.md §5）
-
-**受け入れ条件**
-
-- ▸コマンド: `cargo test --manifest-path src-tauri/Cargo.toml` — 既定値生成 / 壊れた JSON の退避 /
-  schemaVersion が将来版のときエラー / アトミック書き込み後に内容が読み戻せる
-- ▸コマンド: `npm run typecheck`
-- ▸コマンド: `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
-- ▸目視: アプリを起動して終了すると `%APPDATA%\com.tatsu.givsoner\settings.json` と `state.json` が生成される
-- ▸目視: テーマを切り替えて再起動すると保持されている
-- ▸目視: `settings.json` を壊して起動すると `.bak` が作られ、既定値で起動し、警告が表示される
-
-**テスト**
-
-読み書きロジックは「ディレクトリパスを引数で受け取る純粋関数」に切り出し、`tempfile` クレートで
-テストする。`AppHandle` に依存させないこと。
-
-**非スコープ**
-
-リポジトリ登録（T-02）／LLM プロファイルの中身（T-20）／ログファイル（T-24）／設定画面 UI（T-25）。
-テーマ切替の UI は既存のものを settings.json 経由に差し替えるだけでよい。
-
----
 
 ## - [ ] T-02 [Phase 1] リポジトリの登録・判定・フォルダスキャン
 
@@ -1540,3 +1433,4 @@ JSON パース失敗時に Markdown が表示され「構造化に失敗しま�
 | ID | Phase | タイトル | コミット |
 |---|---|---|---|
 | — | 0 | Tauri v2 雛形 ＋ git 検出 ＋ git コマンドログパネル | `93867ed` |
+| T-01 | 1 | 設定ストアと %APPDATA% レイアウト（settings.json / state.json） | `4684234` |

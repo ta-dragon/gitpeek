@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { CommandLogPanel } from "./components/commandlog/CommandLogPanel";
+import { NoticeBar } from "./components/common/NoticeBar";
 import { GitSetupScreen } from "./components/setup/GitSetupScreen";
 import { useCommandLog } from "./hooks/useCommandLog";
 import { useTheme, type ThemePreference } from "./hooks/useTheme";
 import { ja } from "./i18n/ja";
 import { detectGit, isGitUsable, MIN_VERSION_FALLBACK, type GitStatus } from "./lib/ipc";
+import { dismissSettingsNotice, initSettings, useSettings } from "./store/settings";
 
 export default function App() {
   const [theme, setTheme] = useTheme();
@@ -13,6 +15,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [logOpen, setLogOpen] = useState(true);
   const entries = useCommandLog();
+  const { recovered, error, errorKind } = useSettings();
 
   const recheck = useCallback(async (path?: string) => {
     setBusy(true);
@@ -42,6 +45,11 @@ export default function App() {
     void recheck();
   }, [recheck]);
 
+  // 設定の読み込み。二重実行は initSettings 側で無視される。
+  useEffect(() => {
+    void initSettings();
+  }, []);
+
   return (
     <div className="app">
       <header className="app__header">
@@ -64,6 +72,25 @@ export default function App() {
           {logOpen ? ja.commandLog.hide : ja.commandLog.show}
         </button>
       </header>
+
+      {recovered !== null && (
+        <NoticeBar
+          title={ja.settings.recoveredTitle}
+          detail={ja.settings.recoveredDetail(recovered.backupPath, recovered.reason)}
+          onDismiss={dismissSettingsNotice}
+        />
+      )}
+      {error !== null && (
+        <NoticeBar
+          title={
+            errorKind === "save"
+              ? ja.settings.saveFailedTitle
+              : ja.settings.loadFailedTitle
+          }
+          detail={error}
+          onDismiss={dismissSettingsNotice}
+        />
+      )}
 
       <main className="app__main">
         {status === null ? (

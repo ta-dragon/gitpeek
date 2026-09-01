@@ -47,6 +47,165 @@ export function listCommandLog(): Promise<CommandLogEntry[]> {
   return invoke<CommandLogEntry[]>("list_command_log");
 }
 
+/* ---------- settings.json（`src-tauri/src/store/settings.rs`）---------- */
+
+export type ThemePreference = "system" | "light" | "dark";
+
+export type GitSettings = {
+  /** PATH 上に git が無い場合のフルパス。 */
+  path: string | null;
+};
+
+export type VisibleRefs = {
+  mode: "all" | "custom";
+  excluded: string[];
+};
+
+export type RepoSkillTrust = {
+  /** リポジトリ内 skill は既定で無効（CLAUDE.md §4）。 */
+  trusted: boolean;
+  hashes: Record<string, string>;
+};
+
+/** T-02 で使う。T-01 では常に空配列。 */
+export type RepositorySettings = {
+  id: string;
+  name: string;
+  path: string;
+  order: number;
+  visibleRefs: VisibleRefs;
+  defaultLlmProfileId: string | null;
+  repoSkills: RepoSkillTrust;
+};
+
+/**
+ * T-20 で使う。T-01 では常に空配列。
+ * **API キーはここに持たない。** 実体は Windows 資格情報マネージャーにあり、
+ * ここにあるのは参照キーだけ（CLAUDE.md §4）。
+ */
+export type LlmProfile = {
+  id: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  contextWindow: number;
+  temperature: number;
+  maxTokens: number;
+  credentialKey: string;
+};
+
+export type UiSettings = {
+  theme: ThemePreference;
+  dateFormat: "relative" | "absolute";
+  diffLayout: "side-by-side" | "unified";
+  contextLines: number;
+  ignoreWhitespace: boolean;
+  showLineEndings: boolean;
+  commitOrder: "topo" | "date";
+};
+
+export type FetchSettings = { staleWarningDays: number };
+
+export type ReviewSettings = { concurrency: number; contextLines: number };
+
+export type Settings = {
+  schemaVersion: number;
+  git: GitSettings;
+  workspaceRoot: string | null;
+  repositories: RepositorySettings[];
+  llmProfiles: LlmProfile[];
+  ui: UiSettings;
+  fetch: FetchSettings;
+  review: ReviewSettings;
+};
+
+/** 壊れた settings.json を退避したときの記録。 */
+export type SettingsRecovery = { backupPath: string; reason: string };
+
+export type SettingsPayload = {
+  settings: Settings;
+  /** 退避と再生成が起きたときだけ入る。 */
+  recovered: SettingsRecovery | null;
+};
+
+/**
+ * バックエンドから設定を取得できるまでの表示用。
+ * `src-tauri/src/store/settings.rs` の各 `Default` 実装と一致させること。
+ */
+export const DEFAULT_SETTINGS: Settings = {
+  schemaVersion: 1,
+  git: { path: null },
+  workspaceRoot: null,
+  repositories: [],
+  llmProfiles: [],
+  ui: {
+    theme: "system",
+    dateFormat: "relative",
+    diffLayout: "side-by-side",
+    contextLines: 3,
+    ignoreWhitespace: false,
+    showLineEndings: false,
+    commitOrder: "topo",
+  },
+  fetch: { staleWarningDays: 7 },
+  review: { concurrency: 1, contextLines: 10 },
+};
+
+/* ---------- state.json（`src-tauri/src/store/state.rs`）---------- */
+
+export type WindowBounds = { x: number; y: number; width: number; height: number };
+
+export type PaneRatios = {
+  sidebarWidth: number;
+  graphDiffSplit: number;
+  reviewDrawerWidth: number;
+};
+
+export type ColumnWidths = {
+  subject: number;
+  author: number;
+  date: number;
+  sha: number;
+};
+
+export type RepositoryUiState = {
+  selectedCommit: string | null;
+  scrollOffset: number;
+  selectedFile: string | null;
+  expandedTreeNodes: string[];
+  columnWidths: ColumnWidths;
+};
+
+export type UiState = {
+  schemaVersion: number;
+  lastRepositoryId: string | null;
+  windowBounds: WindowBounds | null;
+  paneRatios: PaneRatios;
+  repositoryListSort: "manual" | "recent";
+  perRepository: Record<string, RepositoryUiState>;
+};
+
+export function loadSettings(): Promise<SettingsPayload> {
+  return invoke<SettingsPayload>("load_settings");
+}
+
+export function saveSettings(settings: Settings): Promise<void> {
+  return invoke<void>("save_settings", { settings });
+}
+
+export function loadUiState(): Promise<UiState> {
+  return invoke<UiState>("load_ui_state");
+}
+
+/** Rust 側で 300ms デバウンスされるので、高頻度に呼んでよい。 */
+export function saveUiState(uiState: UiState): Promise<void> {
+  return invoke<void>("save_ui_state", { uiState });
+}
+
+export function appDataDir(): Promise<string> {
+  return invoke<string>("app_data_dir");
+}
+
 const COMMAND_LOG_EVENT = "command-log";
 
 export function onCommandLog(
