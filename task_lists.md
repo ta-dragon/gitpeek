@@ -116,6 +116,7 @@ graph LR
 | 新規 | `src-tauri/src/store/settings.rs` | `Settings` の型と読み書き |
 | 新規 | `src-tauri/src/store/state.rs` | `UiState` の型と読み書き |
 | 変更 | `src-tauri/src/lib.rs` | `AppState` へ追加、コマンド登録 |
+| 変更 | `src-tauri/Cargo.toml` | `[dev-dependencies] tempfile = "3"` |
 | 変更 | `src/lib/ipc.ts` | 型定義と invoke ラッパ |
 | 新規 | `src/store/settings.ts` | フロント側の設定状態 |
 | 変更 | `src/hooks/useTheme.ts` | localStorage から settings.json へ移行 |
@@ -209,7 +210,7 @@ app_data_dir()                        -> Result<String, String>
 **目的**: ローカルの git リポジトリを登録し、その素性（bare / shallow / detached / 空 / index.lock）を
 判定できるようにする。
 
-**参照**: DESIGN.md §3.6, §5(v1 機能), 付録 A / CLAUDE.md §2
+**参照**: DESIGN.md §3.6, §7.1, 付録 A / CLAUDE.md §2
 
 **依存**: T-01
 
@@ -394,6 +395,7 @@ ahead/behind とdirty の実データ（T-17, T-16）／フォルダグループ
 | 新規 | `src-tauri/src/git/refs.rs` | `for-each-ref` の実行とパース |
 | 新規 | `src-tauri/src/model.rs` | `CommitMeta` / `RefEntry` / `HeadInfo` / `RepositorySnapshot` |
 | 変更 | `src-tauri/src/lib.rs` | スナップショットの LRU キャッシュ、コマンド登録 |
+| 変更 | `src-tauri/Cargo.toml` | `sha2 = "0.10"`（`ref_fingerprint` の算出） |
 | 変更 | `src/lib/ipc.ts` | 型と invoke ラッパ |
 
 **実装内容**
@@ -463,6 +465,7 @@ symbolic-ref -q --short refs/remotes/origin/HEAD
 - `default_branch` の決定順は `origin/HEAD` → `refs/heads/main` → `refs/heads/master` → HEAD。
 - **スナップショットは `AppState` に LRU 2〜3 件でキャッシュする**（DESIGN.md §6.2）。
   キーはリポジトリ ID、無効化は `ref_fingerprint` の変化で判定する。
+  件数が 2〜3 件しかないので `Vec` による手書きで十分。`lru` クレートは入れない。
 - 実行は `tauri::async_runtime::spawn_blocking` 経由（Phase 0 の `detect_git` と同じ形）。
 
 **Tauri コマンド**
@@ -484,7 +487,8 @@ load_repository_snapshot(repositoryId: String, force: bool) -> Result<Repository
 - ▸コマンド: `cargo test` — 日本語を含む subject / 空 subject / 複数親 / 署名付きコミット /
   改行を含むメッセージ / 空リポジトリ / annotated tag の peel
 - ▸コマンド: テスト用リポジトリでコミット数と親子関係が期待どおり
-- ▸コマンド: `grep -rn 'log --all' src-tauri/src` が 0 件
+- ▸コマンド: `grep -n '\-\-all' src-tauri/src/git/log.rs` が 0 件
+  （`git log` の引数に `--all` が現れない。`fetch --all` は別物で、T-17 が `ops.rs` に書く）
 - ▸コマンド: `cargo clippy --all-targets -- -D warnings`
 - ▸目視: 数千コミットの実リポジトリで `load_repository_snapshot` の所要時間が 1 秒未満
   （git コマンドログパネルの所要時間表示で確認）

@@ -3,8 +3,13 @@
 個人用 Git ビューワー **Givsoner** の設計記録。
 本書は 2026-09-01 の設計インタビューで確定した全決定を、決定理由つきで記録したもの。
 
-実装時に毎回参照すべき制約の抜粋は [`../CLAUDE.md`](../CLAUDE.md) にある。
-本書は「なぜそう決めたか」を、`CLAUDE.md` は「何を守るか」を担当する。
+文書は 3 層に分かれている。
+
+| ファイル | 担当 |
+|---|---|
+| [`../CLAUDE.md`](../CLAUDE.md) | **何を守るか** — 実装中に毎回効く制約の抜粋 |
+| [`../task_lists.md`](../task_lists.md) | **今やること** — タスクの詳細と進捗（進捗の唯一の正） |
+| 本書 | **なぜそう決めたか** — 全決定と決定理由の記録 |
 
 ---
 
@@ -904,10 +909,14 @@ Phase 9 完了 ＋ **実リポジトリを 5 個以上登録して 1 週間実�
 
 ## 16. ディレクトリ構成（案）
 
+`(済)` は Phase 0 で実在するファイル。それ以外は未作成。
+
 ```
 gitviewer/
-├── CLAUDE.md
-├── docs/DESIGN.md
+├── CLAUDE.md                     (済)
+├── task_lists.md                 (済) タスクと進捗
+├── docs/DESIGN.md                (済)
+├── scripts/make-test-repos.sh    テスト用リポジトリ生成 (T-02)
 ├── package.json
 ├── vite.config.ts
 ├── index.html
@@ -932,29 +941,35 @@ gitviewer/
     ├── Cargo.toml
     ├── tauri.conf.json
     └── src/
-        ├── main.rs
+        ├── main.rs               (済)
+        ├── lib.rs                (済) Tauri コマンドの登録と AppState
+        ├── model.rs              CommitMeta / RefEntry / RepositorySnapshot (T-04)
         ├── git/
-        │   ├── exec.rs           # サブプロセス実行。固定オプションと環境変数はここだけ
-        │   ├── log.rs            # git log パース
-        │   ├── refs.rs           # for-each-ref パース
-        │   ├── status.rs
-        │   ├── diff.rs
-        │   └── ops.rs            # checkout / fetch / merge --ff-only / clone
+        │   ├── exec.rs           (済) サブプロセス実行。固定オプションと環境変数はここだけ
+        │   ├── detect.rs         (済) git 検出とバージョン判定
+        │   ├── repo.rs           リポジトリ判定とスキャン (T-02)
+        │   ├── log.rs            git log パース (T-04)
+        │   ├── refs.rs           for-each-ref パース (T-04)
+        │   ├── status.rs         (T-16)
+        │   ├── diff.rs           (T-11, T-13)
+        │   └── ops.rs            checkout / fetch / merge --ff-only / clone (T-17〜T-19)
         ├── graph/
-        │   ├── lane.rs           # レーン割り当て（最重要・テスト必須）
-        │   └── reach.rs          # 到達可能集合と ahead/behind
+        │   ├── lane.rs           レーン割り当て（最重要・テスト必須） (T-05)
+        │   └── reach.rs          到達可能集合と ahead/behind (T-09)
         ├── llm/
-        │   ├── client.rs         # OpenAI 互換クライアント
-        │   ├── skill.rs
-        │   └── review.rs
+        │   ├── client.rs         OpenAI 互換クライアント (T-20)
+        │   ├── skill.rs          (T-21)
+        │   └── review.rs         (T-22)
         ├── store/
-        │   ├── settings.rs
-        │   ├── state.rs
-        │   └── reviews.rs
-        ├── encoding.rs           # 文字コード自動判別
-        ├── secret.rs             # Windows 資格情報マネージャー
-        ├── redact.rs             # マスキング（全ログ出力がここを通る）
-        └── logging.rs
+        │   ├── paths.rs          %APPDATA% レイアウトの解決 (T-01)
+        │   ├── settings.rs       (T-01)
+        │   ├── state.rs          (T-01)
+        │   └── reviews.rs        (T-23)
+        ├── commandlog.rs         (済) git コマンドログのリングバッファ
+        ├── encoding.rs           文字コード自動判別 (T-12)
+        ├── secret.rs             Windows 資格情報マネージャー (T-20)
+        ├── redact.rs             (済) マスキング（全ログ出力がここを通る）
+        └── logging.rs            ログファイル (T-24)
 ```
 
 ---
