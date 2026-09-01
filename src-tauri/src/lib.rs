@@ -192,6 +192,7 @@ fn app_data_dir(state: State<'_, AppState>) -> Result<String, String> {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 起動時に読んでおくことで、フロントが一度も呼ばなくても
             // settings.json / state.json が生成される。

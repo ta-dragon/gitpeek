@@ -25,6 +25,9 @@
   --danger: #cf222e;
   --ok: #1a7f37;
 
+  /* モーダルの背景を覆う色（コマンドパレット）。 */
+  --overlay: rgba(16, 19, 24, 0.35);
+
   --font-sans: "Segoe UI", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", "Consolas", "Noto Sans Mono", monospace;
 
@@ -52,6 +55,8 @@
     --accent-contrast: #0d1117;
     --danger: #f8737f;
     --ok: #56d364;
+
+    --overlay: rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -74,4 +79,6 @@
   --accent-contrast: #0d1117;
   --danger: #f8737f;
   --ok: #56d364;
+
+  --overlay: rgba(0, 0, 0, 0.55);
 }

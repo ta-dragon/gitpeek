@@ -77,6 +77,9 @@ impl Default for PaneRatios {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RepositoryUiState {
+    /// 最後に開いた時刻（RFC 3339）。「最終アクセス順」の並べ替えに使う。
+    /// 並び順は利便性なので、失っても困らない `state.json` 側に置く。
+    pub last_opened_at: Option<String>,
     pub selected_commit: Option<String>,
     pub scroll_offset: f64,
     pub selected_file: Option<String>,

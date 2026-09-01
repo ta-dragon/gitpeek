@@ -343,6 +343,12 @@ date-order 表示時は「この表示では線が交差します」の注記を
 - UI 言語は**日本語固定**。ただし全表示文言を `src/i18n/ja.ts` に集約しキー参照する
   （i18n ライブラリは入れない。将来必要になったら差し替えるだけで済む形にしておく）
 
+**Windows 固有**: `tauri.conf.json` の `app.windows[].dragDropEnabled` を **`false`** にする。
+既定の `true` では WebView2 がファイルのドラッグ＆ドロップを先に掴み、**フロント側の HTML5
+ドラッグ＆ドロップ（リポジトリ一覧の並べ替え）が一切動かない**（Tauri 本体のドキュメントに
+「Disabling it is required to use HTML5 drag and drop on the frontend on Windows」と明記されている）。
+引き換えに「フォルダをウィンドウへ落として登録」は使えなくなるが、v1 では非対象。
+
 ### 6.2 リポジトリ切替
 
 - **常時サイドバー ＋ `Ctrl+P` で絞り込みジャンプ**の併用

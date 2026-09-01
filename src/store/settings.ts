@@ -88,6 +88,22 @@ export async function initSettings(): Promise<void> {
   }
 }
 
+/** 設定を読み直す。Rust 側が settings.json を書き換えたあと（リポジトリ登録など）に呼ぶ。 */
+export async function refreshSettings(): Promise<void> {
+  try {
+    const payload = await loadSettings();
+    setSnapshot({
+      settings: payload.settings,
+      loaded: true,
+      recovered: payload.recovered,
+      error: null,
+      errorKind: null,
+    });
+  } catch (error) {
+    setSnapshot({ error: messageOf(error), errorKind: "load" });
+  }
+}
+
 /**
  * 設定を更新して保存する。
  *

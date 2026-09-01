@@ -222,6 +222,8 @@ export type ColumnWidths = {
 };
 
 export type RepositoryUiState = {
+  /** 最後に開いた時刻（RFC 3339）。「最終アクセス順」の並べ替えに使う。 */
+  lastOpenedAt: string | null;
   selectedCommit: string | null;
   scrollOffset: number;
   selectedFile: string | null;
