@@ -70,14 +70,19 @@ pub fn trunk_start<'a>(refs: &'a [RefEntry], default_branch: Option<&str>) -> Op
 /// **先頭コミットを起点にする**。lane 0 を空けたままにすると、グラフ全体が 1 レーン
 /// 右へずれた上に左端が永久に空く。topo-order の先頭はいずれかの ref の先端なので、
 /// 幹として不自然にはならない。
+///
+/// **起点より新しい側へも伸ばす**（[`extend_upward`]）。既定ブランチより先へ進んだ
+/// ブランチを開いていると、起点から下だけを幹にした場合に画面上部が lane 0 を空けたまま
+/// 別レーンを下り、起点の行で lane 0 へ折れる。1 本の直線が途中で折れて見えるため。
 pub fn trunk_chain(commits: &[CommitMeta], start_sha: Option<&str>) -> HashSet<String> {
     let by_sha = index_by_sha(commits);
 
-    let mut current = start_sha
+    let start = start_sha
         .filter(|sha| by_sha.contains_key(sha))
         .or_else(|| commits.first().map(|commit| commit.sha.as_str()));
 
     let mut trunk = HashSet::new();
+    let mut current = start;
     while let Some(sha) = current {
         let Some(commit) = by_sha.get(sha) else { break };
         // 壊れた履歴で無限ループにしない。
@@ -86,7 +91,34 @@ pub fn trunk_chain(commits: &[CommitMeta], start_sha: Option<&str>) -> HashSet<S
         }
         current = commit.parents.first().map(String::as_str);
     }
+
+    if let Some(start) = start {
+        extend_upward(commits, start, &mut trunk);
+    }
     trunk
+}
+
+/// 幹の起点を**第一親に持つ子**を辿って、幹を新しい側へ伸ばす。
+///
+/// 分かれ道では topo-order で先に来る子（＝画面で上に描かれる方）を採る。
+/// 第二親でしか繋がらない子は幹にしない。マージで合流しただけの枝まで幹に
+/// 引き込むと、lane 0 が枝から枝へ乗り移って一直線でなくなる。
+fn extend_upward(commits: &[CommitMeta], start: &str, trunk: &mut HashSet<String>) {
+    // 第一親 -> その子のうち topo-order で最初のもの。
+    let mut first_child: HashMap<&str, &CommitMeta> = HashMap::new();
+    for commit in commits {
+        if let Some(parent) = commit.parents.first() {
+            first_child.entry(parent.as_str()).or_insert(commit);
+        }
+    }
+
+    let mut current = start;
+    while let Some(child) = first_child.get(current) {
+        if !trunk.insert(child.sha.clone()) {
+            break;
+        }
+        current = child.sha.as_str();
+    }
 }
 
 /// レーンを確定する。`commits` は topo-order、`trunk` は [`trunk_chain`] の結果。
@@ -454,6 +486,45 @@ pub mod tests {
             trunk,
             ["m", "c", "a"].map(String::from).into_iter().collect()
         );
+    }
+
+    #[test]
+    fn trunk_extends_past_the_default_branch_tip() {
+        // 既定ブランチ（c）より先へ 2 つ進んだブランチを開いている状態。
+        // 一直線の履歴なので、上まで幹として lane 0 を通らなければならない。
+        let commits = dag(&[("e", &["d"]), ("d", &["c"]), ("c", &["b"]), ("b", &[])]);
+        let trunk = trunk_chain(&commits, Some("c"));
+
+        assert_eq!(
+            trunk,
+            ["e", "d", "c", "b"].map(String::from).into_iter().collect()
+        );
+
+        let layout = assign_lanes(&commits, &trunk);
+        assert_eq!(lanes(&layout), [0, 0, 0, 0]);
+        assert_eq!(layout.max_lane, 0);
+    }
+
+    #[test]
+    fn trunk_does_not_climb_into_a_merged_branch() {
+        //   m      幹の外。第二親でしか c に繋がらない
+        //   |\
+        //   x c    c が既定ブランチの先端
+        // 第二親を登ってしまうと lane 0 が枝へ乗り移る。
+        let commits = dag(&[("m", &["x", "c"]), ("x", &["r"]), ("c", &["r"]), ("r", &[])]);
+        let trunk = trunk_chain(&commits, Some("c"));
+
+        assert_eq!(trunk, ["c", "r"].map(String::from).into_iter().collect());
+    }
+
+    #[test]
+    fn trunk_takes_the_topmost_child_at_a_fork() {
+        // c を第一親に持つ子が 2 つある。topo-order で先に来る方（上に描かれる方）を採る。
+        let commits = dag(&[("top", &["c"]), ("other", &["c"]), ("c", &[])]);
+        let trunk = trunk_chain(&commits, Some("c"));
+
+        assert!(trunk.contains("top"));
+        assert!(!trunk.contains("other"));
     }
 
     #[test]

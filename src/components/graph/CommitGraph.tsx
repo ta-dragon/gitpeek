@@ -88,13 +88,19 @@ export function CommitGraph({
                 ))}
                 {row.edges.map((edge, nth) => {
                   const target = rowIndex.get(edge.parentSha);
-                  // 親が読み込んだ範囲の外（表示上限より下）にいる辺は描かない。
-                  if (target === undefined || target >= visible.length) return null;
+                  // **親が表示範囲より下でも線は引く。** 描かずに落とすと、画面の途中で
+                  // 線が切れて終わる（実データで先頭 400 行のうち 3 本がこれになった）。
+                  // 下端まで引いて viewBox で切り、続いていることを見せる。
+                  const below = target === undefined || target >= visible.length;
                   return (
                     <path
                       key={nth}
                       className="graph__line"
-                      d={edgePath(edge, index, target, visible[target].lane)}
+                      d={
+                        below
+                          ? edgePath(edge, index, visible.length, edge.toLane)
+                          : edgePath(edge, index, target, visible[target].lane)
+                      }
                       // 色は「その辺が走るレーン」に合わせる。合流でも枝の色が保たれる。
                       stroke={laneColor(edge.toLane)}
                     />

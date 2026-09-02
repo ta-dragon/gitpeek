@@ -77,17 +77,8 @@ export function edgePath(
 ): string {
   const x0 = laneX(edge.fromLane);
   const y0 = rowY(rowIndex);
-  const xMid = laneX(edge.toLane);
   const x1 = laneX(targetLane);
   const y1 = rowY(targetRowIndex);
-
-  const turnsAtTop = xMid !== x0;
-  const turnsAtBottom = x1 !== xMid;
-
-  // 同一レーンを下るだけ。幹はこれだけで描ける。
-  if (!turnsAtTop && !turnsAtBottom) {
-    return `M ${n(x0)} ${n(y0)} L ${n(x0)} ${n(y1)}`;
-  }
 
   // 親が同じ行か上にある（topo-order では起こり得ないが、描けないより直線を引く）。
   const span = y1 - y0;
@@ -95,32 +86,65 @@ export function edgePath(
     return `M ${n(x0)} ${n(y0)} L ${n(x1)} ${n(y1)}`;
   }
 
-  // 行が離れていないほど角丸を小さくする。曲がり切る前に次の曲がりが始まらないように。
-  const turns = (turnsAtTop ? 1 : 0) + (turnsAtBottom ? 1 : 0);
-  const corner = Math.min(CORNER_RADIUS * 2, span / turns);
+  let xMid = laneX(edge.toLane);
+  let top = bendHeight(xMid - x0);
+  let bottom = bendHeight(x1 - xMid);
 
-  const parts = [`M ${n(x0)} ${n(y0)}`];
-
-  // 上の曲がり。ノードを出てすぐ目的のレーンへ移る。
-  const yAfterTop = turnsAtTop ? y0 + corner : y0;
-  if (turnsAtTop) {
-    parts.push(
-      `C ${n(x0)} ${n(y0 + corner / 2)} ${n(xMid)} ${n(yAfterTop - corner / 2)} ${n(xMid)} ${n(yAfterTop)}`,
-    );
+  // **中間レーンを走る余地が無いなら、そのレーンは経由しない。** 第 2 親のために
+  // 起こしたレーンが 1〜2 行で終わると、右へ跳ねてすぐ左へ戻る弧になって飛び出して見える。
+  // どのみち縦に走る区間が無いレーンなので、通らずに直接繋ぐ方が実態に近い。
+  if (top > 0 && bottom > 0 && top + bottom > span) {
+    xMid = x1;
+    top = bendHeight(xMid - x0);
+    bottom = 0;
   }
 
-  // 下の曲がり。親のノードの手前で寄せる。
-  const yBeforeBottom = turnsAtBottom ? y1 - corner : y1;
+  // 同一レーンを下るだけ。幹はこれだけで描ける。
+  if (top === 0 && bottom === 0) {
+    return `M ${n(x0)} ${n(y0)} L ${n(x0)} ${n(y1)}`;
+  }
+
+  // それでも収まらなければ曲がりを縮める。曲がり切る前に次の曲がりが始まらないように。
+  if (top + bottom > span) {
+    const scale = span / (top + bottom);
+    top *= scale;
+    bottom *= scale;
+  }
+
+  const yAfterTop = y0 + top;
+  const yBeforeBottom = y1 - bottom;
+
+  const parts = [`M ${n(x0)} ${n(y0)}`];
+  // 上の曲がり。ノードを出てすぐ目的のレーンへ移る。
+  if (top > 0) {
+    parts.push(
+      `C ${n(x0)} ${n(y0 + top / 2)} ${n(xMid)} ${n(yAfterTop - top / 2)} ${n(xMid)} ${n(yAfterTop)}`,
+    );
+  }
   if (yBeforeBottom > yAfterTop) {
     parts.push(`L ${n(xMid)} ${n(yBeforeBottom)}`);
   }
-  if (turnsAtBottom) {
+  // 下の曲がり。親のノードの手前で寄せる。
+  if (bottom > 0) {
     parts.push(
-      `C ${n(xMid)} ${n(yBeforeBottom + corner / 2)} ${n(x1)} ${n(y1 - corner / 2)} ${n(x1)} ${n(y1)}`,
+      `C ${n(xMid)} ${n(yBeforeBottom + bottom / 2)} ${n(x1)} ${n(y1 - bottom / 2)} ${n(x1)} ${n(y1)}`,
     );
   }
 
   return parts.join(" ");
+}
+
+/**
+ * 横に `dx` だけ移動する曲がりに要する縦の長さ。
+ *
+ * **横の距離に応じて伸ばす。** 何レーンまたいでも角丸を固定長にすると、
+ * 数レーンぶんの移動が 20px の帯に押し込まれて、ほぼ水平の直線に見える
+ * （実データで 1 行のあいだに 8 レーン移動する辺があった）。
+ * 1 レーンぶんの移動では `CORNER_RADIUS * 2` を下限にして、従来の見た目を保つ。
+ */
+function bendHeight(dx: number): number {
+  const distance = Math.abs(dx);
+  return distance === 0 ? 0 : Math.max(CORNER_RADIUS * 2, distance);
 }
 
 /** この行を素通りするレーンの縦線。 */
