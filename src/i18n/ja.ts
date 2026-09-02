@@ -76,6 +76,7 @@ export const ja = {
       `メモリを数 GB 使います。その間このウィンドウは操作できません。`,
     oversizedNote:
       "Givsoner が想定しているのは数万コミットまでです（docs/DESIGN.md §4.1）。" +
+      "この規模の正式対応は v1.1 以降で行います。" +
       "リリースビルド（npm run start:release）の方が大幅に速く終わります。",
     oversizedLoad: "それでも読み込む",
 
