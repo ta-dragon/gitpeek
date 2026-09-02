@@ -7,7 +7,6 @@ import {
   LANE_COLORS,
   laneColor,
   laneX,
-  passingPath,
   rowIndexBySha,
   rowY,
   type Edge,
@@ -99,13 +98,6 @@ describe("edgePath", () => {
   it("角丸は 8〜12px の範囲に収める", () => {
     expect(CORNER_RADIUS).toBeGreaterThanOrEqual(8);
     expect(CORNER_RADIUS).toBeLessThanOrEqual(12);
-  });
-});
-
-describe("passingPath", () => {
-  it("行の上端から下端まで通す", () => {
-    // ノードの中心ではなく行の境界まで引く。行をまたいで線が途切れないように。
-    expect(passingPath(1, 2)).toBe("M 26 56 L 26 84");
   });
 });
 

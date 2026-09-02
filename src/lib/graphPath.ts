@@ -147,13 +147,6 @@ function bendHeight(dx: number): number {
   return distance === 0 ? 0 : Math.max(CORNER_RADIUS * 2, distance);
 }
 
-/** この行を素通りするレーンの縦線。 */
-export function passingPath(lane: number, rowIndex: number): string {
-  const x = laneX(lane);
-  const top = rowIndex * ROW_HEIGHT;
-  return `M ${n(x)} ${n(top)} L ${n(x)} ${n(top + ROW_HEIGHT)}`;
-}
-
 /**
  * レーンの色。**CSS 変数名を返す**（SVG 属性に生の色値を書かない — CLAUDE.md §6）。
  *

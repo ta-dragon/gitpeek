@@ -16,7 +16,6 @@ import {
   laneColor,
   laneX,
   NODE_RADIUS,
-  passingPath,
   RING_RADIUS,
   ROW_HEIGHT,
   rowIndexBySha,
@@ -74,18 +73,17 @@ export function CommitGraph({
           viewBox={`0 0 ${width} ${height}`}
           role="presentation"
         >
-          {/* 線を先に全部描いてからノードを置く。ノードが線に隠れないように。 */}
+          {/*
+            線を先に全部描いてからノードを置く。ノードが線に隠れないように。
+
+            **描くのは辺だけ。`row.passing` は使わない。** 素通りするレーンは必ず
+            「上の行のノードから下の行の親まで」の辺に覆われている（実データ 2,000 行で確認）。
+            重ねて縦線を引くと、辺が曲がって別レーンへ移った後にも縦線が残り、
+            **どこにも繋がらない線の切れ端**になる。
+          */}
           <g className="graph__edges">
             {visible.map((row, index) => (
               <g key={row.sha}>
-                {row.passing.map((lane) => (
-                  <path
-                    key={`p${lane}`}
-                    className="graph__line"
-                    d={passingPath(lane, index)}
-                    stroke={laneColor(lane)}
-                  />
-                ))}
                 {row.edges.map((edge, nth) => {
                   const target = rowIndex.get(edge.parentSha);
                   // **親が表示範囲より下でも線は引く。** 描かずに落とすと、画面の途中で
