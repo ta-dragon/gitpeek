@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { CommandLogPanel } from "./components/commandlog/CommandLogPanel";
+import { CommitGraph } from "./components/graph/CommitGraph";
 import { CommandPalette } from "./components/common/CommandPalette";
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
@@ -18,6 +19,7 @@ import {
   isGitUsable,
   MIN_VERSION_FALLBACK,
   type GitStatus,
+  type GraphOrder,
   type LoadPhase,
   type RepositoryEntry,
 } from "./lib/ipc";
@@ -286,6 +288,8 @@ function RepositoryPanel({ entry }: { entry: RepositoryEntry | null }) {
 
       <HistoryCard entry={entry} snapshot={snapshot} />
 
+      <GraphCard entry={entry} snapshot={snapshot} />
+
       <div className="ready__card ready__card--muted">
         <h2 className="ready__heading">{ja.phase.title}</h2>
         <p>{ja.phase.body}</p>
@@ -385,6 +389,65 @@ function HistoryCard({
       </dl>
       {data.commits.length === 0 && <p className="ready__note">{ja.snapshot.emptyRepository}</p>}
       {outOfGraph > 0 && <p className="ready__note">{ja.snapshot.outOfGraph(outOfGraph)}</p>}
+    </div>
+  );
+}
+
+/**
+ * コミットグラフ。仮想スクロールとリスト列は T-07 で入る。
+ *
+ * ここで見るのは「幹が一直線に通っているか」「分岐と合流の線が繋がっているか」で、
+ * それが Phase 2 の判定ゲート（T-08）の材料になる。
+ */
+function GraphCard({
+  entry,
+  snapshot,
+}: {
+  entry: RepositoryEntry;
+  snapshot: ReturnType<typeof useSnapshot>;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+
+  if (snapshot.repositoryId !== entry.id) return null;
+  if (snapshot.loading || snapshot.data === null) return null;
+  if (snapshot.data.commits.length === 0) return null;
+
+  const layout = snapshot.layout;
+  return (
+    <div className="ready__card">
+      <div className="ready__cardhead">
+        <h2 className="ready__heading">{ja.graph.title}</h2>
+        <div className="app__spacer" />
+        <label className="app__theme">
+          {ja.graph.order}
+          <select
+            className="select"
+            value={snapshot.order}
+            onChange={(event) => void snapshots.setOrder(event.target.value as GraphOrder)}
+          >
+            <option value="topo">{ja.graph.orderTopo}</option>
+            <option value="date">{ja.graph.orderDate}</option>
+          </select>
+        </label>
+      </div>
+
+      {snapshot.order === "date" && <p className="ready__note">{ja.graph.orderDateNote}</p>}
+
+      {layout === null ? (
+        <p className="ready__note">{ja.graph.unavailable}</p>
+      ) : (
+        <>
+          <CommitGraph
+            rows={layout.rows}
+            maxLane={layout.maxLane}
+            commits={snapshot.data.commits}
+            headSha={snapshot.data.head.sha}
+            selectedSha={selected}
+            onSelect={setSelected}
+          />
+          <p className="ready__note">{ja.graph.maxLane(layout.maxLane + 1)}</p>
+        </>
+      )}
     </div>
   );
 }

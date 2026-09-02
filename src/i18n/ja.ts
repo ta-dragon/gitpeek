@@ -152,6 +152,20 @@ export const ja = {
     ready: "git を検出しました",
   },
 
+  graph: {
+    title: "コミットグラフ",
+    // 仮想スクロールが入るまでの仮の蓋（T-07 で外す）。
+    truncated: (shown: number, total: number) =>
+      `先頭 ${shown.toLocaleString()} 行のみ表示しています（全 ${total.toLocaleString()} 行）。`,
+    unavailable: "レーンを計算できませんでした。",
+    order: "並び順",
+    orderTopo: "topo",
+    orderDate: "日時",
+    // date-order は線が交差する（docs/DESIGN.md §4.3）。
+    orderDateNote: "この表示では線が交差します。",
+    maxLane: (lanes: number) => `レーン ${lanes}`,
+  },
+
   phase: {
     title: "Phase 1 — リポジトリ管理",
     body: "リポジトリの登録・切替と、全コミットの一括取得までが動いています。コミットグラフと差分は Phase 2 以降でこの領域に入ります。",

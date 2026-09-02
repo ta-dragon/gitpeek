@@ -656,6 +656,18 @@ body {
   background: var(--bg-inset);
 }
 
+/* 見出しの右に操作を並べる（グラフの並び順など）。 */
+.ready__cardhead {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ready__cardhead .ready__heading {
+  margin-bottom: 0;
+}
+
 .ready__heading {
   margin: 0 0 12px;
   font-size: 15px;

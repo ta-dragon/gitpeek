@@ -1,0 +1,71 @@
+/*
+ * コミットグラフ（docs/DESIGN.md §5.2）。
+ *
+ * 色はテーマトークン経由で、寸法は src/lib/graphPath.ts の定数と揃える。
+ * ここに座標計算を持ち込まないこと（テストできる場所は 1 つに保つ）。
+ */
+
+.graph {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* レーン数に上限が無いので横スクロールを許す（DESIGN.md §5.1-4）。 */
+.graph__scroll {
+  overflow: auto;
+  min-height: 0;
+  /* 仮想スクロールが入るまでの仮の高さ（T-07 で外す）。 */
+  max-height: 60vh;
+}
+
+.graph__svg {
+  display: block;
+}
+
+.graph__line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.graph__dot {
+  stroke-width: 2;
+}
+
+/* マージは中空円。塗りは行の背景色で抜く。 */
+.graph__dot--merge {
+  stroke-width: 2;
+}
+
+/* HEAD は外側のリング。 */
+.graph__ring {
+  fill: none;
+  stroke-width: 1.5;
+  opacity: 0.7;
+}
+
+/* 選択中は拡大＋発光。 */
+.graph__selected {
+  opacity: 0.22;
+}
+
+.graph__node {
+  cursor: pointer;
+}
+
+.graph__hit {
+  fill: transparent;
+}
+
+.graph__node:hover .graph__dot {
+  stroke-width: 3;
+}
+
+.graph__note {
+  margin: 0;
+  padding: 6px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}

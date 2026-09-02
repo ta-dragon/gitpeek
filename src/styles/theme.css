@@ -28,6 +28,25 @@
   /* モーダルの背景を覆う色（コマンドパレット）。 */
   --overlay: rgba(16, 19, 24, 0.35);
 
+  /*
+   * グラフのレーン色（docs/DESIGN.md §5.2）。
+   * lane 0 は必ず幹なので無彩色寄りの固定色にし、幹を主張させる。
+   * 枝は 8 色ローテーション。彩度を抑え、隣り合っても喧嘩しない並びにする。
+   * ブランチ名のハッシュで色を決める方式は採らない（レーン再利用と相性が悪い）。
+   */
+  --graph-lane-trunk: #4a5563;
+  --graph-lane-0: #2f6feb;
+  --graph-lane-1: #1a7f5a;
+  --graph-lane-2: #b3541e;
+  --graph-lane-3: #8250df;
+  --graph-lane-4: #0f7a8a;
+  --graph-lane-5: #a03a5f;
+  --graph-lane-6: #6a7a1f;
+  --graph-lane-7: #7a5c1a;
+
+  /* マージの中空円を抜く色。行の背景と同じにする。 */
+  --graph-node-fill: #ffffff;
+
   --font-sans: "Segoe UI", "Yu Gothic UI", "Meiryo", system-ui, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", "Consolas", "Noto Sans Mono", monospace;
 
@@ -56,6 +75,18 @@
     --danger: #f8737f;
     --ok: #56d364;
 
+    --graph-lane-trunk: #9aa6b6;
+    --graph-lane-0: #5b9dff;
+    --graph-lane-1: #45c08a;
+    --graph-lane-2: #e08a4a;
+    --graph-lane-3: #b088f0;
+    --graph-lane-4: #3fb6c8;
+    --graph-lane-5: #e0759c;
+    --graph-lane-6: #a8bf4a;
+    --graph-lane-7: #c9a94f;
+
+    --graph-node-fill: #1a1e25;
+
     --overlay: rgba(0, 0, 0, 0.55);
   }
 }
@@ -79,6 +110,18 @@
   --accent-contrast: #0d1117;
   --danger: #f8737f;
   --ok: #56d364;
+
+  --graph-lane-trunk: #9aa6b6;
+  --graph-lane-0: #5b9dff;
+  --graph-lane-1: #45c08a;
+  --graph-lane-2: #e08a4a;
+  --graph-lane-3: #b088f0;
+  --graph-lane-4: #3fb6c8;
+  --graph-lane-5: #e0759c;
+  --graph-lane-6: #a8bf4a;
+  --graph-lane-7: #c9a94f;
+
+  --graph-node-fill: #1a1e25;
 
   --overlay: rgba(0, 0, 0, 0.55);
 }

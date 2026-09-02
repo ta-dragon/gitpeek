@@ -119,8 +119,11 @@ graph LR
 | 新規 | `src/lib/graphPath.ts` | 純関数（テスト対象） |
 | 新規 | `src/lib/graphPath.test.ts` | Vitest |
 | 新規 | `src/components/graph/CommitGraph.tsx` | SVG 描画 |
-| 新規 | `src/styles/graph.css` | レーン配色トークン |
+| 新規 | `src/styles/graph.css` | グラフの見た目 |
 | 変更 | `src/styles/theme.css` | `--graph-lane-*` の追加（ライト/ダーク別） |
+| 変更 | `src/store/snapshot.ts` | レーンの保持と並び順の切替 |
+| 変更 | `src/App.tsx`, `src/i18n/ja.ts`, `src/styles/app.css` | グラフの置き場所と文言 |
+| 変更 | `src/main.tsx` | `graph.css` の読み込み |
 | 変更 | `vite.config.ts` | Vitest 設定 |
 | 変更 | `package.json` | `vitest` devDependency、`"test": "vitest run"` |
 
@@ -138,10 +141,22 @@ export type Edge = {
 export type GraphRow = { sha: string; lane: number; passing: number[]; edges: Edge[] };
 
 export function laneX(lane: number): number;
-/** 行 rowIndex から行 targetRowIndex へ伸びる辺の SVG パス。 */
-export function edgePath(edge: Edge, rowIndex: number, targetRowIndex: number): string;
+export function rowY(rowIndex: number): number;
+/** グラフ列の幅。maxLane は 0 起点なので 1 本ぶん足りない。 */
+export function graphWidth(maxLane: number): number;
+/**
+ * 行 rowIndex から行 targetRowIndex へ伸びる辺の SVG パス。
+ * targetLane は**親のレーン**で、edge.toLane（途中を走るレーン）とは別物。
+ */
+export function edgePath(
+  edge: Edge, rowIndex: number, targetRowIndex: number, targetLane: number,
+): string;
+/** この行を素通りするレーンの縦線。 */
+export function passingPath(lane: number, rowIndex: number): string;
 /** lane 0 は幹の固定色。それ以外は 8 色ローテーション。CSS 変数名を返す。 */
 export function laneColor(lane: number): string;
+/** SHA → 行番号。辺の行き先を引く。 */
+export function rowIndexBySha(rows: GraphRow[]): Map<string, number>;
 ```
 
 - **描線**: 同一レーン内は垂直の直線。レーンをまたぐ辺は「垂直 → 半径 `CORNER_RADIUS` の角丸ベジェ
@@ -159,6 +174,26 @@ export function laneColor(lane: number): string;
 // vite.config.ts へ追加
 test: { environment: "node", include: ["src/**/*.test.ts"] }
 ```
+
+**着手時の突き合わせ（2026-09-03 実装）**
+
+- **`edgePath` に `targetLane` を足した。** `Edge.toLane` は「その辺が途中を走るレーン」で、
+  **親のレーンではない**。枝の第一親は同じレーンを予約したまま親の行まで下り、そこで親が
+  lane 0 を取ってレーンが解放される（`lane.rs` の手順 2）。`toLane` の位置で描き終えると、
+  合流のたびに線とノードの間に隙間が空く。親のレーンは `rows[targetRowIndex].lane` で引ける。
+- **辺は最大 2 回曲がる。** 上（ノードを出てすぐ `toLane` へ移る）と下（親のノードの手前で
+  `targetLane` へ寄せる）。両方曲がるのは「幹から起こしたレーンが幹へ戻る」場合で、
+  行が詰まっているときは角丸を縮めて直線部分を捨てる。
+- **`passingPath` を足した。** 素通りするレーンの縦線は行の**上端から下端**まで引く。
+  ノードの中心から中心へ引くと、行の境目で線が途切れる。
+- **レーンの取得を `src/store/snapshot.ts` に入れた。** 履歴を読み終えた直後に
+  `compute_lane_layout` を呼んで `layout` として持つ。`git log` は走らない（Rust 側の
+  キャッシュから作られる）。レーン計算に失敗しても履歴の要約は出せるよう、`data` とは別に持つ。
+- **`CommitGraph` は先頭 `MAX_ROWS`(400) 行だけを描く。** 仮想スクロールは T-07 なので、
+  それまでの仮の蓋。数万行を素の SVG に流すと DOM が数十万ノードになる。
+  `.graph__scroll` の `max-height: 60vh` も同じ理由の仮置き。
+- **リスト列（subject / 作者 / 日時）は出していない**（T-07 の担当）。ノードのツールチップに
+  短縮 SHA と subject を入れて、どの行がどのコミットか追えるようにしてある。
 
 **T-05 からの申し送り（着手時に確認すること）**
 
@@ -231,6 +266,18 @@ test: { environment: "node", include: ["src/**/*.test.ts"] }
 - **キーボード**: `↑↓` / `j` `k` 移動、`Home` / `End`、`Ctrl+H` で HEAD へ、
   `Alt+←` 第 1 親（複数親なら選択メニュー）、`Alt+→` 子へ。
 - **SHA ジャンプ**: ツールバーの入力欄に SHA を貼ると該当行へスクロールして選択（前方一致可）。
+
+**T-06 からの申し送り（着手時に確認すること）**
+
+- **仮の蓋を外すこと。** `CommitGraph` の `MAX_ROWS`（先頭 400 行だけ描く）と
+  `.graph__scroll` の `max-height: 60vh` は、仮想スクロールが無い間の仮置き。
+  T-07 で両方消す。消し忘れると 1 万コミットのスクロール確認ができない。
+- **レーンは `src/store/snapshot.ts` の `layout` にある。** 並び順の切替は同ファイルの
+  `setOrder`。リスト側で別途 `compute_lane_layout` を呼ばないこと。
+- グラフとリストは**同じスクロールコンテナ**に入れる。現状のグラフは自前で
+  `.graph__scroll` を持っているので、T-07 でリスト側のコンテナへ移す。
+- 座標の定数は `src/lib/graphPath.ts`（`ROW_HEIGHT` / `LANE_WIDTH` / `LEFT_MARGIN`）。
+  行高はここと `--row-height` の両方にあるので、変えるなら両方直す。
 
 **制約**
 

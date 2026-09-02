@@ -8,8 +8,11 @@
 import { useSyncExternalStore } from "react";
 
 import {
+  computeLaneLayout,
   loadRepositorySnapshot,
   onSnapshotProgress,
+  type GraphOrder,
+  type LaneLayout,
   type RepositorySnapshot,
   type SnapshotProgress,
 } from "../lib/ipc";
@@ -30,6 +33,13 @@ export type SnapshotState = {
   /** `data` がどのリポジトリのものか。選択と食い違った表示を防ぐ。 */
   repositoryId: string | null;
   data: RepositorySnapshot | null;
+  /**
+   * 描画用のレーン。`data` と同じリポジトリ・同じ並び順のものだけを持つ。
+   * レーン計算に失敗しても履歴の要約は出したいので、`data` とは別に持つ。
+   */
+  layout: LaneLayout | null;
+  /** 表示中の並び順（docs/DESIGN.md §4.3）。切替は `git log` を再実行しない。 */
+  order: GraphOrder;
   loading: boolean;
   error: string | null;
   /**
@@ -49,6 +59,8 @@ export type SnapshotState = {
 let snapshot: SnapshotState = {
   repositoryId: null,
   data: null,
+  layout: null,
+  order: "topo",
   loading: false,
   error: null,
   elapsedMs: null,
@@ -109,6 +121,7 @@ export async function load(
     setSnapshot({
       repositoryId: null,
       data: null,
+      layout: null,
       loading: false,
       error: null,
       elapsedMs: null,
@@ -126,6 +139,7 @@ export async function load(
     setSnapshot({
       repositoryId: id,
       data: null,
+      layout: null,
       loading: false,
       error: null,
       elapsedMs: null,
@@ -138,6 +152,7 @@ export async function load(
   setSnapshot({
     repositoryId: id,
     data: null,
+    layout: null,
     loading: true,
     error: null,
     elapsedMs: null,
@@ -149,9 +164,16 @@ export async function load(
   try {
     const data = await loadRepositorySnapshot(id, force, estimate);
     if (request !== latestRequest) return;
+
+    // レーンは Rust 側のキャッシュから作られるので `git log` は走らない。
+    // ここで失敗しても履歴の要約は出せるよう、グラフだけ諦める。
+    const layout = await layoutOrNull(id, snapshot.order);
+    if (request !== latestRequest) return;
+
     setSnapshot({
       repositoryId: id,
       data,
+      layout,
       loading: false,
       error: null,
       elapsedMs: Math.round(performance.now() - started),
@@ -169,11 +191,37 @@ export async function load(
     setSnapshot({
       repositoryId: id,
       data: null,
+      layout: null,
       loading: false,
       error: messageOf(error),
       progress: null,
       oversized: null,
     });
+  }
+}
+
+/**
+ * 並び順を切り替える。**`git log` は再実行しない**（docs/DESIGN.md §4.3）。
+ * Rust 側がメモリ上で並べ替えてレーンを振り直すだけなので数十 ms で返る。
+ */
+export async function setOrder(order: GraphOrder): Promise<void> {
+  if (order === snapshot.order) return;
+  const id = snapshot.repositoryId;
+  setSnapshot({ order });
+  if (id === null || snapshot.data === null) return;
+
+  const request = (latestRequest += 1);
+  const layout = await layoutOrNull(id, order);
+  if (request !== latestRequest) return;
+  setSnapshot({ layout });
+}
+
+/** レーンを引く。失敗はグラフを出さないだけに留める。 */
+async function layoutOrNull(id: string, order: GraphOrder): Promise<LaneLayout | null> {
+  try {
+    return await computeLaneLayout(id, order);
+  } catch {
+    return null;
   }
 }
 
