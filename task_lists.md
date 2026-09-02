@@ -113,8 +113,10 @@ graph LR
 
 | 種別 | パス | 内容 |
 |---|---|---|
-| 新規 | `src-tauri/src/graph/mod.rs` | モジュール定義 |
+| 新規 | `src-tauri/src/graph/mod.rs` | モジュール定義とスナップショットからの入口 |
 | 新規 | `src-tauri/src/graph/lane.rs` | レーン割り当て本体とテスト |
+| 新規 | `src-tauri/src/graph/order.rs` | topo / date の並び順 |
+| 新規 | `src-tauri/tests/lanes.rs` | 生成リポジトリに対する結合テスト |
 | 変更 | `src-tauri/src/lib.rs` | コマンド登録 |
 | 変更 | `src/lib/ipc.ts` | 型と invoke ラッパ |
 
@@ -145,8 +147,13 @@ pub struct LaneLayout { pub rows: Vec<GraphRow>, pub max_lane: u32 }
 
 pub const RESERVE_ROWS: usize = 2;   // 解放直後にレーンを再利用しない行数
 
-pub fn trunk_chain(commits: &[CommitMeta], default_branch_sha: Option<&str>) -> HashSet<String>;
+// default_branch は ref 名なので、まず SHA に直す（下の「T-04 からの申し送り」）。
+pub fn trunk_start<'a>(refs: &'a [RefEntry], default_branch: Option<&str>) -> Option<&'a str>;
+pub fn trunk_chain(commits: &[CommitMeta], start_sha: Option<&str>) -> HashSet<String>;
 pub fn assign_lanes(commits: &[CommitMeta], trunk: &HashSet<String>) -> LaneLayout;
+
+// スナップショット 1 つ分の入口。graph/mod.rs 側。
+pub fn layout(snapshot: &RepositorySnapshot, order: GraphOrder) -> LaneLayout;
 ```
 
 **色は返さない。** レーン番号だけを返し、色の決定はフロント側の純関数（T-06）が行う。
@@ -157,8 +164,9 @@ pub fn assign_lanes(commits: &[CommitMeta], trunk: &HashSet<String>) -> LaneLayo
 active: Vec<Option<String>>       # レーン番号 -> そのレーンが待っている親 SHA
 freed:  Vec<(lane, freed_at_row)> # 直近に解放されたレーン
 
-trunk_chain(commits, default_branch_sha):
-    default_branch_sha から第一親だけを辿って集合を作る
+trunk_chain(commits, start_sha):
+    start_sha から第一親だけを辿って集合を作る
+    start_sha が無い / グラフ外を指すときは commits[0] を起点にする
 
 allocate_lane(row_index):
     # lane 0 は幹の予約。trunk 以外には決して割り当てない
@@ -206,18 +214,28 @@ for (row_index, commit) in commits.enumerate():
 **Tauri コマンド**
 
 ```
-compute_lane_layout(repositoryId: String, order: "topo" | "date") -> Result<LaneLayout, String>
+compute_lane_layout(repositoryId: String, order: GraphOrder) -> Result<LaneLayout, String>
 ```
+
+`GraphOrder` は `"topo"` / `"date"` の 2 値（`graph/order.rs`）。
+
+**date-order は単純な日時ソートにしてはいけない。** rebase や amend、時計のずれで親の方が
+新しい日時を持つことがあり、そうなると `assign_lanes` の前提（親は必ず後ろ）が崩れて
+レーンが解放されずに漏れる。git の `--date-order` と同じく「子を全部出し終えた親から、
+日時の新しい順に出す」。
 
 可視 ref による絞り込み引数は T-09 で追加する。ここでは全コミットを対象にする。
 
 **T-04 からの申し送り（着手時に確認すること）**
 
 - **`RepositorySnapshot::default_branch` は SHA ではなく完全な ref 名**（`refs/heads/main`）。
-  上の `trunk_chain(commits, default_branch_sha)` はそのままでは繋がらない。
-  `snapshot.refs` から名前で引いて `target` を取るか、`trunk_chain` の引数を ref 名にすること。
-  幹が決まらないリポジトリでは `None` になる（detached ＋ main/master 無し）ので、その場合の
-  扱い（先頭コミットを幹にするか、lane 0 を空けるか）を決める必要がある。
+  当初の `trunk_chain(commits, default_branch_sha)` はそのままでは繋がらなかった。
+  **`trunk_start(refs, default_branch)` を足して ref 名から `target` を引く**形にし、
+  `trunk_chain` は SHA を受けるままにした（フィクスチャからテストしやすい）。
+- **幹が決まらないときは先頭コミットを起点にする。** detached ＋ main/master 無しだと
+  `default_branch` が `None` になる。lane 0 を空けたままにするとグラフ全体が 1 レーン右へ
+  ずれた上に左端が永久に空くので、**空けない**方を選んだ。topo-order の先頭はいずれかの
+  ref の先端なので、幹として不自然にならない。起点がグラフ外を指すときも同じ扱い。
 - **コミットの取得は `git::snapshot::load_cached` を再度呼べばよい。** ref の指紋が同じなら
   `for-each-ref` 1 回で `Arc<RepositorySnapshot>` が返る（実測 131ms / 148 万コミット）。
   `compute_lane_layout` のために別経路を作らないこと。
