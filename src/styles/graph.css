@@ -5,18 +5,16 @@
  * ここに座標計算を持ち込まないこと（テストできる場所は 1 つに保つ）。
  */
 
-.graph {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
-/* レーン数に上限が無いので横スクロールを許す（DESIGN.md §5.1-4）。 */
-.graph__scroll {
-  overflow: auto;
-  min-height: 0;
-  /* 仮想スクロールが入るまでの仮の高さ（T-07 で外す）。 */
-  max-height: 60vh;
+/*
+ * 行の背後に敷く 1 枚。リストと同じスクロールコンテナの中にいるので、
+ * スクロールしてもずれない（同期処理は無い）。
+ */
+/* グラフ列の枠。列幅より右のレーンはここで切る。 */
+.graph__clip {
+  position: absolute;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .graph__svg {
@@ -30,12 +28,8 @@
   stroke-linejoin: round;
 }
 
+/* 通常は塗り円、マージは中空円（塗りを行の背景色で抜く）。 */
 .graph__dot {
-  stroke-width: 2;
-}
-
-/* マージは中空円。塗りは行の背景色で抜く。 */
-.graph__dot--merge {
   stroke-width: 2;
 }
 
@@ -48,24 +42,5 @@
 
 /* 選択中は拡大＋発光。 */
 .graph__selected {
-  opacity: 0.22;
-}
-
-.graph__node {
-  cursor: pointer;
-}
-
-.graph__hit {
-  fill: transparent;
-}
-
-.graph__node:hover .graph__dot {
-  stroke-width: 3;
-}
-
-.graph__note {
-  margin: 0;
-  padding: 6px 0 0;
-  color: var(--text-dim);
-  font-size: 12px;
+  opacity: 0.28;
 }

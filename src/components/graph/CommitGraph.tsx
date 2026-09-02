@@ -5,11 +5,11 @@
  * ここがやるのは並べることだけで、**幾何や配色の判断をこのファイルに書かない**
  * （テストできなくなる — docs/DESIGN.md §14.4）。
  *
- * 仮想スクロールとリスト列は T-07。ここでは行数を [`MAX_ROWS`] で頭打ちにしている。
+ * **リストの仮想スクロールと同じ窓だけを描く。** 全行を 1 枚の SVG にすると、数万行では
+ * DOM が数十万ノードになり、要素の高さもブラウザの上限（約 3,300 万 px）に近づく。
  */
 import { useMemo } from "react";
 
-import { ja } from "../../i18n/ja";
 import {
   edgePath,
   graphWidth,
@@ -18,140 +18,140 @@ import {
   NODE_RADIUS,
   RING_RADIUS,
   ROW_HEIGHT,
-  rowIndexBySha,
   rowY,
   type GraphRow,
 } from "../../lib/graphPath";
 import type { CommitMeta } from "../../lib/ipc";
 
-/**
- * 一度に描く行数の上限。
- *
- * 仮想スクロールが入るまでの仮の蓋（T-07 で外す）。数万行を素の SVG に流すと
- * DOM が数十万ノードになり、目視どころではなくなる。
- */
-export const MAX_ROWS = 400;
-
 type Props = {
   rows: GraphRow[];
   maxLane: number;
-  /** 行の副次情報。ノードのツールチップと、マージかどうかの判定に使う。 */
   commits: CommitMeta[];
-  /** HEAD が指すコミット。リングを付ける。 */
+  /** 描く範囲（行番号）。リスト側の仮想スクロールが決める。 */
+  start: number;
+  end: number;
   headSha: string | null;
   selectedSha: string | null;
-  onSelect: (sha: string) => void;
+  /** グラフ列の幅。これより右のレーンは見えない（列を広げれば出る）。 */
+  columnWidth: number;
 };
 
 export function CommitGraph({
   rows,
   maxLane,
   commits,
+  start,
+  end,
   headSha,
   selectedSha,
-  onSelect,
+  columnWidth,
 }: Props) {
-  // 辺の行き先は SHA でしか分からない。行ごとに探すと数万行で効くので 1 度だけ作る。
-  const rowIndex = useMemo(() => rowIndexBySha(rows), [rows]);
+  const width = graphWidth(maxLane);
+
+  // **窓の上から入ってくる辺も描く。** 窓の中の行が持つ辺だけを描くと、上から
+  // 下りてきている線が窓の上端で消え、ノードだけが浮く。`row.passing` で縦線を
+  // 引き直す手もあるが、辺が曲がった後にも縦線が残って切れ端になる（T-06 の不具合）。
+  //
+  // 走査は毎回全行を舐める。20,285 コミットの末尾で 1 回 0.45ms（実測）なので、
+  // v1 の想定規模（docs/DESIGN.md §4.1）では索引を用意するまでもない。
+  const paths = useMemo(() => {
+    const found: { key: string; d: string; lane: number }[] = [];
+
+    for (let row = 0; row < rows.length; row += 1) {
+      if (row >= end) break;
+      const source = rows[row];
+
+      for (let nth = 0; nth < source.edges.length; nth += 1) {
+        const edge = source.edges[nth];
+        const target = indexOf(rows, edge.parentSha);
+        // 親が見つからない辺は下端まで引く。描かずに落とすと線が途中で切れる。
+        const to = target === -1 ? rows.length : target;
+        if (to < start) continue;
+
+        // 窓の外まで伸びる辺は、窓の縁で切る。曲がりの形は変えない。
+        const clipped = Math.min(to, end);
+        const targetLane = clipped === to && target !== -1 ? rows[to].lane : edge.toLane;
+        found.push({
+          key: `${row}-${nth}`,
+          d: edgePath(edge, row, clipped, targetLane),
+          lane: edge.toLane,
+        });
+      }
+    }
+    return found;
+  }, [rows, start, end]);
+
   const bySha = useMemo(() => {
     const map = new Map<string, CommitMeta>();
     for (const commit of commits) map.set(commit.sha, commit);
     return map;
   }, [commits]);
 
-  const visible = rows.slice(0, MAX_ROWS);
-  const width = graphWidth(maxLane);
-  const height = visible.length * ROW_HEIGHT;
+  const top = start * ROW_HEIGHT;
+  const height = (end - start) * ROW_HEIGHT;
 
   return (
-    <div className="graph">
-      <div className="graph__scroll">
-        <svg
-          className="graph__svg"
-          width={width}
-          height={height}
-          viewBox={`0 0 ${width} ${height}`}
-          role="presentation"
-        >
-          {/*
-            線を先に全部描いてからノードを置く。ノードが線に隠れないように。
+    // 列の幅で切る。SVG 自体は全レーンぶんの幅を持ったままにして、列を広げれば見える。
+    <div className="graph__clip" style={{ top, width: columnWidth, height }}>
+    <svg
+      className="graph__svg"
+      width={width}
+      height={height}
+      // 行番号そのままの座標で描けるよう、窓の位置を viewBox でずらす。
+      viewBox={`0 ${top} ${width} ${height}`}
+      role="presentation"
+      aria-hidden="true"
+    >
+      <g className="graph__edges">
+        {paths.map((path) => (
+          // 色は「その辺が走るレーン」に合わせる。合流でも枝の色が保たれる。
+          <path key={path.key} className="graph__line" d={path.d} stroke={laneColor(path.lane)} />
+        ))}
+      </g>
 
-            **描くのは辺だけ。`row.passing` は使わない。** 素通りするレーンは必ず
-            「上の行のノードから下の行の親まで」の辺に覆われている（実データ 2,000 行で確認）。
-            重ねて縦線を引くと、辺が曲がって別レーンへ移った後にも縦線が残り、
-            **どこにも繋がらない線の切れ端**になる。
-          */}
-          <g className="graph__edges">
-            {visible.map((row, index) => (
-              <g key={row.sha}>
-                {row.edges.map((edge, nth) => {
-                  const target = rowIndex.get(edge.parentSha);
-                  // **親が表示範囲より下でも線は引く。** 描かずに落とすと、画面の途中で
-                  // 線が切れて終わる（実データで先頭 400 行のうち 3 本がこれになった）。
-                  // 下端まで引いて viewBox で切り、続いていることを見せる。
-                  const below = target === undefined || target >= visible.length;
-                  return (
-                    <path
-                      key={nth}
-                      className="graph__line"
-                      d={
-                        below
-                          ? edgePath(edge, index, visible.length, edge.toLane)
-                          : edgePath(edge, index, target, visible[target].lane)
-                      }
-                      // 色は「その辺が走るレーン」に合わせる。合流でも枝の色が保たれる。
-                      stroke={laneColor(edge.toLane)}
-                    />
-                  );
-                })}
-              </g>
-            ))}
-          </g>
-
-          <g className="graph__nodes">
-            {visible.map((row, index) => {
-              const commit = bySha.get(row.sha);
-              const merge = (commit?.parents.length ?? 0) > 1;
-              const color = laneColor(row.lane);
-              return (
-                <g
-                  key={row.sha}
-                  className="graph__node"
-                  transform={`translate(${laneX(row.lane)} ${rowY(index)})`}
-                  onClick={() => onSelect(row.sha)}
-                >
-                  {row.sha === headSha && (
-                    <circle className="graph__ring" r={RING_RADIUS} stroke={color} />
-                  )}
-                  {row.sha === selectedSha && (
-                    <circle className="graph__selected" r={RING_RADIUS} fill={color} />
-                  )}
-                  <circle
-                    className={merge ? "graph__dot graph__dot--merge" : "graph__dot"}
-                    r={NODE_RADIUS}
-                    stroke={color}
-                    fill={merge ? "var(--graph-node-fill)" : color}
-                  />
-                  {/* 当たり判定。点が小さすぎて掴めないため行全体を受ける。 */}
-                  <rect
-                    className="graph__hit"
-                    x={-laneX(row.lane)}
-                    y={-ROW_HEIGHT / 2}
-                    width={width}
-                    height={ROW_HEIGHT}
-                  >
-                    <title>{`${commit?.shortSha ?? ""} ${commit?.subject ?? ""}`}</title>
-                  </rect>
-                </g>
-              );
-            })}
-          </g>
-        </svg>
-      </div>
-
-      {rows.length > visible.length && (
-        <p className="graph__note">{ja.graph.truncated(visible.length, rows.length)}</p>
-      )}
+      <g className="graph__nodes">
+        {rows.slice(start, end).map((row, offset) => {
+          const index = start + offset;
+          const commit = bySha.get(row.sha);
+          const merge = (commit?.parents.length ?? 0) > 1;
+          const color = laneColor(row.lane);
+          return (
+            <g key={row.sha} transform={`translate(${laneX(row.lane)} ${rowY(index)})`}>
+              {row.sha === selectedSha && (
+                <circle className="graph__selected" r={RING_RADIUS} fill={color} />
+              )}
+              {row.sha === headSha && (
+                <circle className="graph__ring" r={RING_RADIUS} stroke={color} />
+              )}
+              <circle
+                className="graph__dot"
+                r={NODE_RADIUS}
+                stroke={color}
+                fill={merge ? "var(--graph-node-fill)" : color}
+              />
+            </g>
+          );
+        })}
+      </g>
+    </svg>
     </div>
   );
+}
+
+/**
+ * SHA の行番号。見つからなければ -1。
+ *
+ * 呼び出しごとに `Map` を作ると窓を動かすたびに数万件を積み直すことになるので、
+ * レイアウトに 1 つだけ持たせて使い回す。
+ */
+const indexes = new WeakMap<GraphRow[], Map<string, number>>();
+
+function indexOf(rows: GraphRow[], sha: string): number {
+  let index = indexes.get(rows);
+  if (index === undefined) {
+    index = new Map<string, number>();
+    rows.forEach((row, i) => index?.set(row.sha, i));
+    indexes.set(rows, index);
+  }
+  return index.get(sha) ?? -1;
 }

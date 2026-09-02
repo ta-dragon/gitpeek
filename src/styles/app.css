@@ -950,3 +950,249 @@ body {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ---------- コミットリスト（docs/DESIGN.md §6.3） ---------- */
+
+.commits {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+
+.commits__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.commits__jump,
+.commits__order {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.commits__jump .input {
+  width: 220px;
+  font-family: var(--font-mono);
+}
+
+.commits__missed {
+  color: var(--danger);
+}
+
+.commits__note,
+.commits__count {
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* 列見出し。左のグラフ列ぶんは padding で空ける。 */
+.commits__head {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.commits__col {
+  position: relative;
+  flex: none;
+  padding: 4px 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 列幅のドラッグ取っ手。掴みやすいよう見た目より広く取る。 */
+.commits__grip {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.commits__grip:hover {
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+.commits__body {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.commits__scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* レーン数に上限が無いので横スクロールも許す（DESIGN.md §5.1-4）。 */
+  overflow: auto;
+}
+
+.commits__inner {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+}
+
+/* 仮想スクロールの 1 行。位置は transform で与える。 */
+.commits__row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+.crow {
+  display: flex;
+  align-items: center;
+  height: var(--row-height);
+  cursor: default;
+}
+
+.crow:hover {
+  background: var(--bg-hover);
+}
+
+.crow--selected,
+.crow--selected:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+/* グラフの線が通る場所。行側は空けるだけ。 */
+.crow__graph {
+  flex: none;
+}
+
+.crow__subject,
+.crow__author,
+.crow__date,
+.crow__sha {
+  flex: none;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.crow__subject {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.crow__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crow__author,
+.crow__date {
+  color: var(--text-dim);
+}
+
+.crow__sha {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+
+/* ---------- ref チップ ---------- */
+
+.chips {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.chip {
+  flex: none;
+  max-width: 200px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chip--local {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.chip--remote {
+  color: var(--text-dim);
+}
+
+.chip--tag {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+/* HEAD が乗っているブランチと detached HEAD。 */
+.chip--head {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.chip--more {
+  color: var(--text-faint);
+}
+
+/* ---------- スクロールバーの ref マーカー（DESIGN.md §5.3） ---------- */
+
+.refmarks {
+  position: relative;
+  flex: none;
+  width: 12px;
+  border-left: 1px solid var(--border);
+  background: var(--bg-inset);
+}
+
+.refmarks__tip,
+.refmarks__tag {
+  position: absolute;
+  left: 2px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+
+/* ブランチ先端はレーン色の短い線。 */
+.refmarks__tip {
+  width: 8px;
+  height: 2px;
+}
+
+/* タグは小さな菱形。 */
+.refmarks__tag {
+  width: 5px;
+  height: 5px;
+  margin-left: 1px;
+  transform: rotate(45deg);
+}
+
+/* 中央下。T-11（コミット詳細と差分）が入るまでの空き。 */
+.pending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-inset);
+  color: var(--text-faint);
+}

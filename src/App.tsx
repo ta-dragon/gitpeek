@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { CommandLogPanel } from "./components/commandlog/CommandLogPanel";
-import { CommitGraph } from "./components/graph/CommitGraph";
+import { CommitList } from "./components/commits/CommitList";
 import { CommandPalette } from "./components/common/CommandPalette";
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
@@ -18,8 +18,8 @@ import {
   detectGit,
   isGitUsable,
   MIN_VERSION_FALLBACK,
+  type ColumnWidths,
   type GitStatus,
-  type GraphOrder,
   type LoadPhase,
   type RepositoryEntry,
 } from "./lib/ipc";
@@ -28,7 +28,13 @@ import { useRepositories } from "./store/repositories";
 import { dismissSettingsNotice, initSettings, useSettings } from "./store/settings";
 import * as snapshots from "./store/snapshot";
 import { useSnapshot } from "./store/snapshot";
-import { initUiState, updateUiState, useUiState } from "./store/uiState";
+import {
+  DEFAULT_REPOSITORY_UI_STATE,
+  initUiState,
+  updateRepositoryUiState,
+  updateUiState,
+  useUiState,
+} from "./store/uiState";
 
 /**
  * 進捗バーを出し始めるまでの時間。
@@ -260,42 +266,93 @@ export default function App() {
 }
 
 /**
- * 選択中リポジトリの素性と、読み込んだ履歴の要約。
- * コミットグラフは Phase 2 でここに入る。
+ * 選択中リポジトリの中身。
+ *
+ * 履歴を読み終えていればコミットリストを、そうでなければ素性と読み込み状態の
+ * カードを出す。**下半分は T-11（コミット詳細と差分）まで空**。
  */
 function RepositoryPanel({ entry }: { entry: RepositoryEntry | null }) {
   const snapshot = useSnapshot();
+  const settings = useSettings();
+  const { state: uiState } = useUiState();
 
   if (entry === null) {
     return <p className="app__loading">{ja.repositories.empty}</p>;
   }
 
-  const probe = entry.probe;
+  const data = snapshot.data;
+  const layout = snapshot.layout;
+  const ready =
+    snapshot.repositoryId === entry.id &&
+    data !== null &&
+    layout !== null &&
+    data.commits.length > 0;
+
+  if (!ready || data === null || layout === null) {
+    const probe = entry.probe;
+    return (
+      <div className="ready">
+        <div className="ready__card">
+          <h1 className="ready__heading">{entry.name}</h1>
+          <dl className="ready__facts">
+            <dt>{ja.repositories.path}</dt>
+            <dd>{entry.path}</dd>
+            <dt>{ja.repositories.head}</dt>
+            <dd>{describeHead(probe)}</dd>
+          </dl>
+          {probe?.indexLockPresent === true && (
+            <p className="ready__note">{ja.repositories.indexLockDetail}</p>
+          )}
+        </div>
+
+        <HistoryCard entry={entry} snapshot={snapshot} />
+      </div>
+    );
+  }
+
+  const perRepository = uiState.perRepository[entry.id] ?? DEFAULT_REPOSITORY_UI_STATE;
+
+  const select = (sha: string) => {
+    updateRepositoryUiState(entry.id, (current) => ({ ...current, selectedCommit: sha }));
+  };
+  const setColumns = (columns: ColumnWidths) => {
+    updateRepositoryUiState(entry.id, (current) => ({ ...current, columnWidths: columns }));
+  };
+
   return (
-    <div className="ready">
-      <div className="ready__card">
-        <h1 className="ready__heading">{entry.name}</h1>
-        <dl className="ready__facts">
-          <dt>{ja.repositories.path}</dt>
-          <dd>{entry.path}</dd>
-          <dt>{ja.repositories.head}</dt>
-          <dd>{describeHead(probe)}</dd>
-        </dl>
-        {probe?.indexLockPresent === true && (
-          <p className="ready__note">{ja.repositories.indexLockDetail}</p>
-        )}
-      </div>
-
-      <HistoryCard entry={entry} snapshot={snapshot} />
-
-      <GraphCard entry={entry} snapshot={snapshot} />
-
-      <div className="ready__card ready__card--muted">
-        <h2 className="ready__heading">{ja.phase.title}</h2>
-        <p>{ja.phase.body}</p>
-        <p className="ready__note">{ja.phase.next}</p>
-      </div>
-    </div>
+    <SplitPane
+      direction="column"
+      unit="ratio"
+      size={uiState.paneRatios.graphDiffSplit}
+      min={0.25}
+      max={0.95}
+      onSizeChange={(ratio) =>
+        updateUiState((current) => ({
+          ...current,
+          paneRatios: { ...current.paneRatios, graphDiffSplit: ratio },
+        }))
+      }
+      first={
+        <CommitList
+          commits={data.commits}
+          layout={layout}
+          refs={data.refs}
+          head={data.head}
+          columns={perRepository.columnWidths}
+          dateFormat={settings.settings.ui.dateFormat}
+          selectedSha={perRepository.selectedCommit}
+          order={snapshot.order}
+          onSelect={select}
+          onColumnsChange={setColumns}
+          onOrderChange={(order) => void snapshots.setOrder(order)}
+        />
+      }
+      second={
+        <div className="pending">
+          <p>{ja.phase.diffPlaceholder}</p>
+        </div>
+      }
+    />
   );
 }
 
@@ -389,65 +446,6 @@ function HistoryCard({
       </dl>
       {data.commits.length === 0 && <p className="ready__note">{ja.snapshot.emptyRepository}</p>}
       {outOfGraph > 0 && <p className="ready__note">{ja.snapshot.outOfGraph(outOfGraph)}</p>}
-    </div>
-  );
-}
-
-/**
- * コミットグラフ。仮想スクロールとリスト列は T-07 で入る。
- *
- * ここで見るのは「幹が一直線に通っているか」「分岐と合流の線が繋がっているか」で、
- * それが Phase 2 の判定ゲート（T-08）の材料になる。
- */
-function GraphCard({
-  entry,
-  snapshot,
-}: {
-  entry: RepositoryEntry;
-  snapshot: ReturnType<typeof useSnapshot>;
-}) {
-  const [selected, setSelected] = useState<string | null>(null);
-
-  if (snapshot.repositoryId !== entry.id) return null;
-  if (snapshot.loading || snapshot.data === null) return null;
-  if (snapshot.data.commits.length === 0) return null;
-
-  const layout = snapshot.layout;
-  return (
-    <div className="ready__card">
-      <div className="ready__cardhead">
-        <h2 className="ready__heading">{ja.graph.title}</h2>
-        <div className="app__spacer" />
-        <label className="app__theme">
-          {ja.graph.order}
-          <select
-            className="select"
-            value={snapshot.order}
-            onChange={(event) => void snapshots.setOrder(event.target.value as GraphOrder)}
-          >
-            <option value="topo">{ja.graph.orderTopo}</option>
-            <option value="date">{ja.graph.orderDate}</option>
-          </select>
-        </label>
-      </div>
-
-      {snapshot.order === "date" && <p className="ready__note">{ja.graph.orderDateNote}</p>}
-
-      {layout === null ? (
-        <p className="ready__note">{ja.graph.unavailable}</p>
-      ) : (
-        <>
-          <CommitGraph
-            rows={layout.rows}
-            maxLane={layout.maxLane}
-            commits={snapshot.data.commits}
-            headSha={snapshot.data.head.sha}
-            selectedSha={selected}
-            onSelect={setSelected}
-          />
-          <p className="ready__note">{ja.graph.maxLane(layout.maxLane + 1)}</p>
-        </>
-      )}
     </div>
   );
 }

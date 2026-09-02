@@ -30,7 +30,7 @@ export const DEFAULT_REPOSITORY_UI_STATE: RepositoryUiState = {
   scrollOffset: 0,
   selectedFile: null,
   expandedTreeNodes: [],
-  columnWidths: { subject: 600, author: 140, date: 120, sha: 80 },
+  columnWidths: { graph: 200, subject: 600, author: 140, date: 120, sha: 80 },
 };
 
 type Snapshot = {

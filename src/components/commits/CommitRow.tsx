@@ -1,0 +1,77 @@
+/**
+ * コミットリストの 1 行（docs/DESIGN.md §6.3）。
+ *
+ * 列は `グラフ | subject + ref チップ | 作者名 | 日時 | 短縮 SHA`。
+ * **グラフ列はここでは描かない**（1 枚の SVG をリストの上に重ねている）。
+ * ここが持つのはグラフ列ぶんの空きだけ。
+ *
+ * 行の高さは `graphPath.ts` の `ROW_HEIGHT` と一致していなければならない。
+ * ずれるとノードと行がずれる。
+ */
+import { memo } from "react";
+
+import { ja } from "../../i18n/ja";
+import type { ColumnWidths, RefEntry, UiSettings } from "../../lib/ipc";
+import { absoluteTimeDetailed, absoluteTime, relativeTime } from "../../lib/relativeTime";
+import type { CommitMeta } from "../../lib/ipc";
+import { RefChips } from "./RefChips";
+
+type Props = {
+  commit: CommitMeta;
+  refs: RefEntry[];
+  headBranch: string | null;
+  detachedHead: boolean;
+  selected: boolean;
+  columns: ColumnWidths;
+  dateFormat: UiSettings["dateFormat"];
+  /** グラフ列の幅。行の左端に空ける。 */
+  graphWidth: number;
+  onSelect: (sha: string) => void;
+};
+
+export const CommitRow = memo(function CommitRow({
+  commit,
+  refs,
+  headBranch,
+  detachedHead,
+  selected,
+  columns,
+  dateFormat,
+  graphWidth,
+  onSelect,
+}: Props) {
+  const absolute = absoluteTimeDetailed(commit.commitTime);
+
+  return (
+    <div
+      className={`crow${selected ? " crow--selected" : ""}`}
+      onClick={() => onSelect(commit.sha)}
+      role="row"
+    >
+      <div className="crow__graph" style={{ width: graphWidth }} />
+
+      <div className="crow__subject" style={{ width: columns.subject }}>
+        <RefChips refs={refs} headBranch={headBranch} detachedHead={detachedHead} />
+        <span className="crow__text" title={commit.subject}>
+          {commit.subject === "" ? ja.commits.emptySubject : commit.subject}
+        </span>
+      </div>
+
+      {/* 作者は名前のみ。アバターは出さない（外部通信禁止 — CLAUDE.md §1）。 */}
+      <div className="crow__author" style={{ width: columns.author }} title={commit.authorEmail}>
+        {commit.authorName}
+      </div>
+
+      <div className="crow__date" style={{ width: columns.date }} title={absolute}>
+        {dateFormat === "relative"
+          ? relativeTime(commit.commitTime)
+          : absoluteTime(commit.commitTime)}
+      </div>
+
+      {/* 短縮 SHA は %h をそのまま使う。フロントで切り詰めない。 */}
+      <div className="crow__sha" style={{ width: columns.sha }} title={commit.sha}>
+        {commit.shortSha}
+      </div>
+    </div>
+  );
+});

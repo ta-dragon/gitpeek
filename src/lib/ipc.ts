@@ -346,6 +346,8 @@ export type PaneRatios = {
 };
 
 export type ColumnWidths = {
+  /** グラフ列。レーン数に上限が無いので、ここを引っ張って合わせる。 */
+  graph: number;
   subject: number;
   author: number;
   date: number;

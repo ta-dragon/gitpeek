@@ -93,6 +93,9 @@ pub struct RepositoryUiState {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct ColumnWidths {
+    /// グラフ列。レーン数に上限が無いので、狭いリポジトリでも広いリポジトリでも
+    /// ここを引っ張って合わせる（docs/DESIGN.md §5.1-4）。
+    pub graph: f64,
     pub subject: f64,
     pub author: f64,
     pub date: f64,
@@ -102,6 +105,7 @@ pub struct ColumnWidths {
 impl Default for ColumnWidths {
     fn default() -> Self {
         Self {
+            graph: 200.0,
             subject: 600.0,
             author: 140.0,
             date: 120.0,

@@ -124,7 +124,10 @@ graph LR
 | 新規 | `src/components/commits/ScrollbarRefMarkers.tsx` | スクロールバー上のマーカー |
 | 新規 | `src/lib/relativeTime.ts` + `.test.ts` | 相対日時（純関数） |
 | 新規 | `src/hooks/useCommitNavigation.ts` | キーボード操作 |
+| 変更 | `src/components/graph/CommitGraph.tsx` | 窓の範囲だけを描く形に作り替え |
+| 変更 | `src-tauri/src/store/state.rs`, `src/lib/ipc.ts`, `src/store/uiState.ts` | `ColumnWidths.graph` |
 | 変更 | `src/App.tsx` | 中央を上下分割（下は T-11 まで空） |
+| 変更 | `src/i18n/ja.ts`, `src/styles/app.css`, `src/styles/graph.css` | 文言と見た目 |
 | 変更 | `package.json` | `@tanstack/react-virtual` |
 
 **実装内容**
@@ -159,6 +162,24 @@ graph LR
 - 座標の定数は `src/lib/graphPath.ts`（`ROW_HEIGHT` / `LANE_WIDTH` / `LEFT_MARGIN`）。
   行高はここと `--row-height` の両方にあるので、変えるなら両方直す。
 
+**着手時の突き合わせ（2026-09-03 実装）**
+
+- **グラフを「列」にした（`ColumnWidths.graph`、既定 200px）。** レーン数に上限が無いので
+  全レーンぶんの幅を常に空けると、onyx（49 レーン＝712px）では本文が画面外へ押し出された。
+  見出しの取っ手で広げれば全レーン見える。`state.json` は `#[serde(default)]` なので
+  既存のファイルはそのまま読める。
+- **`CommitGraph` を窓の範囲だけ描く形に作り替えた。** `MAX_ROWS` の仮の蓋と
+  `.graph__scroll` の `max-height` は外した。SVG はリストと同じスクロールコンテナに
+  絶対配置し、`viewBox` を窓の位置までずらして**行番号そのままの座標**で描く。
+- **窓を跨ぐ辺は全行走査で拾っている。** 20,285 コミットの末尾で 1 回 0.45ms（実測）。
+  索引を作るまでもないので作っていない。
+- **スクロールバーの ref マーカーは束ねる。** onyx は ref が 3,790 個あり、そのまま置くと
+  12px の帯が塗り潰れる。300 分割して 1 つずつに間引き、ブランチ先端をタグより優先する。
+- **選択コミットは `state.json` の `selectedCommit` をそのまま状態にした。** 別に
+  `useState` を持つと、リポジトリを切り替えたときに前の選択が残る。
+- **`Enter` で差分ペインへフォーカス は入れていない**（差分ペインが T-11 だから）。
+  `Alt+↑` / `Alt+↓`（ファイル移動）も同じ理由で T-11 以降。
+
 **制約**
 
 - 表示文言は `src/i18n/ja.ts`、色はテーマトークン経由（CLAUDE.md §6）
@@ -174,7 +195,8 @@ graph LR
 - ▸目視: グラフ列とリスト列がずれずに同期している
 - ▸目視: `j` / `k` / `Home` / `End` / `Ctrl+H` / `Alt+←→` が効く
 - ▸目視: スクロールバーに ref マーカーが出る
-- ▸目視: 列幅を変えて再起動すると保持されている
+- ▸目視: 列幅（グラフ列を含む）を変えて再起動すると保持されている
+- ▸目視: SHA を貼るとその行へ飛ぶ
 
 **非スコープ**
 

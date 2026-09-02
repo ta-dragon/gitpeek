@@ -152,6 +152,26 @@ export const ja = {
     ready: "git を検出しました",
   },
 
+  commits: {
+    graph: "グラフ",
+    subject: "メッセージ",
+    author: "作者",
+    date: "日時",
+    sha: "SHA",
+    emptySubject: "（メッセージなし）",
+    // detached HEAD の行に付ける印。ブランチ名が無い状態。
+    detachedHead: "HEAD",
+    moreRefs: (n: number) => `+${n}`,
+    total: (n: number) => `${n.toLocaleString()} 件`,
+    jumpLabel: "SHA へ移動",
+    jumpPlaceholder: "SHA を貼り付け（前方一致）",
+    jumpNotFound: "見つかりません",
+    // Alt+← / Alt+→ で親・子が複数あるときの選択メニュー。
+    parent: "親",
+    child: "子",
+    empty: "コミットがありません。",
+  },
+
   graph: {
     title: "コミットグラフ",
     // 仮想スクロールが入るまでの仮の蓋（T-07 で外す）。
@@ -167,9 +187,11 @@ export const ja = {
   },
 
   phase: {
-    title: "Phase 1 — リポジトリ管理",
-    body: "リポジトリの登録・切替と、全コミットの一括取得までが動いています。コミットグラフと差分は Phase 2 以降でこの領域に入ります。",
+    title: "Phase 2 — コミットグラフ",
+    body: "リポジトリの登録・切替、全コミットの一括取得、レーン計算とグラフ描画までが動いています。",
     next: "実装フェーズは CLAUDE.md §9 を参照。",
+    // 中央下（差分ペイン）は T-11 まで空。
+    diffPlaceholder: "コミットを選ぶと、ここに詳細と差分が出ます（Phase 4）。",
   },
 
   commandLog: {
