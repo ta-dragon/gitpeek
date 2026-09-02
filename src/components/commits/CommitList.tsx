@@ -35,6 +35,14 @@ const MIN_COLUMN = 60;
 /** 画面外に余分に描く行数。速いスクロールで空白が見えないだけの厚みを持たせる。 */
 const OVERSCAN = 12;
 
+/**
+ * 列見出しの高さ。**app.css の `--head-height` と一致していなければならない。**
+ *
+ * 見出しは行と同じスクロールコンテナの中にいる（外に出すと横スクロールでずれる）ので、
+ * 行より手前にこのぶんの領域がある。仮想スクロールにも `scrollMargin` として教える。
+ */
+const HEAD_HEIGHT = 26;
+
 type Props = {
   commits: CommitMeta[];
   layout: LaneLayout;
@@ -71,6 +79,8 @@ export function CommitList({
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: OVERSCAN,
+    // 行の手前に見出しがあるぶん。これが無いと行番号と位置が 1 行ぶんずれる。
+    scrollMargin: HEAD_HEIGHT,
   });
 
   const items = virtualizer.getVirtualItems();
@@ -91,10 +101,22 @@ export function CommitList({
 
   const refsBySha = useMemo(() => groupRefsBySha(refs), [refs]);
 
-  const reveal = useCallback(
-    (row: number) => virtualizer.scrollToIndex(row, { align: "auto" }),
-    [virtualizer],
-  );
+  /**
+   * その行が見えるところまでスクロールする。
+   *
+   * `scrollToIndex` を使わないのは、上端に寄せたときに **貼り付いた見出しの下に
+   * 潜ってしまう**ため。見出しの高さを引いた範囲を可視域として自分で数える。
+   */
+  const reveal = useCallback((row: number) => {
+    const element = scrollRef.current;
+    if (element === null) return;
+    const top = HEAD_HEIGHT + row * ROW_HEIGHT;
+    if (top - HEAD_HEIGHT < element.scrollTop) {
+      element.scrollTop = top - HEAD_HEIGHT;
+    } else if (top + ROW_HEIGHT > element.scrollTop + element.clientHeight) {
+      element.scrollTop = top + ROW_HEIGHT - element.clientHeight;
+    }
+  }, []);
 
   const anchorFor = useCallback(
     (row: number) => {
@@ -103,7 +125,7 @@ export function CommitList({
       const box = element.getBoundingClientRect();
       return {
         x: box.left + 120,
-        y: box.top + row * ROW_HEIGHT - element.scrollTop + ROW_HEIGHT,
+        y: box.top + HEAD_HEIGHT + row * ROW_HEIGHT - element.scrollTop + ROW_HEIGHT,
       };
     },
     [],
@@ -196,16 +218,21 @@ export function CommitList({
         <span className="commits__count">{ja.commits.total(commits.length)}</span>
       </div>
 
-      <div className="commits__head">
-        <Header label={ja.commits.graph} width={width} onResize={resize("graph")} />
-        <Header label={ja.commits.subject} width={columns.subject} onResize={resize("subject")} />
-        <Header label={ja.commits.author} width={columns.author} onResize={resize("author")} />
-        <Header label={ja.commits.date} width={columns.date} onResize={resize("date")} />
-        <Header label={ja.commits.sha} width={columns.sha} onResize={resize("sha")} />
-      </div>
-
       <div className="commits__body">
         <div className="commits__scroll" ref={scrollRef}>
+          {/* 見出しは行と同じ横スクロールに乗せる。縦は sticky で貼り付く。 */}
+          <div className="commits__head">
+            <Header label={ja.commits.graph} width={width} onResize={resize("graph")} />
+            <Header
+              label={ja.commits.subject}
+              width={columns.subject}
+              onResize={resize("subject")}
+            />
+            <Header label={ja.commits.author} width={columns.author} onResize={resize("author")} />
+            <Header label={ja.commits.date} width={columns.date} onResize={resize("date")} />
+            <Header label={ja.commits.sha} width={columns.sha} onResize={resize("sha")} />
+          </div>
+
           <div className="commits__inner" style={{ height: virtualizer.getTotalSize() }}>
             {/* 行の背後に敷く。行と同じ座標系なので、ずれようがない。 */}
             <CommitGraph
@@ -225,7 +252,8 @@ export function CommitList({
                 <div
                   key={commit.sha}
                   className="commits__row"
-                  style={{ transform: `translateY(${item.start}px)` }}
+                  // `item.start` は scrollMargin 込み。行はその内側に置くので引く。
+                  style={{ transform: `translateY(${item.start - HEAD_HEIGHT}px)` }}
                 >
                   <CommitRow
                     commit={commit}

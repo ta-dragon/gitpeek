@@ -958,20 +958,33 @@ body {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /*
+   * **ここで切る。** 道具立てや列見出しの最小幅がそのまま外へ伝わると、
+   * 親の `.split__pane`（overflow: auto）に 2 本目の横スクロールバーが生え、
+   * そちらを動かすと見出しだけがずれる。scroll container にしておくと
+   * flex の `min-width: auto` も 0 になり、幅を親に押し付けなくなる。
+   */
+  overflow: hidden;
   background: var(--bg-panel);
 }
 
 .commits__toolbar {
   display: flex;
+  /* 縦は縮めない。折り返して 2 段になったときに中身がはみ出す。 */
+  flex: none;
   align-items: center;
-  gap: 12px;
+  /* 窓が狭いときは折り返す。1 行に押し込むと並び順や件数が黙って消える。 */
+  flex-wrap: wrap;
+  gap: 6px 12px;
   padding: 6px 10px;
+  overflow: hidden;
   border-bottom: 1px solid var(--border);
 }
 
 .commits__jump,
 .commits__order {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   color: var(--text-dim);
@@ -979,7 +992,10 @@ body {
 }
 
 .commits__jump .input {
-  width: 220px;
+  /* 窓が狭いときは縮ませる（`width` 指定のままだと min-width: auto が効いて縮まない）。 */
+  flex: 1 1 220px;
+  width: auto;
+  min-width: 60px;
   font-family: var(--font-mono);
 }
 
@@ -993,9 +1009,22 @@ body {
   white-space: nowrap;
 }
 
-/* 列見出し。左のグラフ列ぶんは padding で空ける。 */
+/*
+ * 列見出し。**行と同じスクロールコンテナの中に置く。**
+ * 外に出すと横スクロールしたときに行とずれる（列幅は同じでも動かない）。
+ * 縦だけ sticky で貼り付ける。高さは `--head-height` で固定し、
+ * CommitList.tsx の `HEAD_HEIGHT`（仮想スクロールの scrollMargin）と一致させる。
+ */
 .commits__head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+  height: var(--head-height);
   border-bottom: 1px solid var(--border);
   background: var(--bg-inset);
   color: var(--text-dim);
@@ -1005,7 +1034,10 @@ body {
 .commits__col {
   position: relative;
   flex: none;
-  padding: 4px 8px;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
   overflow: hidden;
   white-space: nowrap;
 }
@@ -1034,6 +1066,7 @@ body {
 
 .commits__scroll {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
   /* レーン数に上限が無いので横スクロールも許す（DESIGN.md §5.1-4）。 */
   overflow: auto;
@@ -1045,12 +1078,17 @@ body {
   min-width: 100%;
 }
 
-/* 仮想スクロールの 1 行。位置は transform で与える。 */
+/*
+ * 仮想スクロールの 1 行。位置は transform で与える。
+ * 幅は列の合計（`max-content`）まで伸ばす。viewport 幅で止めると、
+ * 横スクロールした先でホバーと選択の帯が途切れる。
+ */
 .commits__row {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
 }
 
 .crow {
@@ -1157,6 +1195,8 @@ body {
 .refmarks {
   position: relative;
   flex: none;
+  /* 見出しは動かないので、マーカーの帯もそのぶん下から始める。 */
+  margin-top: var(--head-height);
   width: 12px;
   border-left: 1px solid var(--border);
   background: var(--bg-inset);

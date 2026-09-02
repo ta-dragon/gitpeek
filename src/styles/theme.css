@@ -52,6 +52,8 @@
 
   --radius: 6px;
   --row-height: 28px;
+  /* 列見出しの高さ。CommitList.tsx の HEAD_HEIGHT と必ず一致させること。 */
+  --head-height: 26px;
 }
 
 @media (prefers-color-scheme: dark) {
