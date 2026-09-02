@@ -45,9 +45,12 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 
 | 項目 | 内容 |
 |---|---|
-| 直前に完了 | T-04 コミットメタ情報の全件取得とパース |
-| 次にやる | **T-05 レーン割り当てアルゴリズム** |
+| 直前に完了 | T-05 レーン割り当てアルゴリズム |
+| 次にやる | **T-06 レーン配列 → SVG パス生成と描線** |
 | 未解決の判断事項 | なし |
+
+**T-05 の受け入れ条件はすべて ▸コマンド で、目視項目は無い。** グラフの見た目の判定は
+T-06 の目視と T-08（判定ゲート）で行う。T-06 の本文に「T-05 からの申し送り」を足してある。
 
 **100 万コミット級の正式対応は v1.1 以降に送った**（DESIGN.md §1.1, §4.1 / 下の「v1.1」表）。
 v1 では非対象のままだが、恒久的な非対象ではなくなった。
@@ -100,170 +103,6 @@ graph LR
 ---
 
 # Phase 2 — グラフ（最初の判定ポイント）
-
-## - [ ] T-05 [Phase 2] レーン割り当てアルゴリズム
-
-**目的**: コミットの DAG から描画用のレーン配列を作る。**このアプリの心臓部。**
-
-**参照**: DESIGN.md §5.1 / CLAUDE.md §3
-
-**依存**: T-04
-
-**作成・変更するファイル**
-
-| 種別 | パス | 内容 |
-|---|---|---|
-| 新規 | `src-tauri/src/graph/mod.rs` | モジュール定義とスナップショットからの入口 |
-| 新規 | `src-tauri/src/graph/lane.rs` | レーン割り当て本体とテスト |
-| 新規 | `src-tauri/src/graph/order.rs` | topo / date の並び順 |
-| 新規 | `src-tauri/tests/lanes.rs` | 生成リポジトリに対する結合テスト |
-| 変更 | `src-tauri/src/lib.rs` | コマンド登録 |
-| 変更 | `src/lib/ipc.ts` | 型と invoke ラッパ |
-
-**実装内容**
-
-```rust
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GraphRow {
-    pub sha: String,
-    pub lane: u32,                  // このコミットのノードが乗るレーン
-    pub passing: Vec<u32>,          // この行を素通りする他のレーンの番号
-    pub edges: Vec<Edge>,           // この行から親へ伸びる辺
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Edge {
-    pub from_lane: u32,
-    pub to_lane: u32,
-    pub parent_sha: String,
-    pub is_merge_second_parent: bool,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LaneLayout { pub rows: Vec<GraphRow>, pub max_lane: u32 }
-
-pub const RESERVE_ROWS: usize = 2;   // 解放直後にレーンを再利用しない行数
-
-// default_branch は ref 名なので、まず SHA に直す（下の「T-04 からの申し送り」）。
-pub fn trunk_start<'a>(refs: &'a [RefEntry], default_branch: Option<&str>) -> Option<&'a str>;
-pub fn trunk_chain(commits: &[CommitMeta], start_sha: Option<&str>) -> HashSet<String>;
-pub fn assign_lanes(commits: &[CommitMeta], trunk: &HashSet<String>) -> LaneLayout;
-
-// スナップショット 1 つ分の入口。graph/mod.rs 側。
-pub fn layout(snapshot: &RepositorySnapshot, order: GraphOrder) -> LaneLayout;
-```
-
-**色は返さない。** レーン番号だけを返し、色の決定はフロント側の純関数（T-06）が行う。
-
-アルゴリズム（`commits` は topo-order 済みで、親が必ず後ろに来ることを前提とする）:
-
-```
-active: Vec<Option<String>>       # レーン番号 -> そのレーンが待っている親 SHA
-freed:  Vec<(lane, freed_at_row)> # 直近に解放されたレーン
-
-trunk_chain(commits, start_sha):
-    start_sha から第一親だけを辿って集合を作る
-    start_sha が無い / グラフ外を指すときは commits[0] を起点にする
-
-allocate_lane(row_index):
-    # lane 0 は幹の予約。trunk 以外には決して割り当てない
-    for L in 1.. :
-        if active[L] is None
-           and not (freed に (L, r) があり row_index - r < RESERVE_ROWS):
-            return L
-    active を 1 つ伸ばして末尾のレーン番号を返す
-
-for (row_index, commit) in commits.enumerate():
-    # 1. このコミットが乗るレーンを決める
-    if commit.sha ∈ trunk:
-        lane = 0
-    else if ∃ L: active[L] == Some(commit.sha):
-        lane = min(そのような L)          # 子が予約していたレーンを引き継ぐ
-    else:
-        lane = allocate_lane(row_index)   # ブランチ先端
-
-    # 2. 同じコミットを待っていた他のレーンを解放する（合流）
-    for L where active[L] == Some(commit.sha) and L != lane:
-        active[L] = None
-        freed.push((L, row_index))
-
-    # 3. passing を記録する（このコミットのレーンと、解放したレーンを除いた残り）
-    passing = [L for L in 0..active.len() if active[L].is_some() and L != lane]
-
-    # 4. 親へレーンを割り当てる
-    for (i, parent) in commit.parents.enumerate():
-        if i == 0:
-            active[lane] = Some(parent)                 # 第一親は同じレーンを継承
-            edges.push(Edge { from_lane: lane, to_lane: lane, parent, false })
-        else:
-            p_lane = allocate_lane(row_index)           # 第2親以降は右に新レーンを起こす
-            active[p_lane] = Some(parent)
-            edges.push(Edge { from_lane: lane, to_lane: p_lane, parent, true })
-
-    if commit.parents.is_empty():                       # ルートコミット
-        active[lane] = None
-        freed.push((lane, row_index))
-```
-
-**注意**: 第 2 親が trunk 上のコミットである場合（幹へ戻るマージ）、`allocate_lane` は lane 0 を
-返さないため、幹は必ず 1 本のまま保たれる。合流は「その親の行に到達したとき」に手順 2 で解放される。
-
-**Tauri コマンド**
-
-```
-compute_lane_layout(repositoryId: String, order: GraphOrder) -> Result<LaneLayout, String>
-```
-
-`GraphOrder` は `"topo"` / `"date"` の 2 値（`graph/order.rs`）。
-
-**date-order は単純な日時ソートにしてはいけない。** rebase や amend、時計のずれで親の方が
-新しい日時を持つことがあり、そうなると `assign_lanes` の前提（親は必ず後ろ）が崩れて
-レーンが解放されずに漏れる。git の `--date-order` と同じく「子を全部出し終えた親から、
-日時の新しい順に出す」。
-
-可視 ref による絞り込み引数は T-09 で追加する。ここでは全コミットを対象にする。
-
-**T-04 からの申し送り（着手時に確認すること）**
-
-- **`RepositorySnapshot::default_branch` は SHA ではなく完全な ref 名**（`refs/heads/main`）。
-  当初の `trunk_chain(commits, default_branch_sha)` はそのままでは繋がらなかった。
-  **`trunk_start(refs, default_branch)` を足して ref 名から `target` を引く**形にし、
-  `trunk_chain` は SHA を受けるままにした（フィクスチャからテストしやすい）。
-- **幹が決まらないときは先頭コミットを起点にする。** detached ＋ main/master 無しだと
-  `default_branch` が `None` になる。lane 0 を空けたままにするとグラフ全体が 1 レーン右へ
-  ずれた上に左端が永久に空くので、**空けない**方を選んだ。topo-order の先頭はいずれかの
-  ref の先端なので、幹として不自然にならない。起点がグラフ外を指すときも同じ扱い。
-- **コミットの取得は `git::snapshot::load_cached` を再度呼べばよい。** ref の指紋が同じなら
-  `for-each-ref` 1 回で `Arc<RepositorySnapshot>` が返る（実測 131ms / 148 万コミット）。
-  `compute_lane_layout` のために別経路を作らないこと。
-- `commits` が topo-order で「親が必ず後ろに来る」ことは T-04 の結合テストで担保済み。
-
-**制約**（すべて CLAUDE.md §3）
-
-1. **lane 0 は幹に予約される。** trunk のコミットは必ず lane 0、trunk 以外は決して lane 0 を使わない
-2. レーン再利用は最小空きレーンだが、**解放直後の 1〜2 行は再利用を保留**する
-3. マージコミットの第 2 親は**右側に新レーンを起こす**
-4. **レーン数に上限を設けない**
-5. 増分レーン計算はしない。全件を一度で確定する
-
-**受け入れ条件**
-
-- ▸コマンド: `cargo test` — 次の DAG フィクスチャすべてで期待レーン配列と一致する
-  - 直線履歴 / 単純な分岐と合流 / 連続するマージ / オクトパスマージ（親 3 つ）/
-    ルートコミット複数 / 空入力 / 単一コミット
-- ▸コマンド: **trunk のコミットがすべて lane 0 である**ことを全フィクスチャで検証するテスト
-- ▸コマンド: **trunk 以外のコミットが lane 0 に乗らない**ことを検証するテスト
-- ▸コマンド: `scripts/make-test-repos.sh` の全リポジトリで `assign_lanes` が panic しない
-- ▸コマンド: `cargo clippy --all-targets -- -D warnings`
-
-**非スコープ**
-
-SVG 描画（T-06）／可視 ref による再計算（T-09）／美しさの判定（T-08）
-
----
 
 ## - [ ] T-06 [Phase 2] レーン配列 → SVG パス生成と描線
 
@@ -320,6 +159,21 @@ export function laneColor(lane: number): string;
 // vite.config.ts へ追加
 test: { environment: "node", include: ["src/**/*.test.ts"] }
 ```
+
+**T-05 からの申し送り（着手時に確認すること）**
+
+- **`GraphRow.passing` はこの行を素通りするレーンだけ。** 自分のレーンと、この行で合流して
+  解放されたレーンは入らない。合流の線は**子の行の `Edge` を親の行まで引く**ことで描くので、
+  passing に頼って引こうとすると二重に描かれる。
+- **`Edge.fromLane == toLane` が第一親**（垂直の直線）。`isMergeSecondParent` が立つ辺だけが
+  レーンをまたぐ。角丸ベジェが要るのはこちらだけ。
+- 辺の行き先の**行番号**は入っていない。`parentSha` から引くので、SHA → 行番号の `Map` を
+  1 度だけ作ること（行ごとに `findIndex` すると数万行で効く）。
+- **グラフ列の幅は `LEFT_MARGIN + (maxLane + 1) * LANE_WIDTH`。** `maxLane` は実際に使われた
+  最大のレーン番号（0 起点）なので +1 が要る。
+- `rows` は `RepositorySnapshot.commits` と**同数・同順**。date-order のときは両方が同じ順に
+  並ぶ（`compute_lane_layout` が並べ替えた側を返す）ので、行番号がそのまま添字になる。
+- **lane 0 は必ず幹**。`laneColor(0)` を無彩色固定にできるのはこの保証があるため。
 
 **制約**
 
@@ -499,6 +353,14 @@ pub fn all_branch_status(snapshot: &RepositorySnapshot) -> Vec<BranchStatus>;
   全 ref 分のビットセットを持つ実装はメモリが厳しいので採らない。
 - `compute_lane_layout` に `visibleRefs` 引数を追加し、可視 ref から
   `reachable_from` で集合を作ってコミットを絞ってから `assign_lanes` を呼ぶ。
+
+**T-05 からの申し送り（着手時に確認すること）**
+
+- `assign_lanes(commits, trunk)` は**スライスを受けるだけ**なので、絞った `Vec<CommitMeta>` を
+  作って渡せば再計算になる。`lane.rs` 側に絞り込みの知識を入れないこと。
+- **幹の ref を非表示にされた場合の扱いを決めること。** `trunk_start` は ref 名から SHA を
+  引くだけで可視性を見ない。現状は「起点がグラフ外なら先頭コミットを幹にする」に落ちるので、
+  絞った集合に幹が残っていなければ自動的に別の幹になる。これで良いかを判断する。
 
 **Tauri コマンド**
 
@@ -1175,3 +1037,4 @@ JSON パース失敗時に Markdown が表示され「構造化に失敗しま�
 | T-02 | 1 | リポジトリの登録・判定・フォルダスキャン ＋ テスト用リポジトリ生成 | `1f368b7` |
 | T-03 | 1 | リポジトリ一覧サイドバーと切替 ＋ 右クリック登録解除・D&D 並べ替え | `80189ea` |
 | T-04 | 1 | コミットメタ情報の全件取得とパース ＋ 読み込み進捗と大規模リポジトリの確認 | `c9aae9d` |
+| T-05 | 2 | レーン割り当てアルゴリズム ＋ topo / date の並び順 | `COMMITHASH` |

@@ -1,5 +1,6 @@
 pub mod commandlog;
 pub mod git;
+pub mod graph;
 pub mod model;
 mod redact;
 pub mod store;
@@ -15,6 +16,7 @@ use git::detect::GitStatus;
 use git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
 use git::repo::{RepositoryEntry, RepositoryProbe};
 use git::snapshot::SnapshotCache;
+use graph::{GraphOrder, LaneLayout};
 use model::RepositorySnapshot;
 
 /// 読み込みの途中経過をフロントへ送るイベント名。
@@ -242,6 +244,46 @@ async fn load_repository_snapshot(
     Ok(snapshot)
 }
 
+/// 描画用のレーンを確定する（docs/DESIGN.md §5.1 / CLAUDE.md §3）。
+///
+/// コミットは [`git::snapshot::load_cached`] から取る。ref の指紋が変わっていなければ
+/// `for-each-ref` 1 回で返るので、**レーンのために別経路で `git log` を呼ばない**。
+/// 並び順の切替も `git log` を再実行せず、メモリ上で並べ替えるだけ（§4.3）。
+///
+/// 可視 ref による絞り込みは T-09 で足す。ここでは全コミットを対象にする。
+#[tauri::command]
+async fn compute_lane_layout(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    order: GraphOrder,
+) -> Result<LaneLayout, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let cache = state.snapshots.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        let snapshot = git::snapshot::load_cached(
+            &EmittingLog::new(&handle, &log),
+            &program,
+            &path,
+            &cache,
+            &repository.id,
+            false,
+            &Reporting::silent(),
+        )?;
+        Ok(graph::layout(&snapshot, order))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// 登録済みリポジトリを素性付きで返す。パスが消えていれば `probe` は `null`。
 #[tauri::command]
 async fn list_repositories(
@@ -324,6 +366,7 @@ pub fn run() {
             remove_repository,
             list_repositories,
             load_repository_snapshot,
+            compute_lane_layout,
             load_settings,
             save_settings,
             load_ui_state,

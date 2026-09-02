@@ -187,6 +187,50 @@ export function loadRepositorySnapshot(
   });
 }
 
+/* ---------- レーン割り当て（`src-tauri/src/graph/lane.rs`）---------- */
+
+/** 表示順。topo が既定。date は「この表示では線が交差します」の注記を出す。 */
+export type GraphOrder = "topo" | "date";
+
+/** ある行から親へ伸びる線 1 本。 */
+export type GraphEdge = {
+  fromLane: number;
+  toLane: number;
+  parentSha: string;
+  /** 第一親以外（マージの右側）。オクトパスの 3 親目以降も true。 */
+  isMergeSecondParent: boolean;
+};
+
+/** 描画 1 行分。**色も座標も持たない**（決めるのは T-06 の純関数）。 */
+export type GraphRow = {
+  sha: string;
+  /** このコミットのノードが乗るレーン。lane 0 は幹に予約されている。 */
+  lane: number;
+  /** この行を素通りするレーン。縦線だけを引く。 */
+  passing: number[];
+  edges: GraphEdge[];
+};
+
+export type LaneLayout = {
+  /** `RepositorySnapshot.commits` と 1 対 1。並び順は `order` に従う。 */
+  rows: GraphRow[];
+  /** 実際に使われた最大のレーン番号。グラフ列の幅はこれで決まる。 */
+  maxLane: number;
+};
+
+/**
+ * 描画用のレーンを確定する。
+ *
+ * コミットは Rust 側のキャッシュから取るので、`loadRepositorySnapshot` の直後に
+ * 呼んでも `git log` は走らない。並び順の切替も再実行にはならない。
+ */
+export function computeLaneLayout(
+  repositoryId: string,
+  order: GraphOrder = "topo",
+): Promise<LaneLayout> {
+  return invoke<LaneLayout>("compute_lane_layout", { repositoryId, order });
+}
+
 /* ---------- settings.json（`src-tauri/src/store/settings.rs`）---------- */
 
 export type ThemePreference = "system" | "light" | "dark";
