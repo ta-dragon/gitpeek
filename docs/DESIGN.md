@@ -974,6 +974,18 @@ LLM プロファイルが未設定のまま AI レビューを押した場合は
 
 ---
 
+**アプリ側で手当てできない白画面が 1 つある。** フィルタリング系ソフトが WebView2 の
+ページに content script を差し込む場合、その問い合わせが返るまでページの評価が止まる。
+実測（AdGuard 8.0.5560.0）では `injections.adguard.org` への要求が 29 秒返らず、
+その間 `index.html` のインラインスクリプトすら動かなかった（HTML 自体は 33ms で届いていた）。
+**受け皿は「自分のコードが動き始めた後」しか守れない**ので、これは環境側で外すしかない
+（CLAUDE.md §10）。原因の切り分けには WebView2 のリモートデバッグが使える:
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` を付けて起動し、
+`http://127.0.0.1:9222/json` でページの状態を見て、CDP で
+`performance.getEntriesByType("resource")` を取る。
+
+---
+
 ## 14. テスト戦略
 
 ### 14.1 レーン割り当てアルゴリズム（必須）

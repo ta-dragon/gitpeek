@@ -193,5 +193,11 @@ GIT_SSH_COMMAND=ssh -o BatchMode=yes     # 無いとパスフレーズ待ちで�
   要求する）。ビルドが通らなくなったらまず `rustup update stable`。
 - 開発時の起動はリポジトリ直下の **`Givsoner.bat`**（ダブルクリック可）。中身は
   `npm run tauri dev` で、node_modules が無ければ先に `npm install` する。
+- **起動直後に数十秒ウィンドウが真っ白になったら、まずフィルタリング系ソフトを疑う。**
+  この環境の AdGuard は WebView2 のページに content script を差し込むため
+  `injections.adguard.org` へ問い合わせに行き、**それが 29 秒返らない間ページの評価が止まる**
+  （実測。HTML 自体は 33ms で届いている）。`index.html` の受け皿もこの間は動けないので、
+  アプリ側からは手当てできない。AdGuard のフィルタリング対象から `msedgewebview2.exe`
+  または `localhost` を外すこと。
 - 配布はポータブル zip のみ。**Tauri の bundler に zip ターゲットは無い**ので、
   `src-tauri/target/release/Givsoner.exe` を npm script で zip 化する。
