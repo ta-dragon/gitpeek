@@ -45,12 +45,14 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 
 | 項目 | 内容 |
 |---|---|
-| 直前に完了 | T-05 レーン割り当てアルゴリズム |
-| 次にやる | **T-06 レーン配列 → SVG パス生成と描線** |
-| 未解決の判断事項 | なし |
+| 直前に完了 | T-06 レーン配列 → SVG パス生成と描線 |
+| 次にやる | **T-07 コミットリストの仮想スクロールと列表示** |
+| 未解決の判断事項 | 第 2 親のレーン起こし方（下記） |
 
-**T-05 の受け入れ条件はすべて ▸コマンド で、目視項目は無い。** グラフの見た目の判定は
-T-06 の目視と T-08（判定ゲート）で行う。T-06 の本文に「T-05 からの申し送り」を足してある。
+**第 2 親のレーンを、同じ親を既に待っているレーンに合流させるか。** onyx（20,285 コミット）で
+maxLane が 49 まで伸びており、第 2 親の辺 597 本のうち 174 本が「既に同じ親を待っている
+レーンがあるのに新しく起こした」ものだった。合流させればレーン数はかなり減るが、
+CLAUDE.md §3-3「第 2 親は右側に新レーンを起こす」の改訂が要る。**T-08（判定ゲート）で判断する。**
 
 **100 万コミット級の正式対応は v1.1 以降に送った**（DESIGN.md §1.1, §4.1 / 下の「v1.1」表）。
 v1 では非対象のままだが、恒久的な非対象ではなくなった。
@@ -103,155 +105,6 @@ graph LR
 ---
 
 # Phase 2 — グラフ（最初の判定ポイント）
-
-## - [ ] T-06 [Phase 2] レーン配列 → SVG パス生成と描線
-
-**目的**: レーン配列を SVG のパス文字列に変換し、グラフを描く。純関数部分をテストで固める。
-
-**参照**: DESIGN.md §5.2 / CLAUDE.md §6
-
-**依存**: T-05
-
-**作成・変更するファイル**
-
-| 種別 | パス | 内容 |
-|---|---|---|
-| 新規 | `src/lib/graphPath.ts` | 純関数（テスト対象） |
-| 新規 | `src/lib/graphPath.test.ts` | Vitest |
-| 新規 | `src/components/graph/CommitGraph.tsx` | SVG 描画 |
-| 新規 | `src/styles/graph.css` | グラフの見た目 |
-| 変更 | `src/styles/theme.css` | `--graph-lane-*` の追加（ライト/ダーク別） |
-| 変更 | `src/store/snapshot.ts` | レーンの保持と並び順の切替 |
-| 変更 | `src/App.tsx`, `src/i18n/ja.ts`, `src/styles/app.css` | グラフの置き場所と文言 |
-| 変更 | `src/main.tsx` | `graph.css` の読み込み |
-| 変更 | `vite.config.ts` | Vitest 設定 |
-| 変更 | `package.json` | `vitest` devDependency、`"test": "vitest run"` |
-
-**実装内容**
-
-```ts
-export const ROW_HEIGHT = 28;
-export const LANE_WIDTH = 14;
-export const LEFT_MARGIN = 12;
-export const CORNER_RADIUS = 10;   // 8〜12px の範囲で調整可
-
-export type Edge = {
-  fromLane: number; toLane: number; parentSha: string; isMergeSecondParent: boolean;
-};
-export type GraphRow = { sha: string; lane: number; passing: number[]; edges: Edge[] };
-
-export function laneX(lane: number): number;
-export function rowY(rowIndex: number): number;
-/** グラフ列の幅。maxLane は 0 起点なので 1 本ぶん足りない。 */
-export function graphWidth(maxLane: number): number;
-/**
- * 行 rowIndex から行 targetRowIndex へ伸びる辺の SVG パス。
- * targetLane は**親のレーン**で、edge.toLane（途中を走るレーン）とは別物。
- */
-export function edgePath(
-  edge: Edge, rowIndex: number, targetRowIndex: number, targetLane: number,
-): string;
-/** この行を素通りするレーンの縦線。 */
-export function passingPath(lane: number, rowIndex: number): string;
-/** lane 0 は幹の固定色。それ以外は 8 色ローテーション。CSS 変数名を返す。 */
-export function laneColor(lane: number): string;
-/** SHA → 行番号。辺の行き先を引く。 */
-export function rowIndexBySha(rows: GraphRow[]): Map<string, number>;
-```
-
-- **描線**: 同一レーン内は垂直の直線。レーンをまたぐ辺は「垂直 → 半径 `CORNER_RADIUS` の角丸ベジェ
-  → 垂直」。直角エルボーや斜め直線にはしない。
-- **配色**: `laneColor(0)` は `var(--graph-lane-trunk)`（無彩色寄りの固定色）、
-  `laneColor(n)` は `var(--graph-lane-${(n - 1) % 8})`。パレットは彩度を抑え、
-  ライト / ダークで別定義する。
-- **ノード**: 通常 = 半径 4 の塗り円 / マージ = 半径 4 の中空円（stroke のみ）/
-  HEAD = 外側に半径 6 のリング / 選択中 = 半径 6 ＋ グロー。
-- グラフ列は横スクロール可能にする（レーン数に上限が無いため）。
-
-**Vitest 導入**
-
-```ts
-// vite.config.ts へ追加
-test: { environment: "node", include: ["src/**/*.test.ts"] }
-```
-
-**着手時の突き合わせ（2026-09-03 実装）**
-
-- **`edgePath` に `targetLane` を足した。** `Edge.toLane` は「その辺が途中を走るレーン」で、
-  **親のレーンではない**。枝の第一親は同じレーンを予約したまま親の行まで下り、そこで親が
-  lane 0 を取ってレーンが解放される（`lane.rs` の手順 2）。`toLane` の位置で描き終えると、
-  合流のたびに線とノードの間に隙間が空く。親のレーンは `rows[targetRowIndex].lane` で引ける。
-- **辺は最大 2 回曲がる。** 上（ノードを出てすぐ `toLane` へ移る）と下（親のノードの手前で
-  `targetLane` へ寄せる）。両方曲がるのは「幹から起こしたレーンが幹へ戻る」場合で、
-  行が詰まっているときは角丸を縮めて直線部分を捨てる。
-- **`passingPath` を足した。** 素通りするレーンの縦線は行の**上端から下端**まで引く。
-  ノードの中心から中心へ引くと、行の境目で線が途切れる。
-- **レーンの取得を `src/store/snapshot.ts` に入れた。** 履歴を読み終えた直後に
-  `compute_lane_layout` を呼んで `layout` として持つ。`git log` は走らない（Rust 側の
-  キャッシュから作られる）。レーン計算に失敗しても履歴の要約は出せるよう、`data` とは別に持つ。
-- **`CommitGraph` は先頭 `MAX_ROWS`(400) 行だけを描く。** 仮想スクロールは T-07 なので、
-  それまでの仮の蓋。数万行を素の SVG に流すと DOM が数十万ノードになる。
-  `.graph__scroll` の `max-height: 60vh` も同じ理由の仮置き。
-- **リスト列（subject / 作者 / 日時）は出していない**（T-07 の担当）。ノードのツールチップに
-  短縮 SHA と subject を入れて、どの行がどのコミットか追えるようにしてある。
-
-**目視で出た不具合と修正（2026-09-03）**
-
-実リポジトリ（onyx 20,285 コミット / AerialSoldierMaker）のレーンを JSON に吐いて原因を特定した。
-**目視で「なんとなく変」としか分からない類なので、実データを吐いて数えるのが早い**
-（DESIGN.md §14.1 が言っているのはこれ）。
-
-- **線が飛び出す（弧が右へ跳ねてすぐ左へ戻る）** — 第 2 親のために起こしたレーンが 1〜2 行で
-  終わる形が 137 箇所あった。走る余地の無い中間レーンは経由せず直接繋ぐようにした（`edgePath`）。
-- **曲がりがなめらかでない** — 角丸を固定 20px にしていたため、数レーンぶんの横移動が
-  20px の帯に押し込まれてほぼ水平になっていた（1 行で 8 レーン移動する辺が 99 本）。
-  曲がりに使う縦の長さを横の移動量に合わせて伸ばすようにした（DESIGN.md §5.2 を更新）。
-- **グラフが途中で切れる** — 親が表示上限（400 行）より下にある辺を描かずに落としていた。
-  先頭 400 行のうち 3 本がこれに当たる。下端まで引いて `viewBox` で切るようにした。
-- **幹が途中で折れる** — これは T-05 側の不具合。既定ブランチより先へ進んだブランチを
-  開いていると、上部が lane 1 を下って既定ブランチの行で lane 0 へ折れていた。
-  幹を新しい側へも伸ばすようにした（`extend_upward`、CLAUDE.md §3-1 / DESIGN.md §5.1 を更新）。
-- **どこにも繋がらない線の切れ端が残る（2 巡目の目視）** — `row.passing` の縦線と辺の線を
-  両方描いていた。**素通りするレーンは必ず辺に覆われている**（onyx の 2,000 行で確認）ので、
-  重ねて縦線を引くと、辺が曲がって別レーンへ移った後にも縦線だけが残る。
-  `passing` の描画をやめ、**辺だけで描く**ようにした（`passingPath` は削除）。
-
-**T-05 からの申し送り（着手時に確認すること）**
-
-- **`GraphRow.passing` はこの行を素通りするレーンだけ。** 自分のレーンと、この行で合流して
-  解放されたレーンは入らない。合流の線は**子の行の `Edge` を親の行まで引く**ことで描くので、
-  passing に頼って引こうとすると二重に描かれる。
-- **`Edge.fromLane == toLane` が第一親**（垂直の直線）。`isMergeSecondParent` が立つ辺だけが
-  レーンをまたぐ。角丸ベジェが要るのはこちらだけ。
-- 辺の行き先の**行番号**は入っていない。`parentSha` から引くので、SHA → 行番号の `Map` を
-  1 度だけ作ること（行ごとに `findIndex` すると数万行で効く）。
-- **グラフ列の幅は `LEFT_MARGIN + (maxLane + 1) * LANE_WIDTH`。** `maxLane` は実際に使われた
-  最大のレーン番号（0 起点）なので +1 が要る。
-- `rows` は `RepositorySnapshot.commits` と**同数・同順**。date-order のときは両方が同じ順に
-  並ぶ（`compute_lane_layout` が並べ替えた側を返す）ので、行番号がそのまま添字になる。
-- **lane 0 は必ず幹**。`laneColor(0)` を無彩色固定にできるのはこの保証があるため。
-
-**制約**
-
-- 色は `theme.css` のトークン経由。SVG 属性に生の色値を書かない（CLAUDE.md §6）
-- グラフ寸法は行高 28px / レーン幅 14px / 左マージン 12px（CLAUDE.md §6）
-- テストするのは**純関数のみ**。コンポーネントテストは書かない（DESIGN.md §14.4）
-
-**受け入れ条件**
-
-- ▸コマンド: `npm run test` — `edgePath` が期待するパス文字列を返す
-  （同レーン直線 / 右へ 1 レーン分岐 / 左へ 1 レーン合流 / 複数レーンまたぎ / 同一行内の辺）
-- ▸コマンド: `npm run test` — `laneColor(0)` が幹の色を返し、`laneColor(9)` が `laneColor(1)` と同じ
-- ▸コマンド: `npm run typecheck`
-- ▸目視: 実リポジトリでグラフが描かれ、**幹が画面左端を一直線に通っている**
-- ▸目視: ライト / ダーク両テーマで線とノードが視認できる
-- ▸目視: マージコミットが中空円、HEAD がリング付きで描かれている
-
-**非スコープ**
-
-仮想スクロールとリスト列（T-07）／ref チップ（T-07）／美しさの最終判定（T-08）
-
----
 
 ## - [ ] T-07 [Phase 2] コミットリストの仮想スクロールと列表示
 
@@ -1117,3 +970,4 @@ JSON パース失敗時に Markdown が表示され「構造化に失敗しま�
 | T-03 | 1 | リポジトリ一覧サイドバーと切替 ＋ 右クリック登録解除・D&D 並べ替え | `80189ea` |
 | T-04 | 1 | コミットメタ情報の全件取得とパース ＋ 読み込み進捗と大規模リポジトリの確認 | `c9aae9d` |
 | T-05 | 2 | レーン割り当てアルゴリズム ＋ topo / date の並び順 | `6601800` |
+| T-06 | 2 | レーン配列 → SVG パス生成と描線 | `e6e877f` `7793d6a` `4bce75b` |
