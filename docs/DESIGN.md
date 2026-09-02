@@ -139,6 +139,7 @@ git -c core.quotepath=false \
     -c core.autocrlf=false \
     -c core.pager=cat \
     -c color.ui=false \
+    -c core.commitGraph=false \
     -C <repo> <subcommand> ...
 ```
 
@@ -148,6 +149,29 @@ git -c core.quotepath=false \
 | `core.autocrlf=false` | ユーザーの `.gitconfig` に左右されない決定的な挙動を得る |
 | `core.pager=cat` | pager がサブプロセスで起動して固まるのを防ぐ |
 | `color.ui=false` | ANSI エスケープが出力に混入するのを防ぐ |
+| `core.commitGraph=false` | **本アプリの読み方では commit-graph が遅い**（下記） |
+
+#### commit-graph を無効にする理由
+
+commit-graph は「メッセージを読まずに履歴をたどる」操作のための索引である。ところが
+Givsoner の主問い合わせ（§4.1 の全件ダンプ）は `%an`/`%ae`/`%s` を含むため、**どのみち
+コミットオブジェクトを 1 件ずつ読む**。commit-graph を有効にすると、そこへ別ファイルへの
+アクセスが上乗せされるだけになる。
+
+Linux カーネル（1,481,526 コミット / pack 6.6GB）で、同一マシン・同一コマンドの A-B 計測:
+
+| `core.commitGraph` | `git log --branches --remotes HEAD --topo-order -z --format=…` |
+|---|---|
+| `true` | 59.5 秒 |
+| `false` | 19.0 秒 |
+
+ahead/behind はメモリ上のグラフから計算する（§4.5）ので、commit-graph が本来効く
+`rev-list --count` 系はそもそも呼ばない。**git は `gc` の際に commit-graph を自動生成する**
+ため、明示的に切っておかないと、ある日を境に 3 倍遅くなる。
+
+なお `%h`（短縮 SHA）の有無と `--topo-order` の有無は同じ計測で有意差が無かった
+（`%h` を外して 16.7 秒、`%H` だけなら 14.6 秒）。**全件ダンプの時間はほぼコミットオブジェクトの
+読み取りそのもの**であり、書式を削っても縮まない。
 
 ### 3.2 全 git 呼び出しに設定する環境変数
 
@@ -229,6 +253,39 @@ WebView2 の解決に失敗して使えなかった。
 この設計の帰結として、**想定規模は数万コミット / 数千ファイルを上限**とする。10 万コミット超の
 モノレポは明示的に非対象。永続インデックス DB は持たない（v1 の規模に対して複雑さが見合わない）。
 
+非対象の側がどうなるかの実測（Linux カーネル 1,481,526 コミット / pack 6.6GB、リリースビルド）:
+
+| 内訳 | 時間 |
+|---|---|
+| `git log` の実行と読み取りとパース | 17.4 秒（うち git 自体が約 16 秒） |
+| JSON 直列化（450MB） | 0.7 秒 |
+| 2 回目（ref の指紋が一致 → キャッシュ） | 0.13 秒 |
+
+**時間のほぼ全部が git 自身**であり、こちら側の工夫では縮まない。
+
+**450MB を IPC で webview へ渡す構造の方が、実は苦しい。** デバッグビルドでの実測で、
+フロント側から見た往復は 39.7 秒（うち `git log` は 15.7 秒）。差の約 24 秒は直列化と転送と
+`JSON.parse` であり、**その間 webview のメインスレッドは止まる**（ウィンドウが白いまま
+描画されない時間が生まれる）。読み終えた webview は 1.5GB を保持する。
+
+100 万コミット級を実用範囲に入れるなら「全件をフロントへ渡す」前提（本節）ごと見直しが要る。
+v1 では見直さず、**時間がかかっていることが分かる表示**で凌ぐ（§4.6）。
+
+**ただし非対象の規模を黙って読みに行かせない。** 148 万コミットのリポジトリを開いたまま
+アプリを終了すると、次回起動時に自動で読み込みが走り、デバッグビルドで 60〜90 秒
+操作できなくなったうえ、**givsoner.exe が 3.5GB・WebView2 が 3.2GB まで伸びて
+プロセスが消えた**（エラー出力なし。空き物理メモリは 10GB 以上あった）。
+
+そこで、**前回の件数が 10 万コミットを超えるリポジトリは自動で読み込まない**。
+件数と所要時間の見込みを出し、明示的に選ばれたときだけ読む
+（`src/store/snapshot.ts` の `LARGE_REPOSITORY_COMMITS`）。前回の件数が無い初回だけは
+判断材料が無いので素直に読みに行く — 分母を得るのに `rev-list --count` を呼ぶと
+`git log` と同じだけ待つことになり、本末転倒だからである。
+
+なお**デバッグビルドでは JSON 直列化だけで 17.7 秒**かかる（リリースの約 28 倍）。
+`npm run tauri dev` で測った数字をそのまま製品の性能と見ないこと。
+リリースビルドで動かすには `npm run start:release`。
+
 キャッシュは HEAD と全 ref の SHA をキーに無効化する。直前のリポジトリのグラフは LRU で 2〜3 件
 保持し、切替を体感即時にする。
 
@@ -276,6 +333,28 @@ date-order 表示時は「この表示では線が交差します」の注記を
 
 `git rev-list --count` をブランチ数だけ呼ぶ実装だと、100 ブランチで 100 プロセス起動になる。
 §4.1 で全コミットの親子関係を保持しているので、到達性計算で無料で求まる。
+
+---
+
+### 4.6 途中経過の見せ方
+
+想定規模（数万コミット）では読み込みは 1 秒未満で終わる。**非対象の規模でも「固まった」と
+思わせない**ことだけを目的に、途中経過を出す。
+
+段階は取得の内訳そのもの。`Refs`（ref 一覧と HEAD）→ `Commits`（`git log` の全件ダンプ）→
+`Graph`（到達可能集合と幹の決定）→ `Transfer`（直列化と転送）。
+
+- **件数は `git log` の出力を読みながら NUL を数えて得る。** パースの完了を待たない。
+  そのために `exec::run_streaming` があり、`Command::output()` と違って完了前に読み進める
+- **割合の分母は前回の読み込み件数**（`state.json` の `lastCommitCount`）。初回は分からないので
+  割合を出さず件数だけ流す。**嘘の割合を出すより、進んでいることが分かる方を採る**
+- 報告は 150ms 間隔に間引く。300MB を 64KB ずつ読むと 5000 回近く呼ばれるため
+- 表示は 400ms 経ってから出す。数万コミットではバーが一瞬光って消えるだけになる
+- `Transfer` は**イベントを送ってから**返す。この段階で webview のメインスレッドは
+  止まるので、止まる前に「何をしているか」を出しておく必要がある
+
+進捗の受け口は §3.5 の `LogSink` と同じくトレイト
+（`git::progress::ProgressSink`）にし、git 側のコードを `AppHandle` に依存させない。
 
 ---
 
@@ -748,6 +827,8 @@ enabled: true
   "repositoryListSort": "manual",
   "perRepository": {
     "uuid": {
+      "lastOpenedAt": "2026-09-02T12:00:00.000Z",
+      "lastCommitCount": 1481526,
       "selectedCommit": "sha",
       "scrollOffset": 1234,
       "selectedFile": "src/foo.ts",
@@ -757,6 +838,9 @@ enabled: true
   }
 }
 ```
+
+`lastOpenedAt` は「最終アクセス順」の並べ替え（T-03）、`lastCommitCount` は読み込み進捗の
+割合表示（§4.6）に使う。**どちらも失っても困らない**ので `settings.json` ではなくここに置く。
 
 ### 12.4 レビュー結果の永続化
 
@@ -835,6 +919,28 @@ LLM プロファイルが未設定のまま AI レビューを押した場合は
 
 ---
 
+### 13.5 白い画面を作らない
+
+**フロントで例外が出たときに何も表示されない状態を作らない。** React は描画中に例外が出ると
+木ごと外すため、受け止める場所が無いとウィンドウが真っ白になり、原因の手掛かりも残らない。
+受け皿を 2 段構えで置く。
+
+| 失敗する場所 | 受け皿 |
+|---|---|
+| モジュールの取得・評価（React が一度も動かない） | `index.html` のインラインスクリプト |
+| 描画中の例外 | `src/components/common/ErrorBoundary.tsx` |
+
+`index.html` 側は `error`（capture 付きで resource error も拾う）と `unhandledrejection` を見て、
+`#root` が空のままなら理由を書き込む。10 秒経っても空なら「時間内に組み上がらなかった」と出す。
+**この受け皿の文言だけは `src/i18n/ja.ts` に置けない**（ja.ts を読めない状況を扱うため、
+インラインで持つ）。
+
+なお、dev サーバ自体に到達できない場合（`npm run dev` が立っていない、ポート 1420 が別プロセスに
+取られている）は HTML すら配信されないので、この受け皿も動かない。WebView2 のエラーページか
+白い画面になる。`tauri dev` の出力に `Port 1420 is already in use` が出ていないか先に見ること。
+
+---
+
 ## 14. テスト戦略
 
 ### 14.1 レーン割り当てアルゴリズム（必須）
@@ -876,6 +982,11 @@ LLM プロファイルが未設定のまま AI レビューを押した場合は
 - msys の bash へ渡す引数はスラッシュ区切りにする（`\` がエスケープとして食われる）。
 - `src-tauri/src` の中では `Command::new` を git 以外に使わない（§3.1 のチョークポイント）。
   プロセス起動を伴うテスト補助は `src-tauri/tests/` 側に書く。
+- 生成と Git Bash の探索は **`src-tauri/tests/common/mod.rs`** に置き、各テストファイルが
+  `mod common;` で共有する。生成はテストバイナリごとに 1 度走るが、cargo はテストバイナリを
+  直列に実行するので衝突しない。
+- 署名付きコミットだけは生成しない（CI に GPG 鍵を置けない）。署名は `--format` の出力形状を
+  変えないので、固定文字列に対する単体テストで代替する（§14.2）。
 
 ### 14.4 フロントエンド
 
@@ -929,49 +1040,60 @@ Phase 9 完了 ＋ **実リポジトリを 5 個以上登録して 1 週間実�
 
 ---
 
-## 16. ディレクトリ構成（案）
+## 16. ディレクトリ構成
 
-`(済)` は Phase 0 で実在するファイル。それ以外は未作成。
+`(済)` は実在するファイル。それ以外は未作成で、括弧内は作られるタスク。
+**最終更新は T-04 完了時点。**
 
 ```
 gitviewer/
 ├── CLAUDE.md                     (済)
 ├── task_lists.md                 (済) タスクと進捗
 ├── docs/DESIGN.md                (済)
-├── scripts/make-test-repos.sh    テスト用リポジトリ生成 (T-02)
-├── package.json
-├── vite.config.ts
-├── index.html
+├── Givsoner.bat                  (済) ダブルクリックで開発起動
+├── scripts/make-test-repos.sh    (済) テスト用リポジトリ生成
+├── package.json                  (済)
+├── vite.config.ts                (済)
+├── index.html                    (済) 起動時失敗の受け皿を含む（§13.5）
 ├── src/                          # フロントエンド (React + TypeScript)
-│   ├── main.tsx
-│   ├── App.tsx
-│   ├── i18n/ja.ts                # 全表示文言をここに集約
+│   ├── main.tsx                  (済)
+│   ├── App.tsx                   (済)
+│   ├── i18n/ja.ts                (済) 全表示文言をここに集約
 │   ├── components/
-│   │   ├── graph/                # SVG グラフ描画
-│   │   ├── commits/              # コミットリスト（仮想スクロール）
-│   │   ├── sidebar/              # リポジトリ一覧 + ブランチ/タグツリー
-│   │   ├── diff/                 # 差分ペイン
-│   │   ├── review/               # AI レビュードロワー
-│   │   ├── commandlog/           # git コマンドログパネル
-│   │   └── common/
+│   │   ├── graph/                SVG グラフ描画 (T-06)
+│   │   ├── commits/              コミットリスト（仮想スクロール）(T-07)
+│   │   ├── sidebar/              (済) リポジトリ一覧。ブランチ/タグツリーは T-10
+│   │   ├── diff/                 差分ペイン (T-13)
+│   │   ├── review/               AI レビュードロワー (T-23)
+│   │   ├── commandlog/           (済) git コマンドログパネル
+│   │   ├── setup/                (済) 空状態と git 未検出画面
+│   │   └── common/               (済) SplitPane / ContextMenu / CommandPalette /
+│   │                                  NoticeBar / LoadProgress / ErrorBoundary
+│   ├── hooks/                    (済) useTheme / useCommandLog
 │   ├── lib/
-│   │   ├── graphPath.ts          # レーン配列 -> SVG パス（純関数・テスト対象）
-│   │   └── ipc.ts                # Tauri invoke ラッパ
-│   ├── store/
-│   └── styles/
+│   │   ├── graphPath.ts          レーン配列 -> SVG パス（純関数・テスト対象）(T-06)
+│   │   └── ipc.ts                (済) Tauri invoke ラッパ
+│   ├── store/                    (済) settings / uiState / repositories / snapshot
+│   └── styles/                   (済) theme.css（トークン）/ app.css
 └── src-tauri/
-    ├── Cargo.toml
-    ├── tauri.conf.json
+    ├── Cargo.toml                (済)
+    ├── tauri.conf.json           (済)
+    ├── tests/
+    │   ├── common/mod.rs         (済) 生成リポジトリの用意と Git Bash 探索
+    │   ├── repositories.rs       (済) 判定とスキャン (T-02)
+    │   └── snapshot.rs           (済) 全件取得 (T-04)
     └── src/
         ├── main.rs               (済)
         ├── lib.rs                (済) Tauri コマンドの登録と AppState
-        ├── model.rs              CommitMeta / RefEntry / RepositorySnapshot (T-04)
+        ├── model.rs              (済) CommitMeta / RefEntry / RepositorySnapshot
         ├── git/
         │   ├── exec.rs           (済) サブプロセス実行。固定オプションと環境変数はここだけ
         │   ├── detect.rs         (済) git 検出とバージョン判定
-        │   ├── repo.rs           リポジトリ判定とスキャン (T-02)
-        │   ├── log.rs            git log パース (T-04)
-        │   ├── refs.rs           for-each-ref パース (T-04)
+        │   ├── repo.rs           (済) リポジトリ判定とスキャン
+        │   ├── log.rs            (済) git log パース
+        │   ├── refs.rs           (済) for-each-ref パースと ref の指紋
+        │   ├── snapshot.rs       (済) 全件取得の組み立てと LRU キャッシュ
+        │   ├── progress.rs       (済) 途中経過の型と受け口（§4.6）
         │   ├── status.rs         (T-16)
         │   ├── diff.rs           (T-11, T-13)
         │   └── ops.rs            checkout / fetch / merge --ff-only / clone (T-17〜T-19)
@@ -983,9 +1105,10 @@ gitviewer/
         │   ├── skill.rs          (T-21)
         │   └── review.rs         (T-22)
         ├── store/
-        │   ├── paths.rs          %APPDATA% レイアウトの解決 (T-01)
-        │   ├── settings.rs       (T-01)
-        │   ├── state.rs          (T-01)
+        │   ├── paths.rs          (済) %APPDATA% レイアウトの解決
+        │   ├── settings.rs       (済)
+        │   ├── state.rs          (済)
+        │   ├── json.rs           (済) アトミック書き込み
         │   └── reviews.rs        (T-23)
         ├── commandlog.rs         (済) git コマンドログのリングバッファ
         ├── encoding.rs           文字コード自動判別 (T-12)
@@ -1005,8 +1128,8 @@ gitviewer/
 | バージョン検出 | `git --version` |
 | リポジトリ判定 | `git -C <path> rev-parse --absolute-git-dir --is-bare-repository --is-shallow-repository` |
 | 作業ツリーの場所 | `git -C <path> rev-parse --show-toplevel`（bare では呼ばない） |
-| **コミットメタ一括取得** | `git -C <path> log --branches --remotes HEAD --topo-order -z --format=<fmt>` |
-| ref 一覧 | `git -C <path> for-each-ref --format=<fmt>` |
+| **コミットメタ一括取得** | `git -C <path> log --branches --remotes [HEAD] --topo-order -z --format=<fmt>` |
+| ref 一覧 | `git -C <path> for-each-ref --format=<fmt> refs/heads refs/remotes refs/tags` |
 | HEAD 判定 | `git -C <path> symbolic-ref -q --short HEAD` / `git -C <path> rev-parse -q --verify HEAD` |
 | 作業ツリー状態 | `git -C <path> status --porcelain=v2 -z` |
 | コミット本文 | `git -C <path> show -s --format=<fmt> <sha>` |
@@ -1022,6 +1145,17 @@ gitviewer/
 | clone | `git clone --progress <url> <dir>` |
 
 ahead/behind は git を呼ばずメモリ上のグラフから計算する（§4.5）。
+
+**`<fmt>` の書式言語はコマンドごとに違う。** `git log` は `%x1f`（`%x` ＋ 16 進 2 桁）で
+区切り文字を出すが、`for-each-ref` は `%x1f` を展開せず、16 進 2 桁だけの `%1f` を使う
+（git 2.43 で実測）。取り違えると、区切りのつもりの `%x1f` が文字列のまま出力に混ざる。
+
+**`git log` に `HEAD` を渡すのは HEAD がコミットを指しているときだけ。** コミット 0 件の
+リポジトリに渡すと `fatal: ambiguous argument 'HEAD'` でコマンド全体が失敗する。
+`--branches --remotes` だけなら exit 0 で空が返る。
+
+**`refs/remotes/origin/HEAD` は `for-each-ref` の `%(symref)` で拾う**ため、`symbolic-ref` を
+別に呼ばない。symbolic ref を ref 一覧から外さないと、`origin/main` がブランチとして二重に見える。
 
 ## 付録 B. 本設計で未決の実装レベル選択
 

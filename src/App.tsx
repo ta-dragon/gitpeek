@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 import { CommandLogPanel } from "./components/commandlog/CommandLogPanel";
 import { CommandPalette } from "./components/common/CommandPalette";
+import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
 import { SplitPane } from "./components/common/SplitPane";
 import { RepositoryList, type SortMode } from "./components/sidebar/RepositoryList";
@@ -17,12 +18,23 @@ import {
   isGitUsable,
   MIN_VERSION_FALLBACK,
   type GitStatus,
+  type LoadPhase,
   type RepositoryEntry,
 } from "./lib/ipc";
 import * as repositories from "./store/repositories";
 import { useRepositories } from "./store/repositories";
 import { dismissSettingsNotice, initSettings, useSettings } from "./store/settings";
+import * as snapshots from "./store/snapshot";
+import { useSnapshot } from "./store/snapshot";
 import { initUiState, updateUiState, useUiState } from "./store/uiState";
+
+/**
+ * 進捗バーを出し始めるまでの時間。
+ *
+ * 数万コミットなら読み込みは 1 秒未満で終わる。そこでバーを出しても
+ * 一瞬光って消えるだけで、かえって落ち着かない。
+ */
+const SLOW_LOAD_MS = 400;
 
 /** サイドバー幅の可動域。狭すぎるとパスが読めず、広すぎると本体が潰れる。 */
 const SIDEBAR_MIN = 180;
@@ -77,6 +89,12 @@ export default function App() {
       await repositories.initRepositories();
     })();
   }, []);
+
+  // リポジトリを選んだら全コミットを一括で読む（docs/DESIGN.md §4.1）。
+  // 直前のリポジトリの分は Rust 側の LRU に残っているので、戻りは体感即時になる。
+  useEffect(() => {
+    void snapshots.load(repos.selectedId);
+  }, [repos.selectedId]);
 
   // Ctrl+P でリポジトリ切替（docs/DESIGN.md §6.5）。
   useEffect(() => {
@@ -240,9 +258,12 @@ export default function App() {
 }
 
 /**
- * 選択中リポジトリの素性。コミットグラフは Phase 2 でここに入る。
+ * 選択中リポジトリの素性と、読み込んだ履歴の要約。
+ * コミットグラフは Phase 2 でここに入る。
  */
 function RepositoryPanel({ entry }: { entry: RepositoryEntry | null }) {
+  const snapshot = useSnapshot();
+
   if (entry === null) {
     return <p className="app__loading">{ja.repositories.empty}</p>;
   }
@@ -262,6 +283,9 @@ function RepositoryPanel({ entry }: { entry: RepositoryEntry | null }) {
           <p className="ready__note">{ja.repositories.indexLockDetail}</p>
         )}
       </div>
+
+      <HistoryCard entry={entry} snapshot={snapshot} />
+
       <div className="ready__card ready__card--muted">
         <h2 className="ready__heading">{ja.phase.title}</h2>
         <p>{ja.phase.body}</p>
@@ -269,6 +293,113 @@ function RepositoryPanel({ entry }: { entry: RepositoryEntry | null }) {
       </div>
     </div>
   );
+}
+
+/**
+ * 一括取得した履歴の要約。グラフが入るまでの繋ぎであり、
+ * 「何件を何 ms で読めたか」を確かめるための場所でもある。
+ */
+function HistoryCard({
+  entry,
+  snapshot,
+}: {
+  entry: RepositoryEntry;
+  snapshot: ReturnType<typeof useSnapshot>;
+}) {
+  // 別のリポジトリの読み込み結果を出さない。
+  if (snapshot.repositoryId !== entry.id) return null;
+
+  // 前回が大きすぎたリポジトリは、起動時や切替で黙って読みに行かない。
+  // 148 万コミットで数十秒操作できなくなり、プロセスが落ちることもあった。
+  if (snapshot.oversized !== null) {
+    return (
+      <div className="ready__card">
+        <h2 className="ready__heading">{ja.snapshot.oversizedTitle}</h2>
+        <p>{ja.snapshot.oversizedBody(snapshot.oversized)}</p>
+        <p className="ready__note">{ja.snapshot.oversizedNote}</p>
+        <button type="button" className="button" onClick={() => void snapshots.loadAnyway()}>
+          {ja.snapshot.oversizedLoad}
+        </button>
+      </div>
+    );
+  }
+
+  if (snapshot.loading) {
+    const progress = snapshot.progress;
+    // 短い読み込みでバーが一瞬光るのは邪魔なだけ。しばらくかかってから出す。
+    if (progress === null || progress.elapsedMs < SLOW_LOAD_MS) {
+      return (
+        <div className="ready__card">
+          <p className="app__loading">{ja.snapshot.loading}</p>
+        </div>
+      );
+    }
+    return (
+      <div className="ready__card">
+        <LoadProgress
+          label={phaseLabel(progress.phase)}
+          done={progress.commits}
+          total={progress.estimatedTotal}
+          elapsedMs={progress.elapsedMs}
+        />
+      </div>
+    );
+  }
+
+  if (snapshot.error !== null) {
+    return (
+      <div className="ready__card">
+        <h2 className="ready__heading">{ja.snapshot.failedTitle}</h2>
+        <p className="ready__note">{snapshot.error}</p>
+        <button type="button" className="button" onClick={() => void snapshots.reload()}>
+          {ja.snapshot.reload}
+        </button>
+      </div>
+    );
+  }
+
+  const data = snapshot.data;
+  if (data === null) return null;
+
+  const local = data.refs.filter((ref) => ref.kind === "localBranch").length;
+  const remote = data.refs.filter((ref) => ref.kind === "remoteBranch").length;
+  const tags = data.refs.filter((ref) => ref.kind === "tag").length;
+  const outOfGraph = data.refs.filter((ref) => ref.outOfGraph).length;
+
+  return (
+    <div className="ready__card">
+      <dl className="ready__facts">
+        <dt>{ja.snapshot.commits}</dt>
+        <dd>
+          {ja.snapshot.count(data.commits.length)}
+          {snapshot.elapsedMs !== null && (
+            <span className="ready__aside">{ja.snapshot.elapsed(snapshot.elapsedMs)}</span>
+          )}
+        </dd>
+        <dt>{ja.snapshot.branches}</dt>
+        <dd>{ja.snapshot.branchCounts(local, remote)}</dd>
+        <dt>{ja.snapshot.tags}</dt>
+        <dd>{ja.snapshot.count(tags)}</dd>
+        <dt>{ja.snapshot.defaultBranch}</dt>
+        <dd>{data.defaultBranch ?? ja.snapshot.none}</dd>
+      </dl>
+      {data.commits.length === 0 && <p className="ready__note">{ja.snapshot.emptyRepository}</p>}
+      {outOfGraph > 0 && <p className="ready__note">{ja.snapshot.outOfGraph(outOfGraph)}</p>}
+    </div>
+  );
+}
+
+function phaseLabel(phase: LoadPhase): string {
+  switch (phase) {
+    case "refs":
+      return ja.snapshot.progressRefs;
+    case "commits":
+      return ja.snapshot.progressCommits;
+    case "graph":
+      return ja.snapshot.progressGraph;
+    case "transfer":
+      return ja.snapshot.progressTransfer;
+  }
 }
 
 function describeHead(probe: RepositoryEntry["probe"]): string {

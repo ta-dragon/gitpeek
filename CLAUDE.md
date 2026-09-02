@@ -35,8 +35,13 @@ git に対して書き込むのは **checkout / fetch / merge --ff-only / clone*
 
 ## 2. git 実行の不変条件（破ると静かに壊れる）
 
-**すべての git 実行は `src-tauri/src/git/exec.rs` の単一の関数を通す。**
+**すべての git 実行は `src-tauri/src/git/exec.rs` を通す。**
 ここ以外で `Command::new("git")` を書かないこと。
+
+入口は `run`（完了を待つ）と `run_streaming`（読みながら途中経過を返す）の 2 つあるが、
+**どちらも `build()` で固定オプションと固定環境変数を付ける**。片方だけに足すと、
+経路によって日本語パスが化けたり認証で固まったりする。新しい入口を増やすときも
+`build()` を通すこと。
 
 ### 固定オプション（全呼び出しに必ず付ける）
 
@@ -45,6 +50,7 @@ git に対して書き込むのは **checkout / fetch / merge --ff-only / clone*
 -c core.autocrlf=false     # ユーザーの .gitconfig に左右されない挙動を得る
 -c core.pager=cat          # pager 起動でハングするのを防ぐ
 -c color.ui=false          # ANSI エスケープの混入を防ぐ
+-c core.commitGraph=false  # 全件ダンプでは commit-graph があると 3 倍遅い（DESIGN.md §3.1）
 ```
 
 ### 固定環境変数（全呼び出しに必ず設定）
@@ -115,6 +121,8 @@ GIT_SSH_COMMAND=ssh -o BatchMode=yes     # 無いとパスフレーズ待ちで�
 
 - 日本語 UI。**全表示文言は `src/i18n/ja.ts` に集約**し、コンポーネントからはキーで参照する
   （i18n ライブラリは入れない）。文言をコンポーネントに直書きしないこと。
+  **唯一の例外が `index.html` の起動時受け皿**（DESIGN.md §13.5）。`ja.ts` を読めない状況を
+  扱うためのものなので、ここへ移してはいけない。
 - レイアウト: 左サイドバー（リポジトリ一覧 / ブランチ・タグツリー）＋ 中央上グラフ ＋ 中央下差分
   ＋ 差分右の AI レビュードロワー。
 - テーマは OS 追従が既定。色はライト / ダークで別定義する。

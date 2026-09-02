@@ -46,8 +46,12 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 | 項目 | 内容 |
 |---|---|
 | 直前に完了 | T-03 リポジトリ一覧サイドバーと切替 |
-| 次にやる | **T-04 コミットメタ情報の全件取得とパース** |
+| 次にやる | **T-04 コミットメタ情報の全件取得とパース（実装済み・目視待ち）** |
 | 未解決の判断事項 | なし |
+
+**T-04 は ▸コマンド の受け入れ条件をすべて満たし、実装もコミット済み。残るは ▸目視 1 件
+（数千コミットの実リポジトリで 1 秒未満）だけ。** 目視が取れたら、規約 1 の例外として
+チェックと畳み込みを単独のコミットで行う（実装を先にコミットしてしまったため）。
 
 ---
 
@@ -112,11 +116,26 @@ graph LR
 | 種別 | パス | 内容 |
 |---|---|---|
 | 新規 | `src-tauri/src/git/log.rs` | `git log` の実行とパース |
-| 新規 | `src-tauri/src/git/refs.rs` | `for-each-ref` の実行とパース |
+| 新規 | `src-tauri/src/git/refs.rs` | `for-each-ref` の実行とパース、ref の指紋 |
+| 新規 | `src-tauri/src/git/snapshot.rs` | log / refs / HEAD の組み立てと LRU キャッシュ |
+| 新規 | `src-tauri/src/git/progress.rs` | 途中経過の型と受け口（`ProgressSink` / `Reporting`） |
 | 新規 | `src-tauri/src/model.rs` | `CommitMeta` / `RefEntry` / `HeadInfo` / `RepositorySnapshot` |
-| 変更 | `src-tauri/src/lib.rs` | スナップショットの LRU キャッシュ、コマンド登録 |
-| 変更 | `src-tauri/Cargo.toml` | `sha2 = "0.10"`（`ref_fingerprint` の算出） |
+| 新規 | `src-tauri/tests/common/mod.rs` | 結合テスト共通（`repositories.rs` から切り出し） |
+| 新規 | `src-tauri/tests/snapshot.rs` | 生成リポジトリに対する結合テスト |
+| 新規 | `src/store/snapshot.ts` | 選択中リポジトリの読み込み状態 |
+| 新規 | `src/components/common/LoadProgress.tsx` | 進捗バー（fetch / clone でも使う） |
+| 新規 | `src/components/common/ErrorBoundary.tsx` | 描画中の例外の受け皿 |
+| 変更 | `src-tauri/src/lib.rs` | `AppState` への LRU 追加、コマンド登録 |
+| 変更 | `src-tauri/src/git/repo.rs` | `read_head` を公開（snapshot から使う） |
+| 変更 | `src-tauri/src/git/exec.rs` | `GitOutput::failure` ／ 逐次読みの `run_streaming` ／ `core.commitGraph=false` |
+| 変更 | `src-tauri/src/store/state.rs` | `lastCommitCount`（進捗の分母） |
+| 変更 | `index.html`, `src/main.tsx` | 起動時と描画中の失敗の受け皿 |
+| 変更 | `package.json` | `start:release`（大きなリポジトリ用） |
+| 変更 | `CLAUDE.md` | 固定オプションに `core.commitGraph=false` |
+| 変更 | `src-tauri/Cargo.toml` | `sha2`（指紋）／ `serde` の `rc`（`Arc` を直列化） |
+| 変更 | `scripts/make-test-repos.sh` | `messages` / `tags` / `cloned` を追加 |
 | 変更 | `src/lib/ipc.ts` | 型と invoke ラッパ |
+| 変更 | `src/App.tsx`, `src/i18n/ja.ts`, `src/styles/app.css` | 履歴の要約表示と進捗表示 |
 
 **実装内容**
 
@@ -173,14 +192,16 @@ pub struct RepositorySnapshot {
 git コマンド:
 
 ```
-log --branches --remotes HEAD --topo-order -z --format=%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%s
-for-each-ref --format=%(objectname)%x1f%(refname)%x1f%(objecttype)%x1f%(*objectname)%x1f%(upstream) refs/heads refs/remotes refs/tags
-symbolic-ref -q --short refs/remotes/origin/HEAD
+log --branches --remotes [HEAD] --topo-order -z --format=%H%x1f%h%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%ct%x1f%s
+for-each-ref --format=%(objectname)%1f%(refname)%1f%(objecttype)%1f%(*objectname)%1f%(upstream)%1f%(symref) refs/heads refs/remotes refs/tags
 ```
 
-- レコード区切りは `-z`（NUL）、フィールド区切りは `%x1f`（Unit Separator）。
-  **`-z` が `--format` 出力にも効くことを、改行を含むコミットメッセージのテストリポジトリで確認すること。**
-  効かない場合は各レコードの先頭に `%x1e`（Record Separator）を置いて分割する方式に切り替える。
+（`HEAD` は HEAD がコミットを指しているときだけ付ける。HEAD 判定は既存の
+`git::repo::read_head`＝`symbolic-ref` ＋ `rev-parse` を使い回す）
+
+- レコード区切りは `-z`（NUL）、フィールド区切りは Unit Separator（0x1F）。
+  **`git log` と `for-each-ref` は書式言語が別**で、前者は `%x1f`、後者は `%1f` と書く
+  （下の突き合わせ）。`-z` が `--format` 出力にも効くことは git 2.43 で実測済み。
 - annotated tag は `%(*objectname)` が空でなければそちらを `target` にする。
 - `default_branch` の決定順は `origin/HEAD` → `refs/heads/main` → `refs/heads/master` → HEAD。
 - **スナップショットは `AppState` に LRU 2〜3 件でキャッシュする**（DESIGN.md §6.2）。
@@ -207,11 +228,60 @@ load_repository_snapshot(repositoryId: String, force: bool) -> Result<Repository
 - ▸コマンド: `cargo test` — 日本語を含む subject / 空 subject / 複数親 / 署名付きコミット /
   改行を含むメッセージ / 空リポジトリ / annotated tag の peel
 - ▸コマンド: テスト用リポジトリでコミット数と親子関係が期待どおり
-- ▸コマンド: `grep -n '\-\-all' src-tauri/src/git/log.rs` が 0 件
-  （`git log` の引数に `--all` が現れない。`fetch --all` は別物で、T-17 が `ops.rs` に書く）
+- ▸コマンド: `grep -n '"--all"' src-tauri/src/git/log.rs` が 0 件
+  （`git log` の**引数**に `--all` が現れない。禁止の理由は同ファイル冒頭のコメントに書いてあるので、
+  素の `--all` ではそこに当たる。`fetch --all` は別物で、T-17 が `ops.rs` に書く）
+- ▸コマンド: `cargo test` の `never_passes_all_to_git_log`（実際の argv を検査する）
 - ▸コマンド: `cargo clippy --all-targets -- -D warnings`
 - ▸目視: 数千コミットの実リポジトリで `load_repository_snapshot` の所要時間が 1 秒未満
   （git コマンドログパネルの所要時間表示で確認）
+
+**着手時の突き合わせ（2026-09-02 実装）**
+
+- **`for-each-ref` は `%x1f` を展開しない。** `git log` と書式言語が別で、`%x1f` を渡すと
+  文字列 `%x1f` がそのまま出る。16 進 2 桁の `%1f` が正しい（git 2.43 で実測）。
+- **`symbolic-ref refs/remotes/origin/HEAD` を呼ぶのをやめ、`%(symref)` で拾う。**
+  origin/HEAD は for-each-ref の結果に含まれており、symbolic ref かどうかは `%(symref)` で判る。
+  プロセスが 1 つ減るうえ、**symbolic ref を一覧から外す処理と同じ場所に収まる**
+  （外さないと origin/main がブランチとして二重に見える）。
+- **`default_branch` は完全な ref 名にした**（`refs/remotes/origin/main`）。短縮名では
+  ローカルの `main` とリモートの `origin/main` を区別できず、lane 0 の起点を引けない。
+- **コミット 0 件のリポジトリでは `HEAD` を引数から外す。** 渡すと
+  `fatal: ambiguous argument 'HEAD'` で `git log` 全体が失敗する。`--branches --remotes` だけなら
+  exit 0 で空が返る（実測）。
+- **`src-tauri/src/git/snapshot.rs` を足した。** log / refs / HEAD を束ねて
+  `RepositorySnapshot` を組み立てる場所が要る。LRU も Tauri に依存しない形でここに置き、
+  `AppState` は `Arc<SnapshotCache>` を持つだけにした。
+- **キャッシュ判定は「毎回 ref だけ引いて指紋を比べる」形にした。** `for-each-ref` は数 ms で
+  終わるので、指紋が一致した回は `git log` を丸ごと省ける。
+- **署名付きコミットは固定文字列の単体テストで見る。** GPG 鍵を CI で用意できないので
+  リポジトリ生成では作れない。署名は `--format` の出力形状を変えない（gpgsig はヘッダにしか出ない）。
+- **`tests/common/mod.rs` を切り出した。** リポジトリ生成と Git Bash 探索を
+  `repositories.rs` と `snapshot.rs` で共有する。生成はテストバイナリごとに 1 度走るが、
+  cargo はテストバイナリを直列に実行するので衝突しない。
+- **`-c core.commitGraph=false` を固定オプションに足した**（CLAUDE.md §2 / DESIGN.md §3.1）。
+  Linux カーネル（148 万コミット）で A-B 計測したところ、commit-graph があると全件ダンプが
+  59.5 秒、無いと 19.0 秒だった。全件ダンプは `%an`/`%ae`/`%s` を含むので結局コミット
+  オブジェクトを 1 件ずつ読むことになり、commit-graph は上乗せにしかならない。
+  **git は `gc` の際に自動生成する**ため、明示的に切らないとある日 3 倍遅くなる。
+- **キャッシュを `Arc<RepositorySnapshot>` にした**（`serde` の `rc` 機能）。格納と返却で
+  2 部持つと、148 万コミットでは丸ごとの複製に 0.8 秒かかる。キャッシュヒットは 131 ms になった。
+- **非対象規模のリポジトリを自動で読み込まないようにした**（DESIGN.md §4.1）。
+  148 万コミットのリポジトリを開いたまま終了すると次回起動で自動読み込みが走り、
+  60〜90 秒操作できなくなったうえプロセスが落ちた（Rust 3.5GB / WebView2 3.2GB）。
+  前回件数が 10 万を超えるものは確認カードを出し、選ばれたときだけ読む。
+- **読み込みの途中経過を出すようにした**（DESIGN.md §4.6）。148 万コミットでは
+  フロントから見た往復が 39.7 秒（うち `git log` 15.7 秒）あり、静止した「読み込んでいます…」
+  だけでは固まったようにしか見えない。`exec::run_streaming` を足して `git log` の出力を
+  読みながら NUL を数え、150ms 間隔で件数を送る。割合の分母は前回件数
+  （`state.json` の `lastCommitCount`）で、初回は件数だけ出す。
+- **描画中の例外と起動時の失敗に受け皿を置いた**（`ErrorBoundary` と `index.html` の
+  インラインスクリプト、DESIGN.md §13.5）。目視で「画面が真っ白」の報告があり、
+  受け止める場所が無いと React が木ごと外して原因が一切残らないことが分かったため。
+  T-24（エラー処理の仕上げ）まで待つと、それまでの目視が毎回「白い画面」で止まる。
+- **フロントに読み込みを繋いだ**（`src/store/snapshot.ts` と中央パネルの要約）。
+  目視項目「所要時間が 1 秒未満」は `load_repository_snapshot` がどこからも呼ばれないと
+  確かめられない。グラフ本体は T-07 なので、ここでは件数・ref 数・所要時間だけ出す。
 
 **非スコープ**
 
@@ -330,6 +400,18 @@ compute_lane_layout(repositoryId: String, order: "topo" | "date") -> Result<Lane
 ```
 
 可視 ref による絞り込み引数は T-09 で追加する。ここでは全コミットを対象にする。
+
+**T-04 からの申し送り（着手時に確認すること）**
+
+- **`RepositorySnapshot::default_branch` は SHA ではなく完全な ref 名**（`refs/heads/main`）。
+  上の `trunk_chain(commits, default_branch_sha)` はそのままでは繋がらない。
+  `snapshot.refs` から名前で引いて `target` を取るか、`trunk_chain` の引数を ref 名にすること。
+  幹が決まらないリポジトリでは `None` になる（detached ＋ main/master 無し）ので、その場合の
+  扱い（先頭コミットを幹にするか、lane 0 を空けるか）を決める必要がある。
+- **コミットの取得は `git::snapshot::load_cached` を再度呼べばよい。** ref の指紋が同じなら
+  `for-each-ref` 1 回で `Arc<RepositorySnapshot>` が返る（実測 131ms / 148 万コミット）。
+  `compute_lane_layout` のために別経路を作らないこと。
+- `commits` が topo-order で「親が必ず後ろに来る」ことは T-04 の結合テストで担保済み。
 
 **制約**（すべて CLAUDE.md §3）
 

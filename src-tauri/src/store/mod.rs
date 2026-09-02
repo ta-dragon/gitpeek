@@ -131,6 +131,14 @@ impl Store {
         Ok(repositories)
     }
 
+    /// ID で 1 件引く。登録が消えていればエラー。
+    pub fn repository(&self, id: &str) -> Result<RepositorySettings, String> {
+        self.repositories()?
+            .into_iter()
+            .find(|repository| repository.id == id)
+            .ok_or_else(|| format!("登録されていないリポジトリです: {id}"))
+    }
+
     /// リポジトリを登録する。
     ///
     /// 既に同じパスが登録されていれば、重複させずにその登録をそのまま返す。

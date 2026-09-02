@@ -8,6 +8,70 @@
 
   <body>
     <div id="root"></div>
+
+    <!--
+      起動時の受け皿。
+
+      モジュールの読み込みや評価で失敗すると React が一度も動かず、
+      ウィンドウが真っ白のまま何の手掛かりも残らない。ここで拾って画面に出す。
+
+      **このファイルの文言だけは src/i18n/ja.ts に置けない**（ja.ts を読めない状況を
+      扱うため）。描画中の例外は src/components/common/ErrorBoundary.tsx が担当する。
+    -->
+    <script>
+      (function () {
+        var root = document.getElementById("root");
+        var shown = false;
+
+        function show(title, detail) {
+          // React が描けていれば触らない。
+          if (shown || root.childElementCount > 0) return;
+          shown = true;
+          root.innerHTML =
+            '<div style="font-family:system-ui,\'Segoe UI\',sans-serif;padding:32px;line-height:1.7">' +
+            '<h1 style="font-size:16px;margin:0 0 8px">' +
+            title +
+            "</h1>" +
+            '<p style="margin:0 0 12px">画面を組み立てる前に問題が起きました。</p>' +
+            '<pre style="white-space:pre-wrap;word-break:break-all;font-size:12px;margin:0 0 12px">' +
+            detail +
+            "</pre>" +
+            '<p style="font-size:12px;margin:0">開発中の場合は、vite が ' +
+            location.origin +
+            " で動いているか確認してください。</p></div>";
+        }
+
+        function describe(value) {
+          if (!value) return String(value);
+          if (value.stack) return String(value.stack);
+          if (value.message) return String(value.message);
+          return String(value);
+        }
+
+        // capture を立てると、モジュールの取得失敗（resource error）も拾える。
+        window.addEventListener(
+          "error",
+          function (event) {
+            if (event.target && event.target !== window && event.target.src) {
+              show("スクリプトを読み込めませんでした", String(event.target.src));
+              return;
+            }
+            show("起動できませんでした", describe(event.error || event.message));
+          },
+          true,
+        );
+
+        window.addEventListener("unhandledrejection", function (event) {
+          show("起動できませんでした", describe(event.reason));
+        });
+
+        // 例外も出ずに白いままの場合の最後の手当て。
+        setTimeout(function () {
+          show("起動できませんでした", "時間内に画面が組み上がりませんでした。");
+        }, 10000);
+      })();
+    </script>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

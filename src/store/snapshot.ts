@@ -1,0 +1,197 @@
+/**
+ * 選択中リポジトリのグラフ素材。
+ *
+ * 正は Rust 側（`git::snapshot`）で、こちらは**表示用の写しを 1 つだけ**持つ。
+ * リポジトリ選択時に全コミットを一括で受け取る設計なので（docs/DESIGN.md §4.1）、
+ * ここに複数リポジトリ分を溜めない。直前のリポジトリのキャッシュは Rust 側の LRU。
+ */
+import { useSyncExternalStore } from "react";
+
+import {
+  loadRepositorySnapshot,
+  onSnapshotProgress,
+  type RepositorySnapshot,
+  type SnapshotProgress,
+} from "../lib/ipc";
+import { currentUiState, updateRepositoryUiState } from "./uiState";
+
+/**
+ * 自動で読み込まない大きさの境目。
+ *
+ * docs/DESIGN.md §4.1 が「10 万コミット超は明示的に非対象」と決めている。
+ * 非対象の規模を**起動時に黙って読みに行くと、数十秒操作できないうえ落ちることがある**
+ * （148 万コミットで Rust 側 3.5GB / WebView2 側 3.2GB まで伸び、プロセスが消えた）。
+ * 前回の件数が分かっているものだけ、読み込む前に確認を挟む。
+ */
+export const LARGE_REPOSITORY_COMMITS = 100_000;
+
+export type SnapshotState = {
+  /** `data` がどのリポジトリのものか。選択と食い違った表示を防ぐ。 */
+  repositoryId: string | null;
+  data: RepositorySnapshot | null;
+  loading: boolean;
+  error: string | null;
+  /**
+   * 取得にかかった時間。git の所要時間そのものではなく、IPC 込みの往復。
+   * キャッシュが効くと `git log` を跨がないので極端に短くなる。
+   */
+  elapsedMs: number | null;
+  /** 読み込み中の途中経過。届いていなければ null。 */
+  progress: SnapshotProgress | null;
+  /**
+   * 大きすぎて自動では読まなかったときの、前回の件数。
+   * 利用者が明示的に読み込みを選ぶまで `data` は空のまま。
+   */
+  oversized: number | null;
+};
+
+let snapshot: SnapshotState = {
+  repositoryId: null,
+  data: null,
+  loading: false,
+  error: null,
+  elapsedMs: null,
+  progress: null,
+  oversized: null,
+};
+
+// Rust 側から届く途中経過を拾う。購読は 1 回だけで、以降は現在の読み込み対象の
+// ものだけを採る（切替後に前のリポジトリの進捗が遅れて届くため）。
+void onSnapshotProgress((progress) => {
+  if (!snapshot.loading || progress.repositoryId !== snapshot.repositoryId) return;
+  setSnapshot({ progress });
+});
+
+const listeners = new Set<() => void>();
+
+function setSnapshot(next: Partial<SnapshotState>): void {
+  snapshot = { ...snapshot, ...next };
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export function useSnapshot(): SnapshotState {
+  return useSyncExternalStore(subscribe, () => snapshot);
+}
+
+/**
+ * 直近の要求だけを採用するための番号。
+ *
+ * 数万コミットの読み込みは数百 ms かかるので、素早く切り替えると先の要求が
+ * 後から返ってくる。番号が古い応答は捨てる。
+ */
+let latestRequest = 0;
+
+/**
+ * 選択中リポジトリの履歴を読む。`id` が null なら表示を空にする。
+ *
+ * `confirmed` は「大きくても読む」と利用者が選んだとき。前回の件数が
+ * [`LARGE_REPOSITORY_COMMITS`] を超えるリポジトリは、これが無いと読みに行かない。
+ */
+export async function load(
+  id: string | null,
+  force = false,
+  confirmed = false,
+): Promise<void> {
+  // StrictMode の二重実行や、同じ行の連打で 2 度読みに行かない。
+  if (!force && id !== null && id === snapshot.repositoryId && snapshot.loading) return;
+
+  const request = (latestRequest += 1);
+
+  if (id === null) {
+    setSnapshot({
+      repositoryId: null,
+      data: null,
+      loading: false,
+      error: null,
+      elapsedMs: null,
+      progress: null,
+      oversized: null,
+    });
+    return;
+  }
+
+  // 前回の件数を割合表示の分母にする。取得内容には影響しない。
+  const estimate = currentUiState().perRepository[id]?.lastCommitCount ?? null;
+
+  // 前回が大きすぎたリポジトリは、起動時や切替で黙って読みに行かない。
+  if (!confirmed && estimate !== null && estimate > LARGE_REPOSITORY_COMMITS) {
+    setSnapshot({
+      repositoryId: id,
+      data: null,
+      loading: false,
+      error: null,
+      elapsedMs: null,
+      progress: null,
+      oversized: estimate,
+    });
+    return;
+  }
+
+  setSnapshot({
+    repositoryId: id,
+    data: null,
+    loading: true,
+    error: null,
+    elapsedMs: null,
+    progress: null,
+    oversized: null,
+  });
+  const started = performance.now();
+
+  try {
+    const data = await loadRepositorySnapshot(id, force, estimate);
+    if (request !== latestRequest) return;
+    setSnapshot({
+      repositoryId: id,
+      data,
+      loading: false,
+      error: null,
+      elapsedMs: Math.round(performance.now() - started),
+      progress: null,
+      oversized: null,
+    });
+    // 次回の分母を更新する。件数が変わっても割合が大きく狂わないように毎回書く。
+    updateRepositoryUiState(id, (current) => ({
+      ...current,
+      lastCommitCount: data.commits.length,
+    }));
+  } catch (error) {
+    if (request !== latestRequest) return;
+    // 読めなくても一覧と切替は使えるままにする。空状態には落とさない。
+    setSnapshot({
+      repositoryId: id,
+      data: null,
+      loading: false,
+      error: messageOf(error),
+      progress: null,
+      oversized: null,
+    });
+  }
+}
+
+/** 今どのリポジトリの履歴を持っているか。購読していない場所から読む用。 */
+export function currentRepositoryId(): string | null {
+  return snapshot.repositoryId;
+}
+
+/** 表示中のリポジトリを読み直す。fetch / checkout の後に使う（T-17 / T-18）。 */
+export function reload(): Promise<void> {
+  return load(snapshot.repositoryId, true, true);
+}
+
+/** 大きさの確認を経て読み込む。 */
+export function loadAnyway(): Promise<void> {
+  return load(snapshot.repositoryId, false, true);
+}
+
+function messageOf(error: unknown): string {
+  if (typeof error === "string") return error;
+  return error instanceof Error ? error.message : String(error);
+}

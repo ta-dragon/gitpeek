@@ -149,7 +149,9 @@ pub fn probe(log: &dyn LogSink, program: &str, path: &Path) -> RepositoryProbe {
 /// - `symbolic-ref` 成功 ＋ `rev-parse` 成功 → ブランチ上
 /// - `symbolic-ref` 失敗 ＋ `rev-parse` 成功 → detached
 /// - `symbolic-ref` 成功 ＋ `rev-parse` 失敗 → コミット 0 件（unborn）
-fn read_head(log: &dyn LogSink, program: &str, path: &Path) -> Option<HeadState> {
+///
+/// どちらも失敗した場合は `None`。**これは unborn ではない**（リポジトリが壊れている等）。
+pub fn read_head(log: &dyn LogSink, program: &str, path: &Path) -> Option<HeadState> {
     let branch = exec::run(
         log,
         program,

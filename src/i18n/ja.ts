@@ -53,6 +53,45 @@ export const ja = {
     path: "パス",
   },
 
+  snapshot: {
+    loading: "履歴を読み込んでいます…",
+    failedTitle: "履歴を読み込めませんでした",
+    reload: "読み直す",
+    commits: "コミット",
+    branches: "ブランチ",
+    branchCounts: (local: number, remote: number) =>
+      `ローカル ${local} / リモート ${remote}`,
+    tags: "タグ",
+    defaultBranch: "幹（lane 0）",
+    elapsed: (ms: number) => `${ms} ms`,
+    count: (n: number) => `${n} 件`,
+    none: "—",
+    emptyRepository: "コミットがまだありません。",
+    outOfGraph: (n: number) => `グラフ外の ref ${n} 件`,
+
+    // 大きすぎて自動では読まなかったとき。
+    oversizedTitle: "大きなリポジトリです",
+    oversizedBody: (commits: number) =>
+      `前回は ${commits.toLocaleString()} コミットありました。読み込みに数十秒かかり、` +
+      `メモリを数 GB 使います。その間このウィンドウは操作できません。`,
+    oversizedNote:
+      "Givsoner が想定しているのは数万コミットまでです（docs/DESIGN.md §4.1）。" +
+      "リリースビルド（npm run start:release）の方が大幅に速く終わります。",
+    oversizedLoad: "それでも読み込む",
+
+    // 途中経過。段階の名前は Rust 側の LoadPhase と対応する。
+    progressRefs: "ref を読んでいます…",
+    progressCommits: "コミットを読んでいます…",
+    progressGraph: "グラフを組み立てています…",
+    progressTransfer: "画面へ渡しています…",
+    progressCount: (done: number) => `${done.toLocaleString()} 件`,
+    // 分母は前回の件数なので「約」を外さないこと。
+    progressOf: (done: number, total: number) =>
+      `${done.toLocaleString()} / 約 ${total.toLocaleString()} 件`,
+    progressPercent: (ratio: number) => `約 ${Math.round(ratio * 100)}%`,
+    progressElapsed: (seconds: number) => `${seconds} 秒経過`,
+  },
+
   palette: {
     placeholder: "リポジトリ名またはパスで絞り込み",
     empty: "一致するリポジトリがありません",
@@ -63,6 +102,13 @@ export const ja = {
     title: "リポジトリを追加してください",
     body: "ローカルの git リポジトリを登録すると、履歴の閲覧を始められます。",
     cloneDisabled: "clone は未実装です（T-19 で実装）。",
+  },
+
+  crash: {
+    title: "画面の描画で問題が起きました",
+    body: "この画面は Givsoner の不具合です。下の内容を添えて報告してください。",
+    stack: "発生箇所",
+    reload: "再読込",
   },
 
   theme: {
@@ -107,7 +153,7 @@ export const ja = {
 
   phase: {
     title: "Phase 1 — リポジトリ管理",
-    body: "リポジトリの登録・一覧・切替までが動いています。コミットグラフと差分は Phase 2 以降でこの領域に入ります。",
+    body: "リポジトリの登録・切替と、全コミットの一括取得までが動いています。コミットグラフと差分は Phase 2 以降でこの領域に入ります。",
     next: "実装フェーズは CLAUDE.md §9 を参照。",
   },
 

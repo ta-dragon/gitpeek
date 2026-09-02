@@ -15,6 +15,8 @@ import {
   type RepositoryEntry,
 } from "../lib/ipc";
 import { refreshSettings, updateSettings } from "./settings";
+// 名前が衝突するので別名で入れる（このファイルの `snapshot` はリポジトリ一覧の状態）。
+import * as history from "./snapshot";
 import { currentUiState, updateRepositoryUiState, updateUiState } from "./uiState";
 
 type Snapshot = {
@@ -170,6 +172,9 @@ export async function relocate(id: string, path: string): Promise<void> {
       ),
     }));
     await refresh();
+    // ID は変わらないので選択も変わらない。読み込み済みの履歴は別フォルダのものなので、
+    // 選択中なら読み直す（Rust 側のキャッシュも force で飛ばす）。
+    if (history.currentRepositoryId() === id) await history.load(id, true);
   });
 }
 

@@ -1,16 +1,57 @@
 pub mod commandlog;
 pub mod git;
+pub mod model;
 mod redact;
 pub mod store;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use tauri::{AppHandle, Manager, RunEvent, State};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, State};
 
 use commandlog::{CommandLog, CommandLogEntry, EmittingLog};
 use git::detect::GitStatus;
+use git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
 use git::repo::{RepositoryEntry, RepositoryProbe};
+use git::snapshot::SnapshotCache;
+use model::RepositorySnapshot;
+
+/// 読み込みの途中経過をフロントへ送るイベント名。
+const SNAPSHOT_PROGRESS_EVENT: &str = "snapshot-progress";
+
+/// 途中経過に**どのリポジトリのものか**を添えて送る。
+///
+/// 読み込み中に別のリポジトリへ切り替えると、前の読み込みの進捗が後から届く。
+/// ID が無いと、切替後の画面に前のリポジトリの件数が出てしまう。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProgressEvent<'a> {
+    repository_id: &'a str,
+    #[serde(flatten)]
+    progress: LoadProgress,
+}
+
+/// 途中経過を webview へ流す [`ProgressSink`]。
+///
+/// git 側のコードを `AppHandle` に依存させないため、Tauri に触るのはここだけ
+/// （`commandlog::EmittingLog` と同じ形）。
+struct EmittingProgress<'a, R: Runtime> {
+    app: &'a AppHandle<R>,
+    repository_id: &'a str,
+}
+
+impl<R: Runtime> ProgressSink for EmittingProgress<'_, R> {
+    fn report(&self, progress: LoadProgress) {
+        let _ = self.app.emit(
+            SNAPSHOT_PROGRESS_EVENT,
+            ProgressEvent {
+                repository_id: self.repository_id,
+                progress,
+            },
+        );
+    }
+}
 use store::settings::{RepositorySettings, Settings};
 use store::state::UiState;
 use store::{SettingsPayload, Store};
@@ -23,6 +64,8 @@ pub struct AppState {
     pub git_path: Mutex<Option<String>>,
     /// `settings.json` / `state.json` の永続化。
     pub store: Store,
+    /// 直近に読んだグラフ素材。リポジトリ切替を体感即時にする（docs/DESIGN.md §6.2）。
+    pub snapshots: Arc<SnapshotCache>,
 }
 
 /// git を検出する。`path` が指定されていればそのフルパスを、無ければ PATH 上の `git` を試す。
@@ -129,7 +172,74 @@ fn add_repository(
 /// 登録を解除する。**フォルダには触らない。**
 #[tauri::command]
 fn remove_repository(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    state.store.remove_repository(&id)
+    state.store.remove_repository(&id)?;
+    // 同じ ID が再発番されることは無いが、メモリを抱えたままにしない。
+    state.snapshots.forget(&id);
+    Ok(())
+}
+
+/// 全コミットのメタ情報と ref 一覧をまとめて読む（docs/DESIGN.md §4.1）。
+///
+/// ref の指紋が前回と同じならキャッシュを返し、`git log` を省く。
+/// `force` は fetch や checkout の直後に立てる（T-17 / T-18）。
+///
+/// `estimated_commits` は**前回の読み込み件数**。割合表示の分母に使うだけで、
+/// 取得内容には影響しない。初回は `None`（件数だけ出す）。
+#[tauri::command]
+async fn load_repository_snapshot(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    force: bool,
+    estimated_commits: Option<u64>,
+) -> Result<Arc<RepositorySnapshot>, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let cache = state.snapshots.clone();
+    let handle = app.clone();
+    let started = std::time::Instant::now();
+
+    let snapshot = tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        git::snapshot::load_cached(
+            &EmittingLog::new(&handle, &log),
+            &program,
+            &path,
+            &cache,
+            &repository.id,
+            force,
+            &Reporting::new(
+                &EmittingProgress {
+                    app: &handle,
+                    repository_id: &repository.id,
+                },
+                estimated_commits,
+            ),
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+
+    // 直列化と転送はこのあと。100 万コミットでは 450MB になり数秒かかるので、
+    // 「100% のまま無言」にならないよう最後の段階を伝えてから返す。
+    let _ = app.emit(
+        SNAPSHOT_PROGRESS_EVENT,
+        ProgressEvent {
+            repository_id: &repository_id,
+            progress: LoadProgress {
+                phase: LoadPhase::Transfer,
+                commits: snapshot.commits.len() as u64,
+                estimated_total: estimated_commits,
+                elapsed_ms: started.elapsed().as_millis() as u64,
+            },
+        },
+    );
+
+    Ok(snapshot)
 }
 
 /// 登録済みリポジトリを素性付きで返す。パスが消えていれば `probe` は `null`。
@@ -201,6 +311,7 @@ pub fn run() {
                 log: Arc::new(CommandLog::default()),
                 git_path: Mutex::new(None),
                 store,
+                snapshots: Arc::new(SnapshotCache::new()),
             });
             Ok(())
         })
@@ -212,6 +323,7 @@ pub fn run() {
             add_repository,
             remove_repository,
             list_repositories,
+            load_repository_snapshot,
             load_settings,
             save_settings,
             load_ui_state,

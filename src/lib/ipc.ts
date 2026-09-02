@@ -100,6 +100,93 @@ export function listRepositories(): Promise<RepositoryEntry[]> {
   return invoke<RepositoryEntry[]>("list_repositories");
 }
 
+/* ---------- グラフ素材（`src-tauri/src/model.rs`）---------- */
+
+/** コミット 1 件のメタ情報。本文と差分は含まない（選択時に遅延取得する）。 */
+export type CommitMeta = {
+  sha: string;
+  /** `%h`。何桁で一意になるかは git に委ねている。 */
+  shortSha: string;
+  /** 第一親が先頭。マージは 2 件以上、ルートコミットは 0 件。 */
+  parents: string[];
+  authorName: string;
+  authorEmail: string;
+  /** Unix 秒。表示形式はフロント側で決める。 */
+  authorTime: number;
+  commitTime: number;
+  subject: string;
+};
+
+export type RefKind = "localBranch" | "remoteBranch" | "tag";
+
+export type RefEntry = {
+  /** 完全な ref 名（`refs/heads/main`）。同名の別種を取り違えないための正。 */
+  name: string;
+  /** 表示用（`main` / `origin/main` / `v1.0`）。 */
+  shortName: string;
+  kind: RefKind;
+  /** 指すコミット SHA。annotated tag は peel 後。 */
+  target: string;
+  upstream: string | null;
+  /** 読み込んだコミット集合に含まれない。ジャンプを無効化する。 */
+  outOfGraph: boolean;
+};
+
+export type HeadInfo = {
+  /** コミット 0 件（unborn）のときだけ null。 */
+  sha: string | null;
+  /** detached のときだけ null。 */
+  branch: string | null;
+  detached: boolean;
+  unborn: boolean;
+};
+
+/** リポジトリ 1 つ分の読み込み結果。グラフはこれだけを材料に描く。 */
+export type RepositorySnapshot = {
+  /** topo-order。date-order への切替は再実行せずメモリ上で並べ替える。 */
+  commits: CommitMeta[];
+  refs: RefEntry[];
+  head: HeadInfo;
+  /** lane 0 を予約する幹の ref 名（完全形）。 */
+  defaultBranch: string | null;
+  loadedAt: string;
+  /** 全 ref と HEAD の指紋。Rust 側のキャッシュ判定に使う。 */
+  refFingerprint: string;
+};
+
+/** 読み込みの段階。所要時間の内訳がそのまま段階になっている。 */
+export type LoadPhase = "refs" | "commits" | "graph" | "transfer";
+
+/** `snapshot-progress` イベントの中身。 */
+export type SnapshotProgress = {
+  /** どのリポジトリの進捗か。切替直後に前の進捗が届くので必ず見ること。 */
+  repositoryId: string;
+  phase: LoadPhase;
+  commits: number;
+  /** 前回の件数を分母にした**概算**。初回は null。 */
+  estimatedTotal: number | null;
+  elapsedMs: number;
+};
+
+/**
+ * 全コミットのメタ情報と ref 一覧をまとめて読む。
+ *
+ * ref の指紋が前回と同じなら Rust 側がキャッシュを返し、`git log` は走らない。
+ * `force` は fetch / checkout の直後に立てる（T-17 / T-18）。
+ * `estimatedCommits` は前回の件数で、進捗の割合表示にしか使われない。
+ */
+export function loadRepositorySnapshot(
+  repositoryId: string,
+  force = false,
+  estimatedCommits: number | null = null,
+): Promise<RepositorySnapshot> {
+  return invoke<RepositorySnapshot>("load_repository_snapshot", {
+    repositoryId,
+    force,
+    estimatedCommits,
+  });
+}
+
 /* ---------- settings.json（`src-tauri/src/store/settings.rs`）---------- */
 
 export type ThemePreference = "system" | "light" | "dark";
@@ -224,6 +311,8 @@ export type ColumnWidths = {
 export type RepositoryUiState = {
   /** 最後に開いた時刻（RFC 3339）。「最終アクセス順」の並べ替えに使う。 */
   lastOpenedAt: string | null;
+  /** 前回読み込んだコミット数。進捗の割合表示の分母にするだけの概算値。 */
+  lastCommitCount: number | null;
   selectedCommit: string | null;
   scrollOffset: number;
   selectedFile: string | null;
@@ -259,6 +348,14 @@ export function saveUiState(uiState: UiState): Promise<void> {
 
 export function appDataDir(): Promise<string> {
   return invoke<string>("app_data_dir");
+}
+
+const SNAPSHOT_PROGRESS_EVENT = "snapshot-progress";
+
+export function onSnapshotProgress(
+  handler: (progress: SnapshotProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<SnapshotProgress>(SNAPSHOT_PROGRESS_EVENT, (event) => handler(event.payload));
 }
 
 const COMMAND_LOG_EVENT = "command-log";

@@ -20,7 +20,10 @@
 #   empty-subject  subject が空のコミット
 #   empty          コミット 0 件（unborn HEAD）
 #   detached       detached HEAD
+#   messages       複数行メッセージ（subject と本文の切れ目）
+#   tags           軽量タグ・注釈付きタグ・グラフ外のタグ
 #   bare.git       bare リポジトリ
+#   cloned         bare.git のクローン（リモート追跡ブランチと upstream）
 
 set -eu
 
@@ -141,8 +144,38 @@ commit a.txt "1 つ目"
 commit a.txt "2 つ目"
 git_ -C "$repo" checkout --quiet --detach HEAD~1
 
+# --- 複数行メッセージ -------------------------------------------------------
+# %s は最初の段落だけを 1 行に畳む。本文が混ざらないことを確かめるため。
+new_repo messages
+commit a.txt "1 つ目"
+echo "2 つ目" >>"$repo/a.txt"
+git_ -C "$repo" add -A
+printf '1 行目の要約
+2 行目も同じ段落
+
+本文の段落。
+' | git_ -C "$repo" commit --quiet -F -
+
+# --- タグ -------------------------------------------------------------------
+# 注釈付きタグは tag オブジェクトを指すので peel が要る（docs/DESIGN.md 付録 A）。
+new_repo tags
+commit a.txt "1 つ目"
+git_ -C "$repo" tag v1.0
+commit a.txt "2 つ目"
+git_ -C "$repo" tag -a v2.0 -m "注釈付きタグ"
+# どのブランチからも到達できないタグ。タグを起点 ref にしないので「グラフ外」になる（§4.2）。
+git_ -C "$repo" checkout --quiet -b throwaway
+commit orphan.txt "消えるブランチのコミット"
+git_ -C "$repo" tag v0.9-orphan
+git_ -C "$repo" checkout --quiet main
+git_ -C "$repo" branch --quiet -D throwaway
+
 # --- bare -------------------------------------------------------------------
 git_ clone --quiet --bare "$root/linear" "$root/bare.git"
+
+# --- クローン ---------------------------------------------------------------
+# リモート追跡ブランチ・upstream・origin/HEAD を持つ唯一のリポジトリ。
+git_ clone --quiet "$root/bare.git" "$root/cloned"
 
 echo "生成しました: $root"
 ls "$root"
