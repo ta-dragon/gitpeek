@@ -380,6 +380,11 @@ pub struct FileDiff {
     /// 代表の改行コード。**Rust 側で計算して渡す**（同じ規則を 2 言語で持たない）。
     pub dominant_line_ending: Option<LineEnding>,
     pub mixed_line_endings: bool,
+    /// 変更前のバイト数。**バイナリのときだけ入る**（テキストでは常に `None`）。
+    /// 追加では片側が無いので `None` になる。**0 と混同しないこと。**
+    pub old_size: Option<u64>,
+    /// 変更後のバイト数。削除では `None`。
+    pub new_size: Option<u64>,
     pub hunks: Vec<Hunk>,
 }
 
@@ -468,19 +473,30 @@ pub fn file_diff(
 
     // **ここで文字コードを判別する**（docs/DESIGN.md §9.1）。`stdout_lossy` は使わない。
     Ok(match encoding::decode(&output.stdout, options.encoding) {
-        encoding::Decoded::Binary { .. } => FileDiff {
-            path: target.path.to_string(),
-            binary: true,
-            encoding: options.encoding.unwrap_or(TextEncoding::Utf8),
-            had_bom: false,
-            lossy: false,
-            line_endings: LineEndingCounts::default(),
-            dominant_line_ending: None,
-            mixed_line_endings: false,
-            hunks: Vec::new(),
-        },
+        encoding::Decoded::Binary { .. } => {
+            let (old_size, new_size) = binary_sizes(log, program, repo, target);
+            FileDiff {
+                path: target.path.to_string(),
+                binary: true,
+                encoding: options.encoding.unwrap_or(TextEncoding::Utf8),
+                had_bom: false,
+                lossy: false,
+                line_endings: LineEndingCounts::default(),
+                dominant_line_ending: None,
+                mixed_line_endings: false,
+                old_size,
+                new_size,
+                hunks: Vec::new(),
+            }
+        }
         encoding::Decoded::Text(text) => {
             let parsed = parse_patch(&text.text);
+            // `Binary files ... differ` は**テキストとして読めた**うえで出てくる。
+            let (old_size, new_size) = if parsed.binary {
+                binary_sizes(log, program, repo, target)
+            } else {
+                (None, None)
+            };
             FileDiff {
                 path: target.path.to_string(),
                 binary: parsed.binary,
@@ -490,10 +506,59 @@ pub fn file_diff(
                 line_endings: parsed.line_endings,
                 dominant_line_ending: parsed.line_endings.dominant(),
                 mixed_line_endings: parsed.line_endings.mixed(),
+                old_size,
+                new_size,
                 hunks: parsed.hunks,
             }
         }
     })
+}
+
+/// バイナリの前後のバイト数を取る（docs/DESIGN.md §7.2）。
+///
+/// **バイナリのときだけ呼ぶこと。** テキストでは行数が出るので要らないうえ、
+/// 1 ファイルにつき git を 2 回余分に叩くことになる。
+///
+/// `cat-file -s` ではなく `ls-tree -l` を使う。無いパス（追加や削除の反対側）を
+/// `cat-file` に渡すと**失敗として記録される**が、`ls-tree` は空を返して成功するため。
+fn binary_sizes(
+    log: &dyn LogSink,
+    program: &str,
+    repo: &Path,
+    target: &DiffTarget<'_>,
+) -> (Option<u64>, Option<u64>) {
+    let old_path = target.old_path.unwrap_or(target.path);
+    let old_size = target
+        .parent
+        .and_then(|parent| blob_size(log, program, repo, parent, old_path));
+    let new_size = blob_size(log, program, repo, target.sha, target.path);
+    (old_size, new_size)
+}
+
+/// そのリビジョンにあるファイルのバイト数。無ければ `None`。
+fn blob_size(
+    log: &dyn LogSink,
+    program: &str,
+    repo: &Path,
+    rev: &str,
+    path: &str,
+) -> Option<u64> {
+    let output = exec::run(
+        log,
+        program,
+        Some(repo),
+        &["ls-tree", "-l", "-z", rev, "--", path],
+    )
+    .ok()?;
+    if !output.ok() {
+        return None;
+    }
+
+    // `<mode> <type> <object> <size>` のあとにタブとパスが続く。パスは要らない。
+    let record = String::from_utf8_lossy(&output.stdout);
+    let head = record.split('\0').next()?;
+    let size = head.split_whitespace().nth(3)?;
+    size.parse().ok()
 }
 
 /// パースの結果。改行の集計は**内容行だけ**を対象にする。

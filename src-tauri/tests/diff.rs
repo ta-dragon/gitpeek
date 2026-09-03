@@ -88,8 +88,8 @@ fn reads_every_kind_of_change() {
     let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
     let changes = changes_of("changes", Some(&head.parents[0]), &head.sha);
 
-    // リネーム / 追加 / 削除 / サブディレクトリ / バイナリ / Shift_JIS / CRLF。
-    assert_eq!(changes.len(), 7, "7 ファイル変わっているはず: {changes:#?}");
+    // リネーム / 追加 / 削除 / サブディレクトリ / バイナリ 3 種 / Shift_JIS / CRLF。
+    assert_eq!(changes.len(), 9, "9 ファイル変わっているはず: {changes:#?}");
 
     let renamed = find(&changes, "リネーム後.txt");
     assert_eq!(renamed.status, ChangeStatus::Renamed);
@@ -137,7 +137,7 @@ fn a_root_commit_lists_every_file_as_added() {
 
     let changes = changes_of("changes", None, &root.sha);
 
-    assert_eq!(changes.len(), 6, "最初のコミットは 6 ファイル: {changes:#?}");
+    assert_eq!(changes.len(), 7, "最初のコミットは 7 ファイル: {changes:#?}");
     assert!(
         changes.iter().all(|change| change.status == ChangeStatus::Added),
         "ルートコミットは全部 Added のはず"
@@ -430,6 +430,49 @@ fn binary_files_have_no_hunks() {
 
     assert!(diff.binary);
     assert!(diff.hunks.is_empty());
+    // 行数の代わりにサイズの変化を出す（docs/DESIGN.md §7.2）。
+    assert_eq!((diff.old_size, diff.new_size), (Some(6), Some(8)));
+}
+
+/// **片側が無いバイナリのサイズは `None`。0 ではない。**
+///
+/// 0 と書いてしまうと「空のファイルになった」と読めてしまう。
+#[test]
+fn added_and_deleted_binaries_have_one_side_only() {
+    let snapshot = snapshot_of("changes");
+    let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
+    let parent = Some(head.parents[0].as_str());
+
+    let added = diff_of("changes", parent, &head.sha, "追加.bin", None, &DiffOptions::default());
+    assert!(added.binary);
+    assert_eq!((added.old_size, added.new_size), (None, Some(7)));
+
+    let deleted = diff_of("changes", parent, &head.sha, "消える.bin", None, &DiffOptions::default());
+    assert!(deleted.binary);
+    assert_eq!((deleted.old_size, deleted.new_size), (Some(6), None));
+
+    // ルートコミットは親が無いので、変更前は常に `None`。
+    let root = commit_by_subject(&snapshot, "最初のコミット");
+    let first = diff_of("changes", None, &root.sha, "blob.bin", None, &DiffOptions::default());
+    assert_eq!((first.old_size, first.new_size), (None, Some(6)));
+}
+
+/// テキストではサイズを取りに行かない（git を 2 回余分に叩かないため）。
+#[test]
+fn text_diffs_do_not_carry_sizes() {
+    let snapshot = snapshot_of("changes");
+    let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
+
+    let diff = diff_of(
+        "changes",
+        Some(&head.parents[0]),
+        &head.sha,
+        "sub/keep.txt",
+        None,
+        &DiffOptions::default(),
+    );
+
+    assert_eq!((diff.old_size, diff.new_size), (None, None));
 }
 
 /// コンテキスト行の増減が効くこと。

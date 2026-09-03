@@ -18,7 +18,7 @@
 #   two-roots      ルートコミット 2 つ（無関係な履歴の合流）
 #   orphan         合流しない orphan ブランチ（幹と繋がらない島）
 #   japanese       日本語ファイル名・日本語ディレクトリ
-#   changes        追加 / 変更 / 削除 / リネーム / バイナリ（T-11）
+#   changes        追加 / 変更 / 削除 / リネーム / バイナリ（T-11, T-14）
 #                  ＋ Shift_JIS のファイルと CRLF のファイル（T-13）
 #   empty-subject  subject が空のコミット
 #   empty          コミット 0 件（unborn HEAD）
@@ -154,6 +154,8 @@ mkdir -p "$repo/sub"
 printf 'x\n' >"$repo/sub/keep.txt"
 # NUL を含むファイルはバイナリとして扱われ、numstat が `-` を返す。
 printf 'bin\000\001\002' >"$repo/blob.bin"
+# 追加と削除のバイナリ。**片側のサイズが「無い」こと**を見る（0 ではない — T-14）。
+printf 'gone\000\001' >"$repo/消える.bin"
 # 差分本体の文字コード判別と改行検出用（T-13）。
 # sjis.txt は「// 日本語」を Shift_JIS で、crlf.txt は UTF-8 で改行だけ CRLF。
 # core.autocrlf=false を付けてあるので、CRLF はそのままコミットされる。
@@ -167,7 +169,10 @@ printf 'a\nb\nc\nd\n' >"$repo/リネーム後.txt"
 rm "$repo/消える.txt"
 printf 'y\nz\n' >>"$repo/sub/keep.txt"
 printf 'new\n' >"$repo/追加.txt"
-printf 'bin\000\011\011' >"$repo/blob.bin"
+# サイズの変わるバイナリ（6 → 8 バイト）。
+printf 'bin\000\011\011\011\011' >"$repo/blob.bin"
+rm "$repo/消える.bin"
+printf 'new\000\001\002\003' >"$repo/追加.bin"
 printf '// \223\372\226\173\214\352\n1\n2\n' >"$repo/sjis.txt"
 printf 'a\r\nB\r\n' >"$repo/crlf.txt"
 git_ -C "$repo" add -A

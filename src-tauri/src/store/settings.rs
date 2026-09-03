@@ -196,11 +196,17 @@ pub struct UiSettings {
     pub date_format: String,
     /// `"side-by-side"` | `"unified"`
     pub diff_layout: String,
-    pub context_lines: u8,
+    /// `-U<N>`。**`u8` にしないこと** — 画面の「すべて」は十分大きな `-U` で
+    /// 代用しており（`ALL_CONTEXT_LINES` = 1000000）、`u8` だと保存が弾かれる。
+    pub context_lines: u32,
     pub ignore_whitespace: bool,
     pub show_line_endings: bool,
     /// `"topo"` | `"date"`
     pub commit_order: String,
+    /// 差分をこの行数より多く含むファイルは既定で折りたたむ（docs/DESIGN.md §7.2）。
+    pub collapse_lines: u32,
+    /// 同じくバイト数。どちらか一方でも超えたら折りたたむ。
+    pub collapse_bytes: u32,
 }
 
 impl Default for UiSettings {
@@ -213,6 +219,8 @@ impl Default for UiSettings {
             ignore_whitespace: false,
             show_line_endings: false,
             commit_order: "topo".to_string(),
+            collapse_lines: 3_000,
+            collapse_bytes: 500 * 1024,
         }
     }
 }
@@ -363,7 +371,7 @@ pub fn save(paths: &StorePaths, settings: &Settings) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{load, save, LoadError, LoadedSettings, Settings, SCHEMA_VERSION};
+    use super::{load, save, LoadError, LoadedSettings, Settings, UiSettings, SCHEMA_VERSION};
     use crate::store::paths::StorePaths;
 
     fn temp_paths() -> (tempfile::TempDir, StorePaths) {
@@ -518,5 +526,17 @@ mod tests {
         assert!(text.contains("credentialKey"));
         assert!(!text.contains("apiKey"), "{text}");
         assert!(!text.contains("api_key"), "{text}");
+    }
+    /// **「すべて」の `-U` が設定に収まること。**
+    ///
+    /// `context_lines` を `u8` にしていたときは、画面で「すべて」を選ぶと
+    /// 保存が丸ごと弾かれた（値は `ALL_CONTEXT_LINES` = 1000000）。
+    #[test]
+    fn context_lines_holds_the_all_choice() {
+        let ui: UiSettings =
+            serde_json::from_str(r#"{"contextLines":1000000}"#).expect("読めるはず");
+        assert_eq!(ui.context_lines, 1_000_000);
+        // 他の既定値まで消えていないこと（`serde(default)` が効いている）。
+        assert_eq!(ui.collapse_lines, 3_000);
     }
 }

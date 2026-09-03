@@ -1592,15 +1592,25 @@ body {
 .dtable {
   --dgutter: 3.6em;
 
+  /* 仮想スクロールの行を絶対配置で置くので、基準になる（T-14）。 */
+  position: relative;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.55;
 }
 
+/*
+ * 行は**絶対配置**。仮想スクロールが `translateY` で置き場所を決める。
+ * 高さは実測なので指定しない（本文を折り返すと 2 行分以上になる）。
+ */
 .drow {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: grid;
   align-items: stretch;
+  width: 100%;
 }
 
 .drow--split {
@@ -1656,11 +1666,17 @@ body {
   overflow-wrap: anywhere;
 }
 
-/* 行内で変わったところ。地色より一段濃くする。 */
+/*
+ * 行内で変わったところ。地色より一段濃くする。
+ *
+ * **ここでは構文色を使わない**（T-14）。強調の地色は行の地より明るいので、
+ * その上に構文色を載せると読めなくなる（実測で最悪 1.97。本文の色なら 4.1）。
+ * 変わった範囲は「何色のトークンか」より「どこが変わったか」が知りたいところ。
+ */
 .dline__word {
   border-radius: 2px;
   background: var(--diff-add-word);
-  color: inherit;
+  color: var(--text);
 }
 
 .dline--removed .dline__word {
@@ -1698,7 +1714,9 @@ body {
   font-size: 11px;
 }
 
-.dhunk:first-child {
+/* 先頭の見出しだけ上の線が要らない。**`:first-child` では効かない** —
+   仮想スクロールでは描かれている中の先頭でしかないため。 */
+.dhunk[data-index="0"] {
   border-top: none;
 }
 

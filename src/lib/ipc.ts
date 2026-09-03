@@ -380,6 +380,12 @@ export type FileDiff = {
   /** 代表の改行コード。**Rust 側で計算済み**（同じ規則を 2 言語で持たない）。 */
   dominantLineEnding: LineEnding | null;
   mixedLineEndings: boolean;
+  /**
+   * バイナリのときだけ入るバイト数。**追加 / 削除では片側が null**。
+   * **0 と混同しないこと**（0 は「空のファイルになった」の意味になる）。
+   */
+  oldSize: number | null;
+  newSize: number | null;
   hunks: Hunk[];
 };
 
@@ -490,6 +496,10 @@ export type UiSettings = {
   ignoreWhitespace: boolean;
   showLineEndings: boolean;
   commitOrder: "topo" | "date";
+  /** この行数を超える差分は既定で折りたたむ（docs/DESIGN.md §7.2）。 */
+  collapseLines: number;
+  /** 同じくバイト数。どちらか一方でも超えたら折りたたむ。 */
+  collapseBytes: number;
 };
 
 export type FetchSettings = { staleWarningDays: number };
@@ -534,6 +544,8 @@ export const DEFAULT_SETTINGS: Settings = {
     ignoreWhitespace: false,
     showLineEndings: false,
     commitOrder: "topo",
+    collapseLines: 3_000,
+    collapseBytes: 512_000,
   },
   fetch: { staleWarningDays: 7 },
   review: { concurrency: 1, contextLines: 10 },

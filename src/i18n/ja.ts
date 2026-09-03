@@ -285,6 +285,18 @@ export const ja = {
     selectFile: "ファイルを選ぶと、ここに差分が出ます。",
     diffFailed: "差分を取得できませんでした",
     binaryBody: "バイナリファイルのため、差分は表示できません。",
+    /*
+     * バイナリは行数の代わりにサイズの変化を出す（docs/DESIGN.md §7.2）。
+     * **片側が無いときは「なし」**。0 と書くと「空のファイルになった」に読める。
+     */
+    binarySize: (before: string, after: string) => `サイズ ${before} → ${after}`,
+    sizeUnknown: "なし",
+
+    // 大差分の折りたたみ（T-14）。
+    collapsedTitle: "大きな差分です",
+    collapsedDetail: (lines: number, size: string) =>
+      `${lines} 行 / ${size} あります。開くと表示が重くなることがあります。`,
+    expand: "それでも表示する",
     noHunks: "内容の変更はありません（リネームやモードの変更だけです）。",
     symlink: "シンボリックリンク",
 

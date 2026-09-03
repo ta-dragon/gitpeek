@@ -9,6 +9,13 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
+  /*
+   * Shiki の文法と wasm は**遅延読み込みの別チャンク**になる（docs/DESIGN.md §7.2）。
+   * 大きいのは承知の上なので、既定の 500KB では毎回警告が出て意味を成さない。
+   * **起動時に読むチャンク（index）が増えたら気付きたい**ので、無効にはしない。
+   */
+  build: { chunkSizeWarningLimit: 900 },
+
   // テストするのは純関数だけなので DOM は要らない（docs/DESIGN.md §14.4）。
   test: {
     environment: "node",

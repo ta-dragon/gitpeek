@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ja } from "../../i18n/ja";
+import { formatBytes, measureDiff, shouldCollapse } from "../../lib/diffRows";
 import {
   loadFileDiff,
   type FileChange,
@@ -17,9 +18,9 @@ import {
   type TextEncoding,
   type UiSettings,
 } from "../../lib/ipc";
+import { CollapsedNotice } from "./CollapsedNotice";
+import { DiffBody } from "./DiffBody";
 import { DiffToolbar } from "./DiffToolbar";
-import { SideBySide } from "./SideBySide";
-import { Unified } from "./Unified";
 import type { CommitFiles } from "./useCommitFiles";
 
 type Props = {
@@ -48,17 +49,24 @@ export function DiffPane({
    */
   const [forcedEncoding, setForcedEncoding] = useState<TextEncoding | null>(null);
   const [retry, setRetry] = useState(0);
+  /**
+   * 大きな差分を明示的に開いたか。**永続化せず、ファイルを移ったら畳み直す**
+   * （文字コードの上書きと同じ理由 — ファイルごとの判断なので持ち越さない）。
+   */
+  const [expanded, setExpanded] = useState(false);
 
   const latest = useRef(0);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   const change: FileChange | null =
     files.changes.find((entry) => entry.path === selectedFile) ?? null;
   // ルートコミットは親が無い。`null` が「空ツリーとの差分」を意味する。
   const parent = files.detail?.parents[files.parentIndex] ?? null;
 
-  // ファイルやコミットが変われば上書きは意味を失う。自動判別へ戻す。
+  // ファイルやコミットが変われば上書きは意味を失う。自動判別へ戻し、折りたたみ直す。
   useEffect(() => {
     setForcedEncoding(null);
+    setExpanded(false);
   }, [repositoryId, sha, selectedFile]);
 
   useEffect(() => {
@@ -147,15 +155,17 @@ export function DiffPane({
         />
       )}
 
-      <div className="dpane__body">
+      <div className="dpane__body" ref={bodyRef}>
         <Body
           sha={sha}
           change={change}
           diff={diff}
           loading={loading}
           error={error}
-          layout={ui.diffLayout}
-          showLineEndings={ui.showLineEndings}
+          ui={ui}
+          expanded={expanded}
+          scrollRef={bodyRef}
+          onExpand={() => setExpanded(true)}
           onRetry={() => {
             setError(null);
             setRetry((count) => count + 1);
@@ -172,8 +182,10 @@ function Body({
   diff,
   loading,
   error,
-  layout,
-  showLineEndings,
+  ui,
+  expanded,
+  scrollRef,
+  onExpand,
   onRetry,
 }: {
   sha: string | null;
@@ -181,8 +193,10 @@ function Body({
   diff: FileDiff | null;
   loading: boolean;
   error: string | null;
-  layout: UiSettings["diffLayout"];
-  showLineEndings: boolean;
+  ui: UiSettings;
+  expanded: boolean;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  onExpand: () => void;
   onRetry: () => void;
 }) {
   if (sha === null) return <p className="dpane__pending">{ja.diff.empty}</p>;
@@ -203,15 +217,42 @@ function Body({
   // 読み込み中は前のファイルの差分を出したままにしない（別のファイルに見える）。
   if (diff === null || loading) return <p className="dpane__pending">{ja.diff.loading}</p>;
 
-  if (diff.binary) return <p className="dpane__pending">{ja.diff.binaryBody}</p>;
+  if (diff.binary) {
+    return (
+      <div className="dpane__notice">
+        <p className="dpane__pending">{ja.diff.binaryBody}</p>
+        {/* 行数の代わりにサイズの変化を出す（docs/DESIGN.md §7.2）。 */}
+        <p className="dpane__detail">
+          {ja.diff.binarySize(sizeText(diff.oldSize), sizeText(diff.newSize))}
+        </p>
+      </div>
+    );
+  }
+
   // リネームやモード変更だけの差分。エラーではない。
   if (diff.hunks.length === 0) return <p className="dpane__pending">{ja.diff.noHunks}</p>;
 
-  return layout === "unified" ? (
-    <Unified hunks={diff.hunks} showLineEndings={showLineEndings} />
-  ) : (
-    <SideBySide hunks={diff.hunks} showLineEndings={showLineEndings} />
+  // **測るだけなら安い。** 重いのはこの後の行の対応付け・語単位差分・ハイライトなので、
+  // 折りたたむと決めたらそこへ進まない。
+  const size = measureDiff(diff.hunks);
+  if (!expanded && shouldCollapse(size, ui)) {
+    return <CollapsedNotice size={size} onExpand={onExpand} />;
+  }
+
+  return (
+    <DiffBody
+      path={diff.path}
+      hunks={diff.hunks}
+      layout={ui.diffLayout}
+      showLineEndings={ui.showLineEndings}
+      scrollRef={scrollRef}
+    />
   );
+}
+
+/** 片側が無いバイナリは「なし」。**0 と書くと「空になった」に読める。** */
+function sizeText(bytes: number | null): string {
+  return bytes === null ? ja.diff.sizeUnknown : formatBytes(bytes);
 }
 
 /** シンボリックリンクのモードは `120000`。追加・削除では片側が `000000` になる。 */

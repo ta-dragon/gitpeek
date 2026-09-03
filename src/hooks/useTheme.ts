@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import type { ThemePreference } from "../lib/ipc";
 import { currentSettings, updateSettings, useSettings } from "../store/settings";
@@ -56,4 +56,46 @@ export function useTheme(): [ThemePreference, (next: ThemePreference) => void] {
   }, [loaded, setTheme]);
 
   return [theme, setTheme];
+}
+
+/**
+ * 実際に描かれているのがライトかダークか。
+ *
+ * **設定ではなく `data-theme` を見る。** CSS が見ているのと同じものを見ないと、
+ * テーマトークンで表せない色（シンタックスハイライト）だけが食い違う。
+ * 設定が `"system"` のときは属性が付かないので、そのときだけ OS に訊く。
+ */
+export function useResolvedTheme(): "light" | "dark" {
+  const [theme, setTheme] = useState(resolveTheme);
+
+  useEffect(() => {
+    const update = (): void => setTheme(resolveTheme());
+    update();
+
+    const root = document.documentElement;
+    const observer = new MutationObserver(update);
+    observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    media.addEventListener("change", update);
+
+    return () => {
+      observer.disconnect();
+      media.removeEventListener("change", update);
+    };
+  }, []);
+
+  return theme;
+}
+
+function resolveTheme(): "light" | "dark" {
+  const attribute = document.documentElement.getAttribute("data-theme");
+  if (attribute === "dark" || attribute === "light") return attribute;
+
+  try {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  } catch {
+    // matchMedia が無い環境（テストなど）ではライト扱いでよい。
+    return "light";
+  }
 }

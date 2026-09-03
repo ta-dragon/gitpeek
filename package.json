@@ -17,12 +17,16 @@
     "package:zip": "npm run tauri build && powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path dist-zip | Out-Null; Compress-Archive -Path 'src-tauri/target/release/Givsoner.exe' -DestinationPath 'dist-zip/Givsoner-portable.zip' -Force\""
   },
   "dependencies": {
+    "@shikijs/langs": "^4.4.3",
+    "@shikijs/themes": "^4.4.3",
+    "@shikijs/types": "^4.4.3",
     "@tanstack/react-virtual": "^3.14.10",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "@tauri-apps/plugin-opener": "^2",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "shiki": "^4.4.3"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
