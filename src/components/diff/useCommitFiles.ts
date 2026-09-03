@@ -21,7 +21,21 @@ import {
 /** 参照が毎回変わると一覧が毎回組み直しになる。空のときは同じ配列を使う。 */
 const NO_CHANGES: FileChange[] = [];
 
+/**
+ * 何を見ているか。**1 点（コミットと親）か、2 点比較か**（docs/DESIGN.md §10.3）。
+ *
+ * 差分の取得側から見ればどちらも「2 つのリビジョンを比べる」なので、
+ * 違いは**親を自分で決めるかどうか**と、コミット詳細を出すかどうかだけ。
+ */
+export type DiffScope =
+  | { kind: "commit"; sha: string }
+  | { kind: "compare"; from: string; to: string; symmetric: boolean };
+
+/** 実際に git へ渡した 2 点。`from` が null ならルートコミット（空ツリーとの差分）。 */
+export type DiffRange = { from: string | null; to: string; symmetric: boolean };
+
 export type CommitFiles = {
+  /** **2 点比較では null**（`show -s` は 1 点のためのもの）。 */
   detail: CommitDetail | null;
   changes: FileChange[];
   loading: boolean;
@@ -31,6 +45,11 @@ export type CommitFiles = {
   setParentIndex: (index: number) => void;
   /** 親のメタ情報。読み込んだ集合の外にある親は `null`。 */
   parentsInGraph: (CommitMeta | null)[];
+  /**
+   * 一覧を作ったときに実際に比べた 2 点。**差分本体もこれを使う。**
+   * 詳細から組み直すと、読み込み中に一覧と差分が別の組を見ることがある。
+   */
+  range: DiffRange | null;
   retry: () => void;
   /** `Enter` でフォーカスを移す先（差分本体）に付ける。 */
   bodyRef: React.RefObject<HTMLDivElement | null>;
@@ -38,20 +57,28 @@ export type CommitFiles = {
 
 export function useCommitFiles({
   repositoryId,
-  sha,
+  scope,
   commits,
   selectedFile,
   onSelectFile,
 }: {
   repositoryId: string;
-  /** 選択中のコミット。`state.json` の `selectedCommit` が正（T-07 からの申し送り）。 */
-  sha: string | null;
+  /** 見ているもの。`null` なら何も選ばれていない。 */
+  scope: DiffScope | null;
   /** 読み込んだ全コミット。親の subject を引くために使う（再取得はしない）。 */
   commits: CommitMeta[];
   selectedFile: string | null;
   onSelectFile: (path: string | null) => void;
 }): CommitFiles {
+  // **依存には素の値を並べる。** `scope` は呼び出しのたびに作り直される
+  // オブジェクトなので、そのまま依存に入れると毎回取り直しになる。
+  const sha = scope?.kind === "commit" ? scope.sha : null;
+  const from = scope?.kind === "compare" ? scope.from : null;
+  const to = scope?.kind === "compare" ? scope.to : null;
+  const symmetric = scope?.kind === "compare" ? scope.symmetric : false;
+
   const [detail, setDetail] = useState<CommitDetail | null>(null);
+  const [range, setRange] = useState<DiffRange | null>(null);
   const [changes, setChanges] = useState<FileChange[]>(NO_CHANGES);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,8 +109,9 @@ export function useCommitFiles({
   useEffect(() => {
     const request = (latest.current += 1);
 
-    if (sha === null) {
+    if (sha === null && to === null) {
       setDetail(null);
+      setRange(null);
       setChanges(NO_CHANGES);
       setLoading(false);
       setError(null);
@@ -95,26 +123,35 @@ export function useCommitFiles({
 
     void (async () => {
       try {
-        const loaded = await loadCommitDetail(repositoryId, sha);
+        // **2 点比較では詳細を取りに行かない。** 親は呼び出し側が決めている。
+        const target: DiffRange =
+          sha === null
+            ? { from, to: to as string, symmetric }
+            : await commitRange(repositoryId, sha, parentIndex, setDetail);
         if (request !== latest.current) return;
-        setDetail(loaded);
+        if (sha === null) setDetail(null);
 
-        // ルートコミットは親が無い。null を渡すと空ツリーとの差分になる。
-        const parent = loaded.parents[parentIndex] ?? loaded.parents[0] ?? null;
-        const files = await loadChangedFiles(repositoryId, sha, parent);
+        const files = await loadChangedFiles(
+          repositoryId,
+          target.to,
+          target.from,
+          target.symmetric,
+        );
         if (request !== latest.current) return;
 
+        setRange(target);
         setChanges(files.length === 0 ? NO_CHANGES : files);
         setLoading(false);
       } catch (caught) {
         if (request !== latest.current) return;
         setDetail(null);
+        setRange(null);
         setChanges(NO_CHANGES);
         setLoading(false);
         setError(messageOf(caught));
       }
     })();
-  }, [repositoryId, sha, parentIndex, retryCount]);
+  }, [repositoryId, sha, from, to, symmetric, parentIndex, retryCount]);
 
   // 選択ファイルが今の一覧に無ければ先頭へ寄せる。コミットを移ると前のファイルは
   // たいてい変更されていないので、毎回「選択なし」になるより先頭が出るほうが速い。
@@ -185,8 +222,31 @@ export function useCommitFiles({
     parentIndex,
     setParentIndex,
     parentsInGraph,
+    range,
     retry,
     bodyRef,
+  };
+}
+
+/**
+ * 1 点のときの「比べる 2 点」を決める。**詳細を取ってからでないと親が分からない。**
+ *
+ * ルートコミットは親が無いので `from` が null になり、空ツリーとの差分になる。
+ * 指定された番号の親が無ければ第 1 親に落とす（親の数はコミットごとに違う）。
+ */
+async function commitRange(
+  repositoryId: string,
+  sha: string,
+  parentIndex: number,
+  setDetail: (detail: CommitDetail) => void,
+): Promise<DiffRange> {
+  const detail = await loadCommitDetail(repositoryId, sha);
+  setDetail(detail);
+
+  return {
+    from: detail.parents[parentIndex] ?? detail.parents[0] ?? null,
+    to: sha,
+    symmetric: false,
   };
 }
 

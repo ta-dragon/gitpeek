@@ -8,12 +8,26 @@
 import { useState } from "react";
 
 import { ja } from "../../i18n/ja";
+import type { CommitMeta } from "../../lib/ipc";
 import { CommitDetail } from "./CommitDetail";
+import { CompareBar } from "./CompareBar";
 import { FileList, type FileListLayout } from "./FileList";
 import type { CommitFiles } from "./useCommitFiles";
 
+/** 2 点比較中に出すもの（T-15）。`null` なら 1 点の詳細を出す。 */
+export type CompareInfo = {
+  from: string;
+  to: string;
+  symmetric: boolean;
+  commitBySha: Map<string, CommitMeta>;
+  onSymmetricChange: (symmetric: boolean) => void;
+  onSwap: () => void;
+  onClear: () => void;
+};
+
 export function CommitInfo({
   sha,
+  compare,
   files,
   selectedFile,
   onSelectFile,
@@ -21,6 +35,7 @@ export function CommitInfo({
 }: {
   /** 選択中のコミット。`null` なら案内だけ出す。 */
   sha: string | null;
+  compare: CompareInfo | null;
   files: CommitFiles;
   selectedFile: string | null;
   onSelectFile: (path: string) => void;
@@ -49,7 +64,8 @@ export function CommitInfo({
   }
 
   const detail = files.detail;
-  if (detail === null) {
+  // **比較中は詳細を取りに行かない**ので、待つのは 1 点のときだけ。
+  if (compare === null && detail === null) {
     return (
       <div className="cinfo cinfo--empty">
         <p>{ja.diff.loading}</p>
@@ -59,13 +75,26 @@ export function CommitInfo({
 
   return (
     <div className="cinfo">
-      <CommitDetail
-        detail={detail}
-        parentIndex={files.parentIndex}
-        parentsInGraph={files.parentsInGraph}
-        onParentChange={files.setParentIndex}
-        onCopySha={(text) => void copyText(text, onNotice)}
-      />
+      {compare !== null ? (
+        <CompareBar
+          from={{ sha: compare.from, commit: compare.commitBySha.get(compare.from) ?? null }}
+          to={{ sha: compare.to, commit: compare.commitBySha.get(compare.to) ?? null }}
+          symmetric={compare.symmetric}
+          onSymmetricChange={compare.onSymmetricChange}
+          onSwap={compare.onSwap}
+          onClear={compare.onClear}
+        />
+      ) : (
+        detail !== null && (
+          <CommitDetail
+            detail={detail}
+            parentIndex={files.parentIndex}
+            parentsInGraph={files.parentsInGraph}
+            onParentChange={files.setParentIndex}
+            onCopySha={(text) => void copyText(text, onNotice)}
+          />
+        )
+      )}
 
       <FileList
         changes={files.changes}

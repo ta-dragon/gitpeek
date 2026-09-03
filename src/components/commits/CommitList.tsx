@@ -52,13 +52,15 @@ type Props = {
   columns: ColumnWidths;
   dateFormat: UiSettings["dateFormat"];
   selectedSha: string | null;
+  /** 2 点比較の比較元。`null` なら比較していない（T-15）。 */
+  compareSha: string | null;
   /**
    * 外から「この SHA を見せてほしい」と言われたとき（ブランチツリーのジャンプ）。
    * 連番が変わったときだけ動く。選択そのものは `selectedSha` が正。
    */
   jumpTo: { sha: string; nonce: number } | null;
   order: GraphOrder;
-  onSelect: (sha: string) => void;
+  onSelect: (sha: string, compare: boolean) => void;
   onColumnsChange: (next: ColumnWidths) => void;
   onOrderChange: (next: GraphOrder) => void;
 };
@@ -71,6 +73,7 @@ export function CommitList({
   columns,
   dateFormat,
   selectedSha,
+  compareSha,
   jumpTo,
   order,
   onSelect,
@@ -155,6 +158,9 @@ export function CommitList({
     [],
   );
 
+  /** ジャンプとキーボード操作は**常に 1 点選択**（比較は Ctrl+クリックだけ）。 */
+  const selectOnly = useCallback((sha: string) => onSelect(sha, false), [onSelect]);
+
   // ブランチツリーからのジャンプ。処理済みの連番を覚えておき、再描画では動かない。
   const handledJump = useRef(0);
   useEffect(() => {
@@ -162,16 +168,16 @@ export function CommitList({
     handledJump.current = jumpTo.nonce;
     const row = indexBySha.get(jumpTo.sha);
     if (row === undefined) return;
-    onSelect(jumpTo.sha);
+    selectOnly(jumpTo.sha);
     reveal(row);
-  }, [jumpTo, indexBySha, onSelect, reveal]);
+  }, [jumpTo, indexBySha, selectOnly, reveal]);
 
   const { choice, closeChoice } = useCommitNavigation({
     commits: shown,
     indexBySha,
     selectedSha,
     headSha: head.sha,
-    onSelect,
+    onSelect: selectOnly,
     onReveal: reveal,
     anchorFor,
     enabled: shown.length > 0,
@@ -186,7 +192,7 @@ export function CommitList({
     );
     setJumpMissed(row < 0);
     if (row < 0) return;
-    onSelect(shown[row].sha);
+    selectOnly(shown[row].sha);
     reveal(row);
   };
 
@@ -236,6 +242,9 @@ export function CommitList({
         {jumpMissed && <span className="commits__missed">{ja.commits.jumpNotFound}</span>}
 
         <div className="app__spacer" />
+
+        {/* 2 点比較は操作が見えないので、比較していないときだけ出す（T-15）。 */}
+        {compareSha === null && <span className="commits__note">{ja.compare.hint}</span>}
 
         {/* date-order は線が交差する（docs/DESIGN.md §4.3）。切替で git log は走らない。 */}
         {order === "date" && <span className="commits__note">{ja.graph.orderDateNote}</span>}
@@ -296,6 +305,7 @@ export function CommitList({
                     headBranch={head.branch}
                     detachedHead={head.detached && head.sha === commit.sha}
                     selected={selectedSha === commit.sha}
+                    compareFrom={compareSha === commit.sha}
                     columns={columns}
                     dateFormat={dateFormat}
                     graphWidth={width}

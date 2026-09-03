@@ -22,11 +22,13 @@ type Props = {
   headBranch: string | null;
   detachedHead: boolean;
   selected: boolean;
+  /** 2 点比較の**比較元**の行（T-15）。比較先は `selected` のほう。 */
+  compareFrom: boolean;
   columns: ColumnWidths;
   dateFormat: UiSettings["dateFormat"];
   /** グラフ列の幅。行の左端に空ける。 */
   graphWidth: number;
-  onSelect: (sha: string) => void;
+  onSelect: (sha: string, compare: boolean) => void;
 };
 
 export const CommitRow = memo(function CommitRow({
@@ -35,6 +37,7 @@ export const CommitRow = memo(function CommitRow({
   headBranch,
   detachedHead,
   selected,
+  compareFrom,
   columns,
   dateFormat,
   graphWidth,
@@ -44,8 +47,11 @@ export const CommitRow = memo(function CommitRow({
 
   return (
     <div
-      className={`crow${selected ? " crow--selected" : ""}`}
-      onClick={() => onSelect(commit.sha)}
+      className={`crow${selected ? " crow--selected" : ""}${
+        compareFrom ? " crow--compare-from" : ""
+      }`}
+      // **Ctrl（Mac は Cmd）で 2 点比較**（docs/DESIGN.md §10.3）。
+      onClick={(event) => onSelect(commit.sha, event.ctrlKey || event.metaKey)}
       role="row"
     >
       <div className="crow__graph" style={{ width: graphWidth }} />

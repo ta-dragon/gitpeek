@@ -130,20 +130,44 @@ pub fn commit_detail(
 ///
 /// **`--raw` と `--numstat` を 1 回の実行で両方出す。** raw から状態とファイルモード、
 /// numstat から増減行数とバイナリ判定が取れるので、2 回呼ぶ必要はない。
+/// 失敗を人間向けの文にする（CLAUDE.md §6）。
+///
+/// **共通の祖先が無い 2 点だけは言い換える。** git は `no merge base` としか言わないので、
+/// `A...B` を選んだ理由と結び付かない。それ以外はそのまま生の 1 行目を添える。
+fn explain(output: &exec::GitOutput, context: &str) -> String {
+    if output.stderr.contains("no merge base") {
+        return "共通の祖先がありません。無関係な履歴どうしなので、マージベース起点では比べられません。".to_string();
+    }
+    output.failure(context)
+}
+
+/// 比べる 2 点をコマンド引数にする。
+///
+/// **`A...B` は 1 つの引数として渡す。** `A` と `B` に分けて渡すと
+/// ただの 2 点間差分（`A B`）になり、マージベース起点にならない。
+fn revisions(parent: &str, sha: &str, symmetric: bool) -> Vec<String> {
+    if symmetric {
+        vec![format!("{parent}...{sha}")]
+    } else {
+        vec![parent.to_string(), sha.to_string()]
+    }
+}
+
 pub fn changed_files(
     log: &dyn LogSink,
     program: &str,
     path: &Path,
     parent: Option<&str>,
     sha: &str,
+    symmetric: bool,
 ) -> Result<Vec<FileChange>, String> {
     let output = match parent {
-        Some(parent) => exec::run(
-            log,
-            program,
-            Some(path),
-            &["diff", "--raw", "--numstat", "-z", "-M", parent, sha],
-        )?,
+        Some(parent) => {
+            let revisions = revisions(parent, sha, symmetric);
+            let mut args = vec!["diff", "--raw", "--numstat", "-z", "-M"];
+            args.extend(revisions.iter().map(String::as_str));
+            exec::run(log, program, Some(path), &args)?
+        }
         // `git diff` はルートコミットを片側に取れない。`diff-tree --root` なら
         // 空ツリーとの差分として出せる（`-r` が無いとサブディレクトリを潜らない）。
         None => exec::run(
@@ -164,7 +188,7 @@ pub fn changed_files(
         )?,
     };
     if !output.ok() {
-        return Err(output.failure("変更ファイルの一覧を取得できませんでした"));
+        return Err(explain(&output, "変更ファイルの一覧を取得できませんでした"));
     }
 
     // パス名は `core.quotepath=false` により生バイトで出る。UTF-8 として読めない名前は
@@ -398,6 +422,9 @@ pub struct DiffTarget<'a> {
     pub path: &'a str,
     /// **リネームのときは必ず入れる**（下記 [`file_diff`] の注意）。
     pub old_path: Option<&'a str>,
+    /// `A...B`（マージベース起点）で比べる。2 点比較のときだけ意味を持つ
+    /// （docs/DESIGN.md §10.3）。
+    pub symmetric: bool,
 }
 
 /// 差分の取り方。画面のトグルがそのまま入る。
@@ -453,10 +480,11 @@ pub fn file_diff(
     if options.ignore_whitespace {
         args.push("-w");
     }
-    if let Some(parent) = target.parent {
-        args.push(parent);
-    }
-    args.push(target.sha);
+    let revisions = target
+        .parent
+        .map(|parent| revisions(parent, target.sha, target.symmetric))
+        .unwrap_or_else(|| vec![target.sha.to_string()]);
+    args.extend(revisions.iter().map(String::as_str));
     args.push("--");
     // リネーム元を先に置く。`--` の後ろは pathspec なので順序は問われない。
     if let Some(old_path) = target.old_path {
@@ -468,7 +496,7 @@ pub fn file_diff(
 
     let output = exec::run(log, program, Some(repo), &args)?;
     if !output.ok() {
-        return Err(output.failure("差分を取得できませんでした"));
+        return Err(explain(&output, "差分を取得できませんでした"));
     }
 
     // **ここで文字コードを判別する**（docs/DESIGN.md §9.1）。`stdout_lossy` は使わない。

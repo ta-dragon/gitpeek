@@ -365,6 +365,8 @@ async fn load_changed_files(
     repository_id: String,
     sha: String,
     parent: Option<String>,
+    // `A...B`（マージベース起点）で比べる。2 点比較のときだけ意味を持つ。
+    symmetric: bool,
 ) -> Result<Vec<FileChange>, String> {
     let repository = state.store.repository(&repository_id)?;
     let program = git_program(&state);
@@ -382,6 +384,7 @@ async fn load_changed_files(
             &path,
             parent.as_deref(),
             &sha,
+            symmetric,
         )
     })
     .await
@@ -402,6 +405,7 @@ async fn load_file_diff(
     repository_id: String,
     sha: String,
     parent: Option<String>,
+    symmetric: bool,
     path: String,
     old_path: Option<String>,
     context_lines: u32,
@@ -427,6 +431,7 @@ async fn load_file_diff(
                 sha: &sha,
                 path: &path,
                 old_path: old_path.as_deref(),
+                symmetric,
             },
             &DiffOptions {
                 context_lines,

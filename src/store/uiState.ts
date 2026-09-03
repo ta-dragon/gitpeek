@@ -29,6 +29,7 @@ export const DEFAULT_REPOSITORY_UI_STATE: RepositoryUiState = {
   lastOpenedAt: null,
   lastCommitCount: null,
   selectedCommit: null,
+  compareCommit: null,
   scrollOffset: 0,
   selectedFile: null,
   // タググループだけ畳んでおく。Rust 側 `RepositoryUiState::default` と一致させること。

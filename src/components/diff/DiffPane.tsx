@@ -21,11 +21,10 @@ import {
 import { CollapsedNotice } from "./CollapsedNotice";
 import { DiffBody } from "./DiffBody";
 import { DiffToolbar } from "./DiffToolbar";
-import type { CommitFiles } from "./useCommitFiles";
+import type { CommitFiles, DiffRange } from "./useCommitFiles";
 
 type Props = {
   repositoryId: string;
-  sha: string | null;
   selectedFile: string | null;
   files: CommitFiles;
   ui: UiSettings;
@@ -34,7 +33,6 @@ type Props = {
 
 export function DiffPane({
   repositoryId,
-  sha,
   selectedFile,
   files,
   ui,
@@ -60,19 +58,22 @@ export function DiffPane({
 
   const change: FileChange | null =
     files.changes.find((entry) => entry.path === selectedFile) ?? null;
-  // ルートコミットは親が無い。`null` が「空ツリーとの差分」を意味する。
-  const parent = files.detail?.parents[files.parentIndex] ?? null;
+  /**
+   * **一覧を作ったときの 2 点をそのまま使う。** 詳細から組み直すと、
+   * 読み込み中に一覧と差分が別の組を見ることがある。
+   */
+  const range: DiffRange | null = files.range;
 
   // ファイルやコミットが変われば上書きは意味を失う。自動判別へ戻し、折りたたみ直す。
   useEffect(() => {
     setForcedEncoding(null);
     setExpanded(false);
-  }, [repositoryId, sha, selectedFile]);
+  }, [repositoryId, range?.from, range?.to, selectedFile]);
 
   useEffect(() => {
     const request = (latest.current += 1);
 
-    if (sha === null || change === null) {
+    if (range === null || change === null) {
       setDiff(null);
       setLoading(false);
       setError(null);
@@ -86,8 +87,9 @@ export function DiffPane({
       try {
         const loaded = await loadFileDiff({
           repositoryId,
-          sha,
-          parent,
+          sha: range.to,
+          parent: range.from,
+          symmetric: range.symmetric,
           path: change.path,
           // **リネームでは古いパスも渡す。** 渡さないと git がリネームを検出できず、
           // 全行が追加された新規ファイルとして返る。
@@ -109,8 +111,9 @@ export function DiffPane({
     // `change` そのものではなくパスを見る（一覧を取り直すたびに再取得しない）。
   }, [
     repositoryId,
-    sha,
-    parent,
+    range?.from,
+    range?.to,
+    range?.symmetric,
     change?.path,
     change?.oldPath,
     ui.contextLines,
@@ -139,7 +142,7 @@ export function DiffPane({
         </header>
       )}
 
-      {sha !== null && change !== null && (
+      {range !== null && change !== null && (
         <DiffToolbar
           diff={diff}
           layout={ui.diffLayout}
@@ -157,7 +160,7 @@ export function DiffPane({
 
       <div className="dpane__body" ref={bodyRef}>
         <Body
-          sha={sha}
+          range={range}
           change={change}
           diff={diff}
           loading={loading}
@@ -177,7 +180,7 @@ export function DiffPane({
 }
 
 function Body({
-  sha,
+  range,
   change,
   diff,
   loading,
@@ -188,7 +191,7 @@ function Body({
   onExpand,
   onRetry,
 }: {
-  sha: string | null;
+  range: DiffRange | null;
   change: FileChange | null;
   diff: FileDiff | null;
   loading: boolean;
@@ -199,7 +202,7 @@ function Body({
   onExpand: () => void;
   onRetry: () => void;
 }) {
-  if (sha === null) return <p className="dpane__pending">{ja.diff.empty}</p>;
+  if (range === null) return <p className="dpane__pending">{ja.diff.empty}</p>;
   if (change === null) return <p className="dpane__pending">{ja.diff.selectFile}</p>;
 
   if (error !== null) {

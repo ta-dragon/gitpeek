@@ -227,6 +227,22 @@ export const ja = {
     copyFailed: "クリップボードへコピーできませんでした。",
   },
 
+  // 2 点比較（T-15。docs/DESIGN.md §10.3）。
+  compare: {
+    title: "2 点比較",
+    from: "比較元",
+    to: "比較先",
+    swap: "入れ替え",
+    clear: "比較をやめる",
+    symmetric: "マージベース起点",
+    symmetricHint:
+      "分岐したところを起点に、比較先で起きた変更だけを出します（git diff A...B）。",
+    outsideGraph: "（読み込んだ範囲の外）",
+    // 共通の祖先が無いときの説明は Rust 側（`git/diff.rs` の `explain`）にある。
+    // git のエラーを言い換えるものなので、出どころと同じところに置く。
+    hint: "Ctrl+クリックで 2 点比較",
+  },
+
   diff: {
     // 右ペイン上段 — コミット詳細。
     empty: "コミットを選んでください。",

@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import { CommandLogPanel } from "./components/commandlog/CommandLogPanel";
 import { CommitList } from "./components/commits/CommitList";
 import { CommitInfo } from "./components/diff/CommitInfo";
 import { DiffPane } from "./components/diff/DiffPane";
-import { useCommitFiles } from "./components/diff/useCommitFiles";
+import { useCommitFiles, type DiffScope } from "./components/diff/useCommitFiles";
 import { CommandPalette } from "./components/common/CommandPalette";
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
@@ -18,11 +18,13 @@ import { GitSetupScreen } from "./components/setup/GitSetupScreen";
 import { useCommandLog } from "./hooks/useCommandLog";
 import { useTheme, type ThemePreference } from "./hooks/useTheme";
 import { ja } from "./i18n/ja";
+import { clearCompare, selectCommit, swapEnds } from "./lib/compareSelection";
 import {
   detectGit,
   isGitUsable,
   MIN_VERSION_FALLBACK,
   type ColumnWidths,
+  type CommitMeta,
   type GitStatus,
   type LoadPhase,
   type RepositoryEntry,
@@ -438,8 +440,20 @@ function CommitWorkspace({
   const { state: uiState } = useUiState();
   const perRepository = uiState.perRepository[entry.id] ?? DEFAULT_REPOSITORY_UI_STATE;
 
-  const select = (sha: string) => {
-    updateRepositoryUiState(entry.id, (current) => ({ ...current, selectedCommit: sha }));
+  // 遷移そのものは純関数（`lib/compareSelection.ts`）。ここは保存するだけ。
+  const select = (sha: string, compare: boolean) => {
+    updateRepositoryUiState(entry.id, (current) => ({
+      ...current,
+      ...selectCommit(current, sha, compare),
+    }));
+  };
+
+  const clear = () => {
+    updateRepositoryUiState(entry.id, (current) => ({ ...current, ...clearCompare(current) }));
+  };
+
+  const swap = () => {
+    updateRepositoryUiState(entry.id, (current) => ({ ...current, ...swapEnds(current) }));
   };
   const setColumns = (columns: ColumnWidths) => {
     updateRepositoryUiState(entry.id, (current) => ({ ...current, columnWidths: columns }));
@@ -451,9 +465,33 @@ function CommitWorkspace({
     [entry.id],
   );
 
+  /**
+   * マージベース起点で比べるか。**この比較かぎりの判断なので残さない**（§10.3）。
+   * 比較の相手が変われば既定（2 点間差分）へ戻す。
+   */
+  const [symmetric, setSymmetric] = useState(false);
+  const compareFrom = perRepository.compareCommit;
+  useEffect(() => {
+    setSymmetric(false);
+  }, [compareFrom, entry.id]);
+
+  const commitBySha = useMemo(() => {
+    const map = new Map<string, CommitMeta>();
+    for (const commit of data.commits) map.set(commit.sha, commit);
+    return map;
+  }, [data.commits]);
+
+  const to = perRepository.selectedCommit;
+  const scope: DiffScope | null =
+    to === null
+      ? null
+      : compareFrom === null
+        ? { kind: "commit", sha: to }
+        : { kind: "compare", from: compareFrom, to, symmetric };
+
   const files = useCommitFiles({
     repositoryId: entry.id,
-    sha: perRepository.selectedCommit,
+    scope,
     commits: data.commits,
     selectedFile: perRepository.selectedFile,
     onSelectFile: selectFile,
@@ -495,6 +533,7 @@ function CommitWorkspace({
               columns={perRepository.columnWidths}
               dateFormat={ui.dateFormat}
               selectedSha={perRepository.selectedCommit}
+              compareSha={compareFrom}
               jumpTo={jumpTo}
               order={order}
               onSelect={select}
@@ -505,7 +544,6 @@ function CommitWorkspace({
           second={
             <DiffPane
               repositoryId={entry.id}
-              sha={perRepository.selectedCommit}
               selectedFile={perRepository.selectedFile}
               files={files}
               ui={ui}
@@ -521,7 +559,20 @@ function CommitWorkspace({
       }
       second={
         <CommitInfo
-          sha={perRepository.selectedCommit}
+          sha={to}
+          compare={
+            compareFrom === null
+              ? null
+              : {
+                  from: compareFrom,
+                  to: to ?? compareFrom,
+                  symmetric,
+                  commitBySha,
+                  onSymmetricChange: setSymmetric,
+                  onSwap: swap,
+                  onClear: clear,
+                }
+          }
           files={files}
           selectedFile={perRepository.selectedFile}
           onSelectFile={selectFile}

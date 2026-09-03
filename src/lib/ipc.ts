@@ -333,8 +333,15 @@ export function loadChangedFiles(
   repositoryId: string,
   sha: string,
   parent: string | null,
+  /** `A...B`（マージベース起点）で比べる。2 点比較のときだけ意味を持つ（§10.3）。 */
+  symmetric = false,
 ): Promise<FileChange[]> {
-  return invoke<FileChange[]>("load_changed_files", { repositoryId, sha, parent });
+  return invoke<FileChange[]>("load_changed_files", {
+    repositoryId,
+    sha,
+    parent,
+    symmetric,
+  });
 }
 
 /* ---------- 差分本体（`src-tauri/src/git/diff.rs`）---------- */
@@ -403,6 +410,8 @@ export function loadFileDiff(options: {
   repositoryId: string;
   sha: string;
   parent: string | null;
+  /** `A...B`（マージベース起点）で比べる。2 点比較のときだけ意味を持つ。 */
+  symmetric: boolean;
   path: string;
   oldPath: string | null;
   contextLines: number;
@@ -578,6 +587,8 @@ export type RepositoryUiState = {
   /** 前回読み込んだコミット数。進捗の割合表示の分母にするだけの概算値。 */
   lastCommitCount: number | null;
   selectedCommit: string | null;
+  /** 2 点比較の**比較元**（T-15）。null なら比較していない。比較先は `selectedCommit`。 */
+  compareCommit: string | null;
   scrollOffset: number;
   selectedFile: string | null;
   /**

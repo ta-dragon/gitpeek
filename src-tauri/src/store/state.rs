@@ -87,6 +87,9 @@ pub struct RepositoryUiState {
     /// 分からなくても件数表示に落ちるだけなので、`state.json` 側に置く。
     pub last_commit_count: Option<u64>,
     pub selected_commit: Option<String>,
+    /// 2 点比較の**比較元**（T-15）。`None` なら比較していない。
+    /// 比較先は `selected_commit`。
+    pub compare_commit: Option<String>,
     pub scroll_offset: f64,
     pub selected_file: Option<String>,
     /// ブランチ / タグツリーで**畳んでいる**ノードの ID（T-10）。
@@ -104,6 +107,7 @@ impl Default for RepositoryUiState {
             last_opened_at: None,
             last_commit_count: None,
             selected_commit: None,
+            compare_commit: None,
             scroll_offset: 0.0,
             selected_file: None,
             // タグは数千本になることがあるので、最初は畳んでおく（docs/DESIGN.md §6.4）。

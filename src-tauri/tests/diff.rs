@@ -33,8 +33,55 @@ fn commit_by_subject<'a>(snapshot: &'a RepositorySnapshot, subject: &str) -> &'a
 }
 
 fn changes_of(repo: &str, parent: Option<&str>, sha: &str) -> Vec<FileChange> {
-    diff::changed_files(&log(), "git", &fixtures().join(repo), parent, sha)
+    diff::changed_files(&log(), "git", &fixtures().join(repo), parent, sha, false)
         .unwrap_or_else(|error| panic!("{repo} の変更ファイルを取れません: {error}"))
+}
+
+/// 2 点比較（T-15）。`symmetric` なら `A...B`（マージベース起点）。
+fn compare(
+    repo: &str,
+    from: &str,
+    to: &str,
+    symmetric: bool,
+) -> Result<Vec<FileChange>, String> {
+    diff::changed_files(
+        &log(),
+        "git",
+        &fixtures().join(repo),
+        Some(from),
+        to,
+        symmetric,
+    )
+}
+
+/// 同じ比較を git CLI に直接訊く。**テストコードでだけ git を呼んでよい**（CLAUDE.md §8）。
+fn git_name_only(repo: &str, range: &[&str]) -> Vec<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(fixtures().join(repo))
+        .args(["-c", "core.quotepath=false", "diff", "--name-only"])
+        .args(range)
+        .output()
+        .expect("git を起動できません");
+
+    assert!(
+        output.status.success(),
+        "git diff --name-only が失敗しました: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut paths: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
+    paths.sort();
+    paths
+}
+
+fn paths_of(changes: &[FileChange]) -> Vec<String> {
+    let mut paths: Vec<String> = changes.iter().map(|change| change.path.clone()).collect();
+    paths.sort();
+    paths
 }
 
 fn find<'a>(changes: &'a [FileChange], path: &str) -> &'a FileChange {
@@ -204,7 +251,7 @@ fn an_unknown_sha_is_an_error() {
     let missing = "0000000000000000000000000000000000000000";
     assert!(diff::commit_detail(&log(), "git", &fixtures().join("linear"), missing).is_err());
     assert!(
-        diff::changed_files(&log(), "git", &fixtures().join("linear"), None, missing).is_err()
+        diff::changed_files(&log(), "git", &fixtures().join("linear"), None, missing, false).is_err()
     );
 }
 
@@ -227,6 +274,7 @@ fn diff_of(
             sha,
             path,
             old_path,
+            symmetric: false,
         },
         options,
     )
@@ -506,4 +554,81 @@ fn context_lines_change_the_surrounding_lines() {
         },
     );
     assert_eq!(shape(&wide), vec![" a", " b", " c", "+d"]);
+}
+
+/* ---------- 任意 2 コミット間差分（T-15） ---------- */
+
+/// **`A B` と `A...B` は分岐したブランチどうしで結果が変わる。**
+///
+/// `A B` は 2 点のツリーを直接比べるので、`A` 側にしかない変更が「削除」として出る。
+/// `A...B` はマージベースを起点にするので、`B` 側で起きたことだけが出る。
+#[test]
+fn two_dot_and_three_dot_differ_when_branches_diverged() {
+    let snapshot = snapshot_of("branch-merge");
+    let feature = &commit_by_subject(&snapshot, "feature の作業").sha;
+    let main = &commit_by_subject(&snapshot, "main の作業").sha;
+
+    let two_dot = compare("branch-merge", feature, main, false).expect("2 点間差分");
+    let three_dot = compare("branch-merge", feature, main, true).expect("マージベース起点");
+
+    // git CLI と一致すること。
+    assert_eq!(paths_of(&two_dot), git_name_only("branch-merge", &[feature, main]));
+    assert_eq!(
+        paths_of(&three_dot),
+        git_name_only("branch-merge", &[&format!("{feature}...{main}")])
+    );
+
+    // 意味が違うこと。`A B` では feature 側のファイルが削除として出る。
+    assert_eq!(paths_of(&two_dot), vec!["feature.txt", "main.txt"]);
+    assert_eq!(paths_of(&three_dot), vec!["main.txt"]);
+    assert_eq!(
+        find(&two_dot, "feature.txt").status,
+        ChangeStatus::Deleted,
+        "2 点間差分では feature 側の追加が削除に見える"
+    );
+}
+
+/// **マージベースが無い 2 点では `A...B` が成立しない。**
+///
+/// `A B` はツリーを直接比べるだけなので成立する。ここを取り違えると、
+/// orphan ブランチと比べたときに黙って空の差分が出る。
+#[test]
+fn unrelated_histories_have_no_merge_base() {
+    let snapshot = snapshot_of("orphan");
+    let trunk = &commit_by_subject(&snapshot, "幹の 2 つ目").sha;
+    let island = &commit_by_subject(&snapshot, "orphan の 2 つ目").sha;
+
+    let two_dot = compare("orphan", trunk, island, false).expect("2 点間差分は取れる");
+    assert_eq!(paths_of(&two_dot), git_name_only("orphan", &[trunk, island]));
+    assert!(!two_dot.is_empty(), "無関係でもツリーの差は出る");
+
+    // **git の `no merge base` は言い換える**（何を選んだせいで失敗したか分からないため）。
+    let error = compare("orphan", trunk, island, true).expect_err("`A...B` は失敗するはず");
+    assert!(error.contains("共通の祖先がありません"), "説明が足りない: {error}");
+}
+
+/// 差分本体も 2 点比較で取れること（`A...B` を 1 つの引数として渡せているか）。
+#[test]
+fn a_file_diff_can_compare_two_commits() {
+    let snapshot = snapshot_of("branch-merge");
+    let feature = &commit_by_subject(&snapshot, "feature の作業").sha;
+    let main = &commit_by_subject(&snapshot, "main の作業").sha;
+
+    let diff = diff::file_diff(
+        &log(),
+        "git",
+        &fixtures().join("branch-merge"),
+        &DiffTarget {
+            parent: Some(feature),
+            sha: main,
+            path: "main.txt",
+            old_path: None,
+            symmetric: true,
+        },
+        &DiffOptions::default(),
+    )
+    .expect("2 点間の差分を取れるはず");
+
+    assert!(!diff.hunks.is_empty(), "main.txt が追加されているはず");
+    assert!(shape(&diff).iter().all(|line| line.starts_with('+')));
 }
