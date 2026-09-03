@@ -202,7 +202,7 @@ body {
 
 /*
  * 上段はリポジトリ一覧。中身なりの高さにするが、サイドバーの半分までに抑える。
- * 余った縦は下段のツリーへ渡す（ブランチとタグは数千件になる）。
+ * 余った縦は下段のツリーへ渡す。
  */
 .sidebar__top {
   flex: 0 1 auto;
@@ -211,9 +211,17 @@ body {
   overflow: auto;
 }
 
+/*
+ * **下段の flex-basis は 0 でなければならない。**
+ *
+ * `auto` にすると ref が数千本あるリポジトリ（vite / onyx）でツリーの中身の高さが
+ * そのまま基準サイズになり、縮小が基準サイズの比で配分される。上段は 200px 対 数万 px の
+ * 比でほぼ全部を削られ、リポジトリ一覧が数 px に潰れて選べなくなる。
+ * 基準を 0 にすると、下段は「上段が使った残り」を受け取るだけになる。
+ */
 .sidebar__bottom {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   flex-direction: column;
   min-height: 0;
   border-top: 1px solid var(--border);
@@ -223,7 +231,7 @@ body {
 
 .reftree {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   flex-direction: column;
   min-height: 0;
 }
@@ -263,7 +271,7 @@ body {
 }
 
 .reftree__body {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   /* ref 名は長い。縦横どちらもここでスクロールさせる。 */
   overflow: auto;
@@ -312,16 +320,47 @@ body {
   font-weight: 600;
 }
 
+/*
+ * 開閉の三角。**文字（▸ / ▾）では小さすぎて開閉が読み取れない**（目視の指摘）ので、
+ * ボーダーで描いて大きさを自分で決める。回転で開閉を示すと形が同じまま向きだけ変わり、
+ * 2 つの字形を見比べるより差が分かりやすい。
+ */
 .reftree__caret {
+  display: flex;
   flex: none;
-  width: 16px;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: none;
+  border-radius: 3px;
   background: none;
-  color: var(--text-faint);
-  font-size: 10px;
-  line-height: 1;
+  color: var(--text-dim);
   cursor: pointer;
+}
+
+.reftree__caret::before {
+  content: "";
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid currentColor;
+  transform-origin: 50% 50%;
+  transition: transform 0.12s ease-out;
+}
+
+.reftree__caret--open::before {
+  transform: rotate(90deg);
+}
+
+.reftree__caret:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+/* グループの見出しでは本文と同じ濃さにする。畳んだタグを見落とさないように。 */
+.reftree__row--group .reftree__caret {
+  color: var(--text);
 }
 
 /* 葉の桁をフォルダと揃えるための空き。 */

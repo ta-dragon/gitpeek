@@ -48,14 +48,14 @@ export function RefTreeNodeView({
     return (
       <li className="reftree__item">
         <div className="reftree__row" style={{ paddingLeft: depth * INDENT }}>
+          {/* 三角は CSS で描く（文字だと小さすぎて開閉が読めない）。 */}
           <button
             type="button"
-            className="reftree__caret"
+            className={`reftree__caret${collapsed ? "" : " reftree__caret--open"}`}
             aria-expanded={!collapsed}
+            aria-label={collapsed ? ja.refTree.expand : ja.refTree.collapse}
             onClick={() => callbacks.onToggleCollapse(node.id)}
-          >
-            {collapsed ? "▸" : "▾"}
-          </button>
+          />
           {checkable && (
             <Check
               state={state}
@@ -102,7 +102,7 @@ export function RefTreeNodeView({
           callbacks.onContextMenu(entry, event.clientX, event.clientY);
         }}
       >
-        {/* フォルダの▸と桁を揃えるための空き。 */}
+        {/* フォルダの三角と桁を揃えるための空き。 */}
         <span className="reftree__caret reftree__caret--leaf" aria-hidden="true" />
         {checkable ? (
           <Check

@@ -196,12 +196,11 @@ function Group({
       <div className="reftree__row reftree__row--group">
         <button
           type="button"
-          className="reftree__caret"
+          className={`reftree__caret${collapsed ? "" : " reftree__caret--open"}`}
           aria-expanded={!collapsed}
+          aria-label={collapsed ? ja.refTree.expand : ja.refTree.collapse}
           onClick={() => callbacks.onToggleCollapse(group.id)}
-        >
-          {collapsed ? "▸" : "▾"}
-        </button>
+        />
         {checkable && (
           <input
             type="checkbox"

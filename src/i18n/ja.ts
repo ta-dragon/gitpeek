@@ -182,6 +182,10 @@ export const ja = {
     empty: "ref がありません。",
     filterEmpty: "一致する ref がありません。",
 
+    // ツリーの開閉。三角は CSS で描くので、読み上げ用の名前だけ持つ。
+    expand: "開く",
+    collapse: "畳む",
+
     // 最上段のグループ。リモートは `リモート > origin` のように名前を添える。
     groupLocal: "ローカル",
     groupRemote: (remote: string) => `リモート > ${remote}`,
