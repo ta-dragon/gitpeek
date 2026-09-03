@@ -142,26 +142,65 @@ graph LR
 
 **依存**: なし（いつ着手してもよい）
 
-**作成・変更するファイル**: `src-tauri/src/encoding.rs`(新) / `src-tauri/Cargo.toml`(変更) /
-`src/lib/ipc.ts`(変更)
+**作成・変更するファイル**
 
-**実装内容（骨子）**
+| 種別 | パス | 内容 |
+|---|---|---|
+| 新規 | `src-tauri/src/encoding.rs` | 判別・デコード・改行検出・バイナリ判定 ＋ 単体テスト |
+| 変更 | `src-tauri/Cargo.toml` | `encoding_rs` を足す |
+| 変更 | `src-tauri/src/lib.rs` | `pub mod encoding;` |
+| 変更 | `src/lib/ipc.ts` | `TextEncoding` / `LineEndingCounts` / `DecodedText` の型 |
 
-- UTF-8 として妥当なら UTF-8。失敗したら Shift_JIS → EUC-JP の順に試行
-- 判別結果を返し、手動上書きできる API にする（`decode(bytes, forced: Option<Encoding>)`）
-- 改行コード（LF / CRLF / CR）を検出し、**1 ファイル内の混在**を検出する
-- バイナリ判定（NUL バイトの有無）
+**実装内容**
+
+*判別*
+
+- **バイナリ判定を先に行う。** 先頭 8000 バイトに NUL があればバイナリとし、デコードしない
+  （git 自身の判定と同じ範囲にする）。BOM 付き UTF-16 もここでバイナリになる。
+  v1 はそれでよい（git も同じくバイナリ扱いする）
+- UTF-8 BOM は**取り除いてから**デコードする。残すと差分の先頭に U+FEFF が出る
+- **UTF-8 → Shift_JIS → EUC-JP の順に、置換なしの厳密デコードを試す**
+  （`decode_without_bom_handling_and_without_replacement` が `None` を返したら失敗）
+- どれも通らなければ **UTF-8 の置換ありデコード**に落とし、`lossy: true` を立てる。
+  ASCII 部分は読めるので、この環境では最も傷が浅い
+- 手動上書き: `decode(bytes, forced: Option<TextEncoding>)`。指定された文字コードで
+  置換ありデコードし、置換が起きたら `lossy: true`
+
+*改行*
+
+- LF / CRLF / CR（単独）をそれぞれ数える。**CRLF を CR と LF に二重計上しない**
+- 2 種類以上が 1 件以上あれば混在。既定の表示は最多のもの
+- **改行検出はテキストのバイト列に対して行う**。何を渡すかは呼び出し側が決める
+  （T-13 は diff 出力の**内容行だけ**を渡すこと。ヘッダ行は常に LF なので、
+  そのまま渡すと CRLF のファイルが全部「混在」になる）
+
+*フロント*
+
+- 型だけ足す。**この時点では生産者がいない**（差分の取得は T-13）
 
 **制約**
 
 - `git::exec::run` の `GitOutput.stdout` は**生バイト列**である。文字コード判別はこのモジュールが行う
   （DESIGN.md §9.1、`exec.rs` の `stdout_lossy` をファイル内容に使ってはいけない）
+- 外部通信をしない（CLAUDE.md §1）。文字コード表はバンドルに含まれる `encoding_rs` で足りる
 
-**受け入れ条件（骨子）**: 各エンコーディングのサンプル、BOM 付き UTF-8、混在改行、バイナリの判定テスト。
+**受け入れ条件**
 
-**テスト**: `cargo test`
+- ▸コマンド: `npm run test:rust` — ASCII / UTF-8 日本語 / BOM 付き UTF-8 /
+  Shift_JIS / EUC-JP / どれでもないバイト列 / 空 / NUL 入り（バイナリ）/
+  手動上書き（誤った指定で `lossy` が立つこと）/
+  改行 LF のみ・CRLF のみ・CR のみ・混在・改行なし
+- ▸コマンド: `npm run check:rust` / `npm run typecheck`
 
-**非スコープ**: UI での表示（T-13）／改行可視化トグル（T-13）
+**テスト**: `cargo test`（単体のみ。git は呼ばない）
+
+**非スコープ**: UI での表示（T-13）／改行可視化トグル（T-13）／
+文字コードの統計的推定（chardet 系は入れない。判別は上の順序が正）
+
+**T-13 への申し送りに書くこと**
+
+- 判別と改行検出は**どのバイト列に適用するかで結果が変わる**。特に改行は上記のとおり
+- 手動上書きの UI（ファイルごとの文字コード選択）は T-13 側で作る
 
 ---
 
