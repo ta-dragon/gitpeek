@@ -49,6 +49,9 @@ pub struct RefEntry {
     /// `target` が読み込んだコミット集合に含まれない（docs/DESIGN.md §4.2）。
     /// タグは起点 ref にしないので、どのブランチからも到達できない古いタグがこれになる。
     pub out_of_graph: bool,
+    /// 幹とコミットを 1 つも共有しない履歴を指している（`git checkout --orphan` 由来）。
+    /// グラフではその島のルートで線が止まるので、チップに印を付けて区別する。
+    pub orphan: bool,
 }
 
 /// HEAD の状態を 1 つの構造体に平らにしたもの。

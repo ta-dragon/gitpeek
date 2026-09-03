@@ -21,6 +21,11 @@ export const NODE_RADIUS = 4;
 /** HEAD のリングと選択中のノードの半径。 */
 export const RING_RADIUS = 6;
 
+/** ルートコミットの下に引く横棒の幅。「ここで履歴が終わる」の印（T-27）。 */
+export const ROOT_CAP_WIDTH = 10;
+/** その横棒をノード中心から何 px 下に引くか。行の下端（14px）を越えないこと。 */
+export const ROOT_CAP_OFFSET = 8;
+
 /** レーンの色数。lane 0（幹）はこれに含めない。 */
 export const LANE_COLORS = 8;
 
@@ -39,6 +44,18 @@ export type GraphRow = {
   passing: number[];
   edges: Edge[];
 };
+
+/**
+ * ルートコミット（親なし）の下に引く横棒。
+ *
+ * ルートはレーンの終わり方のうち**線がその場で止まる唯一のもの**で、印が無いと
+ * 「切れている」のか「終わっている」のか見分けられない（CLAUDE.md §3-2）。
+ */
+export function rootCapPath(lane: number, rowIndex: number): string {
+  const x = laneX(lane);
+  const y = rowY(rowIndex) + ROOT_CAP_OFFSET;
+  return `M${x - ROOT_CAP_WIDTH / 2} ${y}H${x + ROOT_CAP_WIDTH / 2}`;
+}
 
 /** レーン番号 → 中心の x 座標。 */
 export function laneX(lane: number): number {

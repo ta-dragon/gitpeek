@@ -213,6 +213,29 @@ fn peels_annotated_tags_and_marks_the_unreachable_one() {
         .any(|commit| commit.sha == orphan.target));
 }
 
+/// 合流しない orphan ブランチの ref だけに印が付くこと（T-27）。
+#[test]
+fn marks_refs_on_a_disconnected_history() {
+    let snapshot = snapshot_of("orphan");
+    let entry = |short: &str| {
+        snapshot
+            .refs
+            .iter()
+            .find(|entry| entry.short_name == short)
+            .unwrap_or_else(|| panic!("{short} が無い"))
+    };
+
+    assert!(entry("assets").orphan, "orphan ブランチに印が付いていない");
+    assert!(!entry("main").orphan, "幹に印が付いている");
+}
+
+/// 合流した無関係履歴は orphan ではない（繋がっているので線も途切れない）。
+#[test]
+fn a_merged_unrelated_history_is_not_orphan() {
+    let snapshot = snapshot_of("two-roots");
+    assert!(snapshot.refs.iter().all(|entry| !entry.orphan));
+}
+
 #[test]
 fn reads_remote_branches_and_upstream() {
     let snapshot = snapshot_of("cloned");

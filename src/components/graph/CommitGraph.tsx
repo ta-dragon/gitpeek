@@ -17,6 +17,7 @@ import {
   laneX,
   NODE_RADIUS,
   RING_RADIUS,
+  rootCapPath,
   ROW_HEIGHT,
   rowY,
   type GraphRow,
@@ -114,9 +115,13 @@ export function CommitGraph({
           const index = start + offset;
           const commit = bySha.get(row.sha);
           const merge = (commit?.parents.length ?? 0) > 1;
+          // ルートは線がその場で止まる唯一の終わり方なので、終端の印を足す（T-27）。
+          const root = commit !== undefined && commit.parents.length === 0;
           const color = laneColor(row.lane);
           return (
-            <g key={row.sha} transform={`translate(${laneX(row.lane)} ${rowY(index)})`}>
+            <g key={row.sha}>
+              {root && <path className="graph__cap" d={rootCapPath(row.lane, index)} stroke={color} />}
+              <g transform={`translate(${laneX(row.lane)} ${rowY(index)})`}>
               {row.sha === selectedSha && (
                 <circle className="graph__selected" r={RING_RADIUS} fill={color} />
               )}
@@ -129,6 +134,7 @@ export function CommitGraph({
                 stroke={color}
                 fill={merge ? "var(--graph-node-fill)" : color}
               />
+              </g>
             </g>
           );
         })}

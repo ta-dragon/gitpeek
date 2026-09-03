@@ -112,8 +112,10 @@ pub fn parse(stdout: &str) -> Refs {
             kind,
             target: target.to_string(),
             upstream: (!upstream.is_empty()).then(|| upstream.to_string()),
-            // コミット集合が確定してから [`mark_out_of_graph`] で埋める。
+            // どちらもコミット集合が確定してから埋める
+            // （[`mark_out_of_graph`] と [`mark_orphans`]）。
             out_of_graph: false,
+            orphan: false,
         });
     }
 
@@ -140,6 +142,16 @@ fn classify(name: &str) -> Option<(RefKind, &str)> {
 pub fn mark_out_of_graph(entries: &mut [RefEntry], commits: &HashSet<&str>) {
     for entry in entries {
         entry.out_of_graph = !commits.contains(entry.target.as_str());
+    }
+}
+
+/// 幹と繋がっていない履歴を指す ref に印を付ける（T-27）。
+///
+/// `disconnected` は [`crate::graph::component::disconnected_from`] の結果。
+/// グラフ外の ref は判定できないので触らない。
+pub fn mark_orphans(entries: &mut [RefEntry], disconnected: &HashSet<String>) {
+    for entry in entries {
+        entry.orphan = !entry.out_of_graph && disconnected.contains(&entry.target);
     }
 }
 

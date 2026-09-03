@@ -86,6 +86,11 @@ fn assemble(
     refs::mark_out_of_graph(&mut refs.entries, &reachable);
     let default_branch = refs::default_branch(&refs, &head);
 
+    // orphan 判定は幹の島がどれかを決めてからでないとできない。
+    let anchor = crate::graph::lane::trunk_start(&refs.entries, default_branch.as_deref());
+    let disconnected = crate::graph::component::disconnected_from(&commits, anchor);
+    refs::mark_orphans(&mut refs.entries, &disconnected);
+
     Ok(RepositorySnapshot {
         commits,
         refs: refs.entries,

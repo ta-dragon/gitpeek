@@ -162,6 +162,9 @@ export const ja = {
     // detached HEAD の行に付ける印。ブランチ名が無い状態。
     detachedHead: "HEAD",
     moreRefs: (n: number) => `+${n}`,
+    // orphan ブランチのチップに付ける印と、その説明（ホバーで出る）。
+    orphanMark: "⊥",
+    orphanHint: "orphan ブランチ（他の履歴と繋がっていません）",
     total: (n: number) => `${n.toLocaleString()} 件`,
     jumpLabel: "SHA へ移動",
     jumpPlaceholder: "SHA を貼り付け（前方一致）",

@@ -16,6 +16,7 @@
 #   merges         連続マージ
 #   octopus        オクトパスマージ（親 3 つ）
 #   two-roots      ルートコミット 2 つ（無関係な履歴の合流）
+#   orphan         合流しない orphan ブランチ（幹と繋がらない島）
 #   japanese       日本語ファイル名・日本語ディレクトリ
 #   empty-subject  subject が空のコミット
 #   empty          コミット 0 件（unborn HEAD）
@@ -121,6 +122,17 @@ git_ -C "$repo" rm --quiet -rf .
 commit second-root.txt "2 つ目のルート"
 git_ -C "$repo" checkout --quiet main
 git_ -C "$repo" merge --quiet --no-edit --allow-unrelated-histories second-root
+
+# --- 合流しない orphan ブランチ ---------------------------------------------
+# two-roots と違い、こちらは最後まで幹と繋がらない。ref に orphan の印が付く。
+new_repo orphan
+commit a.txt "幹の 1 つ目"
+commit b.txt "幹の 2 つ目"
+git_ -C "$repo" checkout --quiet --orphan assets
+git_ -C "$repo" rm --quiet -rf .
+commit screenshot.txt "orphan の 1 つ目"
+commit screenshot.txt "orphan の 2 つ目"
+git_ -C "$repo" checkout --quiet main
 
 # --- 日本語ファイル名 -------------------------------------------------------
 # core.quotepath=false を付けないと 8 進エスケープで返るケース（CLAUDE.md §2）。

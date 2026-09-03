@@ -1179,6 +1179,19 @@ body {
   color: var(--ok);
 }
 
+/*
+ * orphan ブランチ（幹と繋がらない履歴）。破線の枠と ⊥ の印。
+ * グラフ側のルート終端（.graph__cap）と同じ形を印にして、両者を結び付ける。
+ */
+.chip--orphan {
+  border-style: dashed;
+}
+
+.chip__mark {
+  margin-right: 3px;
+  opacity: 0.8;
+}
+
 /* HEAD が乗っているブランチと detached HEAD。 */
 .chip--head {
   background: var(--accent);

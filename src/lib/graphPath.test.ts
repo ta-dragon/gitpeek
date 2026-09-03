@@ -7,7 +7,11 @@ import {
   LANE_COLORS,
   laneColor,
   laneX,
+  ROOT_CAP_OFFSET,
+  ROOT_CAP_WIDTH,
+  rootCapPath,
   rowIndexBySha,
+  ROW_HEIGHT,
   rowY,
   type Edge,
   type GraphRow,
@@ -131,5 +135,23 @@ describe("rowIndexBySha", () => {
     expect(index.get("a")).toBe(0);
     expect(index.get("b")).toBe(1);
     expect(index.get("zz")).toBeUndefined();
+  });
+});
+
+describe("rootCapPath", () => {
+  it("ノードの真下に、レーンをまたがない横棒を引く", () => {
+    const x = laneX(2);
+    const y = rowY(3) + ROOT_CAP_OFFSET;
+    expect(rootCapPath(2, 3)).toBe(`M${x - 5} ${y}H${x + 5}`);
+  });
+
+  it("横棒は行からはみ出さない", () => {
+    // はみ出すと 1 つ下の行の線と重なって、そちらが切れて見える。
+    expect(ROOT_CAP_OFFSET + 1).toBeLessThan(ROW_HEIGHT / 2);
+  });
+
+  it("横棒はレーン幅に収まる", () => {
+    // 隣のレーンに掛かると、その線を横切ったように見える。
+    expect(ROOT_CAP_WIDTH).toBeLessThan(14);
   });
 });

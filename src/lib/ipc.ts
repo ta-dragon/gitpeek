@@ -130,6 +130,8 @@ export type RefEntry = {
   upstream: string | null;
   /** 読み込んだコミット集合に含まれない。ジャンプを無効化する。 */
   outOfGraph: boolean;
+  /** 幹とコミットを 1 つも共有しない履歴を指している（`git checkout --orphan` 由来）。 */
+  orphan: boolean;
 };
 
 export type HeadInfo = {

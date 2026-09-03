@@ -6,6 +6,7 @@
 //! レーンは**全件を一度で確定**する。増分計算をしないのは、後から現れた親で
 //! 割り当てが遡って変わり、描画中にグラフが踊るため（CLAUDE.md §3-5）。
 
+pub mod component;
 pub mod lane;
 pub mod order;
 

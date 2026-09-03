@@ -32,9 +32,16 @@ export function RefChips({
       {shown.map((entry) => (
         <span
           key={entry.name}
-          className={`chip chip--${kindClass(entry.kind)}${entry.name === headBranch ? " chip--head" : ""}`}
-          title={entry.name}
+          className={
+            `chip chip--${kindClass(entry.kind)}` +
+            `${entry.name === headBranch ? " chip--head" : ""}` +
+            `${entry.orphan ? " chip--orphan" : ""}`
+          }
+          title={entry.orphan ? `${entry.name}
+${ja.commits.orphanHint}` : entry.name}
         >
+          {/* 幹と繋がっていない履歴。グラフではその島のルートで線が止まる。 */}
+          {entry.orphan && <span className="chip__mark">{ja.commits.orphanMark}</span>}
           {entry.shortName}
         </span>
       ))}

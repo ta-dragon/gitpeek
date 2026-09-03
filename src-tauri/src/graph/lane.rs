@@ -582,6 +582,7 @@ pub mod tests {
                 target: "aaa".to_string(),
                 upstream: None,
                 out_of_graph: false,
+                orphan: false,
             },
             RefEntry {
                 name: "refs/remotes/origin/main".to_string(),
@@ -590,6 +591,7 @@ pub mod tests {
                 target: "bbb".to_string(),
                 upstream: None,
                 out_of_graph: false,
+                orphan: false,
             },
         ];
 

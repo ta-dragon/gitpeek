@@ -40,6 +40,16 @@
   stroke-width: 2;
 }
 
+/*
+ * ルートコミットの終端。ノードの下に短い横棒を引いて「ここで履歴が終わる」を出す。
+ * 印が無いと、数行後に同じレーンを別の枝が使ったときに 1 本の線が切れて見える。
+ */
+.graph__cap {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
 /* HEAD は外側のリング。 */
 .graph__ring {
   fill: none;

@@ -14,12 +14,13 @@ use givsoner_lib::model::RepositorySnapshot;
 use common::{fixtures, log};
 
 /// `make-test-repos.sh` が作るリポジトリ全部。増えたらここに足す。
-const REPOSITORIES: [&str; 13] = [
+const REPOSITORIES: [&str; 14] = [
     "linear",
     "branch-merge",
     "merges",
     "octopus",
     "two-roots",
+    "orphan",
     "japanese",
     "empty-subject",
     "empty",
