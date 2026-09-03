@@ -3,7 +3,9 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 import { CommandLogPanel } from "./components/commandlog/CommandLogPanel";
 import { CommitList } from "./components/commits/CommitList";
+import { CommitInfo } from "./components/diff/CommitInfo";
 import { DiffPane } from "./components/diff/DiffPane";
+import { useCommitFiles } from "./components/diff/useCommitFiles";
 import { CommandPalette } from "./components/common/CommandPalette";
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
@@ -24,6 +26,7 @@ import {
   type GitStatus,
   type LoadPhase,
   type RepositoryEntry,
+  type UiSettings,
 } from "./lib/ipc";
 import * as repositories from "./store/repositories";
 import { useRepositories } from "./store/repositories";
@@ -49,6 +52,10 @@ const SLOW_LOAD_MS = 400;
 /** サイドバー幅の可動域。狭すぎるとパスが読めず、広すぎると本体が潰れる。 */
 const SIDEBAR_MIN = 180;
 const SIDEBAR_MAX = 560;
+
+/** 右のコミット情報ペイン幅の可動域。狭すぎると facts が折り返しだらけになる。 */
+const COMMIT_INFO_MIN = 240;
+const COMMIT_INFO_MAX = 720;
 
 export default function App() {
   const [theme, setTheme] = useTheme();
@@ -335,7 +342,7 @@ function RefTreePanel({
  * 選択中リポジトリの中身。
  *
  * 履歴を読み終えていればコミットリストを、そうでなければ素性と読み込み状態の
- * カードを出す。下半分は差分ペイン（3 段目の差分本体は T-13 で入る）。
+ * カードを出す。読み終わっていれば 3 ペイン（`CommitWorkspace`）を描く。
  */
 function RepositoryPanel({
   entry,
@@ -348,7 +355,6 @@ function RepositoryPanel({
 }) {
   const snapshot = useSnapshot();
   const settings = useSettings();
-  const { state: uiState } = useUiState();
 
   if (entry === null) {
     return <p className="app__loading">{ja.repositories.empty}</p>;
@@ -384,6 +390,46 @@ function RepositoryPanel({
     );
   }
 
+  return (
+    <CommitWorkspace
+      entry={entry}
+      data={data}
+      layout={layout}
+      order={snapshot.order}
+      dateFormat={settings.settings.ui.dateFormat}
+      jumpTo={jumpTo}
+      onNotice={onNotice}
+    />
+  );
+}
+
+/**
+ * 3 ペインの中身（docs/DESIGN.md §6.1）。
+ *
+ * **左からグラフ ＋ 差分本体（上下分割）／ コミット詳細と変更ファイル一覧（右列）。**
+ * 詳細と一覧を差分の上に積んでいたときは、差分本体に数行しか残らなかった。
+ *
+ * 取得は `useCommitFiles` で 1 回だけ行い、右列と差分本体の両方へ配る。
+ * **フックを呼ぶのでリポジトリの読み込みが終わってから描くこと**（呼び出し側で分岐済み）。
+ */
+function CommitWorkspace({
+  entry,
+  data,
+  layout,
+  order,
+  dateFormat,
+  jumpTo,
+  onNotice,
+}: {
+  entry: RepositoryEntry;
+  data: NonNullable<ReturnType<typeof useSnapshot>["data"]>;
+  layout: NonNullable<ReturnType<typeof useSnapshot>["layout"]>;
+  order: ReturnType<typeof useSnapshot>["order"];
+  dateFormat: UiSettings["dateFormat"];
+  jumpTo: { sha: string; nonce: number } | null;
+  onNotice: (message: string) => void;
+}) {
+  const { state: uiState } = useUiState();
   const perRepository = uiState.perRepository[entry.id] ?? DEFAULT_REPOSITORY_UI_STATE;
 
   const select = (sha: string) => {
@@ -392,44 +438,77 @@ function RepositoryPanel({
   const setColumns = (columns: ColumnWidths) => {
     updateRepositoryUiState(entry.id, (current) => ({ ...current, columnWidths: columns }));
   };
-  const selectFile = (path: string | null) => {
-    updateRepositoryUiState(entry.id, (current) => ({ ...current, selectedFile: path }));
-  };
+  const selectFile = useCallback(
+    (path: string | null) => {
+      updateRepositoryUiState(entry.id, (current) => ({ ...current, selectedFile: path }));
+    },
+    [entry.id],
+  );
+
+  const files = useCommitFiles({
+    repositoryId: entry.id,
+    sha: perRepository.selectedCommit,
+    commits: data.commits,
+    selectedFile: perRepository.selectedFile,
+    onSelectFile: selectFile,
+  });
 
   return (
     <SplitPane
-      direction="column"
-      unit="ratio"
-      size={uiState.paneRatios.graphDiffSplit}
-      min={0.25}
-      max={0.95}
-      onSizeChange={(ratio) =>
+      direction="row"
+      unit="px"
+      anchor="second"
+      size={uiState.paneRatios.commitInfoWidth}
+      min={COMMIT_INFO_MIN}
+      max={COMMIT_INFO_MAX}
+      onSizeChange={(width) =>
         updateUiState((current) => ({
           ...current,
-          paneRatios: { ...current.paneRatios, graphDiffSplit: ratio },
+          paneRatios: { ...current.paneRatios, commitInfoWidth: width },
         }))
       }
       first={
-        <CommitList
-          commits={data.commits}
-          layout={layout}
-          refs={data.refs}
-          head={data.head}
-          columns={perRepository.columnWidths}
-          dateFormat={settings.settings.ui.dateFormat}
-          selectedSha={perRepository.selectedCommit}
-          jumpTo={jumpTo}
-          order={snapshot.order}
-          onSelect={select}
-          onColumnsChange={setColumns}
-          onOrderChange={(order) => void snapshots.setOrder(order)}
+        <SplitPane
+          direction="column"
+          unit="ratio"
+          size={uiState.paneRatios.graphDiffSplit}
+          min={0.15}
+          max={0.85}
+          onSizeChange={(ratio) =>
+            updateUiState((current) => ({
+              ...current,
+              paneRatios: { ...current.paneRatios, graphDiffSplit: ratio },
+            }))
+          }
+          first={
+            <CommitList
+              commits={data.commits}
+              layout={layout}
+              refs={data.refs}
+              head={data.head}
+              columns={perRepository.columnWidths}
+              dateFormat={dateFormat}
+              selectedSha={perRepository.selectedCommit}
+              jumpTo={jumpTo}
+              order={order}
+              onSelect={select}
+              onColumnsChange={setColumns}
+              onOrderChange={(next) => void snapshots.setOrder(next)}
+            />
+          }
+          second={
+            <DiffPane
+              sha={perRepository.selectedCommit}
+              selectedFile={perRepository.selectedFile}
+              files={files}
+            />
+          }
         />
       }
       second={
-        <DiffPane
-          repositoryId={entry.id}
+        <CommitInfo
           sha={perRepository.selectedCommit}
-          commits={data.commits}
+          files={files}
           selectedFile={perRepository.selectedFile}
           onSelectFile={selectFile}
           onNotice={onNotice}

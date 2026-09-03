@@ -18,6 +18,7 @@ export const DEFAULT_UI_STATE: UiState = {
   paneRatios: {
     sidebarWidth: 260,
     graphDiffSplit: 0.55,
+    commitInfoWidth: 380,
     reviewDrawerWidth: 420,
   },
   repositoryListSort: "manual",

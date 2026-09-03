@@ -1,11 +1,11 @@
 /**
- * 差分ペインの 2 段目 — 変更ファイル一覧（docs/DESIGN.md §7.3）。
+ * 右ペインの下段 — 変更ファイル一覧（docs/DESIGN.md §7.3）。
  *
  * 既定は**フラットなパス一覧**（共通ディレクトリを淡色にしてファイル名を強調）で、
  * ディレクトリツリーに切り替えられる。ファイルごとに `+N` `-M` と増減バーを出す。
  *
  * **全ファイルを縦に連結してスクロールする方式は採らない**（§7.3）。一覧で 1 つ選び、
- * 3 段目にその差分だけを出す。
+ * 中央下の差分ペインにその差分だけを出す。
  */
 import { useMemo } from "react";
 
@@ -214,14 +214,19 @@ function Row({
         {statusMark(change.status)}
       </span>
 
-      <span className="flist__path">
-        {flat && dir !== "" && <span className="flist__dirPart">{dir}</span>}
-        <span className="flist__name">{name}</span>
+      {/*
+       * リネーム元は**行内に並べず 2 行目に置く**。右ペインは幅が 380px 程度しかなく、
+       * 横に並べるとパスと増減が押し合って両方読めなくなる。
+       */}
+      <span className="flist__pathBox">
+        <span className="flist__path">
+          {flat && dir !== "" && <span className="flist__dirPart">{dir}</span>}
+          <span className="flist__name">{name}</span>
+        </span>
+        {change.oldPath !== null && (
+          <span className="flist__rename">{ja.diff.renamedFrom(change.oldPath)}</span>
+        )}
       </span>
-
-      {change.oldPath !== null && (
-        <span className="flist__aside">{ja.diff.renamedFrom(change.oldPath)}</span>
-      )}
 
       <div className="app__spacer" />
 

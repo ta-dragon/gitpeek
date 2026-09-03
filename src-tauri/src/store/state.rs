@@ -59,8 +59,10 @@ pub struct WindowBounds {
 #[serde(default, rename_all = "camelCase")]
 pub struct PaneRatios {
     pub sidebar_width: f64,
-    /// グラフ（上）と差分（下）の分割比。
+    /// グラフ（上）と差分本体（下）の分割比。
     pub graph_diff_split: f64,
+    /// 右のコミット情報ペイン（詳細 ＋ 変更ファイル一覧）の幅（px）。
+    pub commit_info_width: f64,
     pub review_drawer_width: f64,
 }
 
@@ -69,6 +71,7 @@ impl Default for PaneRatios {
         Self {
             sidebar_width: 260.0,
             graph_diff_split: 0.55,
+            commit_info_width: 380.0,
             review_drawer_width: 420.0,
         }
     }

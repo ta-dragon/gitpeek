@@ -448,6 +448,8 @@ export type WindowBounds = { x: number; y: number; width: number; height: number
 export type PaneRatios = {
   sidebarWidth: number;
   graphDiffSplit: number;
+  /** 右のコミット情報ペイン（詳細 ＋ 変更ファイル一覧）の幅（px）。 */
+  commitInfoWidth: number;
   reviewDrawerWidth: number;
 };
 

@@ -167,8 +167,12 @@ body {
   overflow: auto;
 }
 
+/*
+ * 固定側でないほうのペイン。**flex-basis は 0**（CLAUDE.md §6）。
+ * `auto` だと中身の高さ / 幅が基準になり、縮小がその比で配分される。
+ */
 .split__pane--rest {
-  flex: 1 1 auto;
+  flex: 1 1 0;
 }
 
 .split__handle {
@@ -1482,9 +1486,8 @@ body {
 /* ---------- 差分ペイン（docs/DESIGN.md §7.3） ---------- */
 
 /*
- * 3 段構成: コミット詳細 → 変更ファイル一覧 → 差分本体。
- * **スクロールする段の flex-basis は 0**（CLAUDE.md §6。中身の高さを基準にすると
- * 隣の段が潰れる）。詳細は中身なり、一覧と本体が残りを分け合う。
+ * **ここは差分本体だけ**を出す。コミット詳細と変更ファイル一覧は右の `.cinfo` へ移した
+ * （docs/DESIGN.md §6.1）。同じ列に縦積みしていたときは差分に数行しか残らなかった。
  */
 .dpane {
   display: flex;
@@ -1500,20 +1503,26 @@ body {
   box-shadow: inset 0 2px 0 var(--accent);
 }
 
-.dpane--empty {
+/* 差分本体の見出し。どのファイルを見ているかは右ペインを見なくても分かるようにする。 */
+.dpane__head {
   display: flex;
-  flex-direction: column;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: baseline;
   gap: 8px;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
   background: var(--bg-inset);
-  color: var(--text-faint);
+  font-size: 12px;
 }
 
-.dpane__error {
-  margin: 0;
-  color: var(--danger);
+.dpane__path {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.dpane__aside {
+  color: var(--text-faint);
 }
 
 .dpane__detail {
@@ -1532,7 +1541,6 @@ body {
   justify-content: center;
   min-height: 0;
   overflow: auto;
-  border-top: 1px solid var(--border);
   background: var(--bg-inset);
 }
 
@@ -1541,7 +1549,44 @@ body {
   color: var(--text-faint);
 }
 
-/* ---------- 1 段目: コミット詳細 ---------- */
+/* ---------- 右ペイン: コミット詳細 ＋ 変更ファイル一覧 ---------- */
+
+/*
+ * **縦に長い列**。詳細は中身なり（上限つき）、一覧が残り全部を取る。
+ * スクロールする段の flex-basis は 0（CLAUDE.md §6）。
+ */
+.cinfo {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.cinfo--empty {
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.cinfo__error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.cinfo__detail {
+  margin: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- コミット詳細 ---------- */
 
 /* 詰まったら縮んでよい（中でスクロールする）。一覧の下限を守るのが先。 */
 .cdetail {
@@ -1637,7 +1682,7 @@ body {
   min-width: 0;
 }
 
-/* ---------- 2 段目: 変更ファイル一覧 ---------- */
+/* ---------- 変更ファイル一覧 ---------- */
 
 /*
  * **下限はここに置く。** `.flist__body` に `min-height` を書いても、親の
@@ -1713,7 +1758,8 @@ body {
   align-items: center;
   gap: 6px;
   width: 100%;
-  height: 22px;
+  /* 高さを固定しない。リネームは 2 行になる。 */
+  min-height: 22px;
   padding-right: 12px;
   border: none;
   background: none;
@@ -1775,6 +1821,25 @@ body {
  * （docs/DESIGN.md §7.3）。`direction: rtl` で末尾を残す手もあるが、
  * インライン要素の並びまで反転してディレクトリがファイル名の後ろに出る。
  */
+/* パスとリネーム元を縦に積む箱。**縮むのはこちら**（増減とバーは削らない）。 */
+.flist__pathBox {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/*
+ * 2 行目。**`direction: rtl` で末尾を残そうとしないこと**（T-11 の目視で戻した経緯がある）。
+ * インライン要素の並びまで反転する。全体はツールチップで読む。
+ */
+.flist__rename {
+  overflow: hidden;
+  color: var(--text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .flist__path {
   display: flex;
   flex: 0 1 auto;

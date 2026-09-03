@@ -228,7 +228,7 @@ export const ja = {
   },
 
   diff: {
-    // 1 段目 — コミット詳細。
+    // 右ペイン上段 — コミット詳細。
     empty: "コミットを選んでください。",
     loading: "読み込んでいます…",
     failed: "コミットの内容を取得できませんでした",
@@ -249,7 +249,7 @@ export const ja = {
     parentNth: (n: number) => `第 ${n} 親`,
     mergeNote: "マージコミットの差分は親ごとに異なります。",
 
-    // 2 段目 — 変更ファイル一覧。
+    // 右ペイン下段 — 変更ファイル一覧。
     files: "変更ファイル",
     fileCount: (n: number) => `${n} ファイル`,
     additions: (n: number) => `+${n}`,
@@ -281,7 +281,7 @@ export const ja = {
     },
     keyHint: "Alt+↑ / Alt+↓ でファイル移動",
 
-    // 3 段目 — 差分本体（T-13 で入る）。
+    // 中央下 — 差分本体（T-13 で入る）。
     bodyPending: "差分の本体は T-13 で表示します。",
     selectFile: "ファイルを選ぶと、ここに差分が出ます。",
   },
