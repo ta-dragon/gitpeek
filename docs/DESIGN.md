@@ -427,8 +427,14 @@ ref ごとにビットセットを持つ実装は 20,000 コミット × 数千 
 
 3. **マージコミットの第 2 親は右側に新レーンを起こす。**
 
-4. **レーン数に上限を設けない。** グラフ列のみ横スクロール可とする。
+4. **レーン数に上限を設けない。**
    レーン幅を可変にして詰める方式は、密度が上がったときに確実に破綻する。
+
+   **グラフは幅を持つ「列」として扱い、列幅より右のレーンは切る**（既定 200px、
+   ドラッグ可変、リポジトリごとに `state.json` へ永続化）。全レーンぶんの幅を常に
+   空けると本文が画面の外へ押し出される（onyx は 49 レーン ＝ 712px あった）。
+   見出しの取っ手を引けば全レーンまで広がる。**横スクロールはリスト全体で 1 つ**にする
+   （グラフ列だけ別にスクロールさせると行とずれる）。
 
 ### 5.2 描線と配色
 
@@ -475,6 +481,11 @@ ref ごとにビットセットを持つ実装は 20,000 コミット × 数千 
 
 数万コミットのリストではスクラバが極端に小さくなり位置感覚が完全に失われるため、
 実装コストに対して効果が非常に大きい。ミニマップは作らない。
+
+**同じ高さに重なるぶんは 1 本に束ねる。** onyx は ref が 3,790 個あり、そのまま置くと
+12px の帯が塗り潰れるうえ DOM が 3,790 要素になる。トラックを固定数（300）に割り、
+1 枠につき 1 つだけ描く。残すのは**ブランチ先端を優先**（タグより「今どこにいるか」の
+手掛かりになる）。
 
 ---
 
@@ -573,6 +584,11 @@ VS Code 風を基本に、リスト移動のみ vim 風の `j` / `k` も受け�
 | `Esc` | ドロワー / パネルを閉じる |
 
 ツールバーの入力欄に SHA を貼るとそのコミットへジャンプする（前方一致可）。
+
+**この表は v1 の最終形であり、現時点で全部が効くわけではない。** T-09 完了時点で
+効くのは `Ctrl+P` / `↑` `↓` / `j` `k` / `Alt+←` `Alt+→` / `Ctrl+H` / `Home` / `End` と
+SHA ジャンプ。残りは対応する機能を作る Phase で足し、最後に T-25 で揃える。
+実装は `src/hooks/useCommitNavigation.ts`。
 
 ---
 
@@ -1078,10 +1094,14 @@ LLM プロファイルが未設定のまま AI レビューを押した場合は
 手元の実リポジトリには依存しない（CI で再現可能にする）。
 
 実体は `scripts/make-test-repos.sh`（T-02 で作成）。テストは `src-tauri/tests/` に置く。
+**生成する形はスクリプト先頭のコメントが一覧**（直線 / 分岐と合流 / 連続マージ /
+オクトパス / ルート 2 つ / 合流しない orphan / 日本語名 / 空 subject / コミット 0 件 /
+detached / 複数行メッセージ / タグ / bare / クローン / 上流と分岐したクローン）。
+形を足すときはスクリプトとコメントの両方に足し、`tests/lanes.rs` の一覧にも入れる。
 
 - 生成先は **`%TEMP%\givsoner-test-repos`**。この gitviewer リポジトリの中に置くと、
   「リポジトリでないパス」の判定テストが親リポジトリを拾って落ちる。
-- Windows では **git 付属の bash（`<Git>inash.exe`）で実行する**。PATH 上の `bash` は
+- Windows では **git 付属の bash（`<Git>\bin\bash.exe`）で実行する**。PATH 上の `bash` は
   WSL のことがあり、Windows のパスを渡しても解決できない。`GIT_BASH` で明示指定もできる。
 - msys の bash へ渡す引数はスラッシュ区切りにする（`\` がエスケープとして食われる）。
 - `src-tauri/src` の中では `Command::new` を git 以外に使わない（§3.1 のチョークポイント）。
@@ -1094,7 +1114,9 @@ LLM プロファイルが未設定のまま AI レビューを押した場合は
 
 ### 14.4 フロントエンド
 
-「レーン配列 → SVG パス文字列」の純関数のみテストする。コンポーネントテストはしない。
+**純関数のみ**テストする。コンポーネントテストはしない。
+現在の対象は「レーン配列 → SVG パス文字列」（`src/lib/graphPath.ts`）と
+相対日時（`src/lib/relativeTime.ts`）。
 
 テストランナーは **Vitest**（Vite プロジェクトなので `vite.config.ts` に `test` を足すだけで済む）。
 導入は T-06 で行う。
@@ -1186,7 +1208,7 @@ Phase 9 完了 ＋ **実リポジトリを 5 個以上登録して 1 週間実�
 ## 16. ディレクトリ構成
 
 `(済)` は実在するファイル。それ以外は未作成で、括弧内は作られるタスク。
-**最終更新は T-04 完了時点。**
+**最終更新は T-09 完了時点。**
 
 ```
 gitviewer/
@@ -1196,35 +1218,40 @@ gitviewer/
 ├── Givsoner.bat                  (済) ダブルクリックで開発起動
 ├── scripts/make-test-repos.sh    (済) テスト用リポジトリ生成
 ├── package.json                  (済)
-├── vite.config.ts                (済)
+├── vite.config.ts                (済) vitest の設定もここ
 ├── index.html                    (済) 起動時失敗の受け皿を含む（§13.5）
 ├── src/                          # フロントエンド (React + TypeScript)
 │   ├── main.tsx                  (済)
 │   ├── App.tsx                   (済)
 │   ├── i18n/ja.ts                (済) 全表示文言をここに集約
 │   ├── components/
-│   │   ├── graph/                SVG グラフ描画 (T-06)
-│   │   ├── commits/              コミットリスト（仮想スクロール）(T-07)
+│   │   ├── graph/CommitGraph.tsx (済) 窓の範囲だけを描く SVG
+│   │   ├── commits/              (済) CommitList / CommitRow / RefChips /
+│   │   │                              ScrollbarRefMarkers
 │   │   ├── sidebar/              (済) リポジトリ一覧。ブランチ/タグツリーは T-10
-│   │   ├── diff/                 差分ペイン (T-13)
+│   │   ├── diff/                 差分ペイン (T-11, T-13)
 │   │   ├── review/               AI レビュードロワー (T-23)
 │   │   ├── commandlog/           (済) git コマンドログパネル
 │   │   ├── setup/                (済) 空状態と git 未検出画面
 │   │   └── common/               (済) SplitPane / ContextMenu / CommandPalette /
 │   │                                  NoticeBar / LoadProgress / ErrorBoundary
-│   ├── hooks/                    (済) useTheme / useCommandLog
+│   ├── hooks/                    (済) useTheme / useCommandLog / useCommitNavigation
 │   ├── lib/
-│   │   ├── graphPath.ts          レーン配列 -> SVG パス（純関数・テスト対象）(T-06)
+│   │   ├── graphPath.ts          (済) レーン配列 -> SVG パス（純関数・テスト対象）
+│   │   ├── relativeTime.ts       (済) 相対日時（純関数・テスト対象）
+│   │   ├── refTree.ts            ref 一覧 -> 階層構造（純関数）(T-10)
 │   │   └── ipc.ts                (済) Tauri invoke ラッパ
 │   ├── store/                    (済) settings / uiState / repositories / snapshot
-│   └── styles/                   (済) theme.css（トークン）/ app.css
+│   └── styles/                   (済) theme.css（トークン）/ app.css / graph.css
 └── src-tauri/
     ├── Cargo.toml                (済)
     ├── tauri.conf.json           (済)
     ├── tests/
     │   ├── common/mod.rs         (済) 生成リポジトリの用意と Git Bash 探索
     │   ├── repositories.rs       (済) 判定とスキャン (T-02)
-    │   └── snapshot.rs           (済) 全件取得 (T-04)
+    │   ├── snapshot.rs           (済) 全件取得と ref の印 (T-04, T-27)
+    │   ├── lanes.rs              (済) 生成リポジトリでのレーン不変条件 (T-05)
+    │   └── reach.rs              (済) 到達可能集合と ahead/behind (T-09)
     └── src/
         ├── main.rs               (済)
         ├── lib.rs                (済) Tauri コマンドの登録と AppState
@@ -1241,8 +1268,11 @@ gitviewer/
         │   ├── diff.rs           (T-11, T-13)
         │   └── ops.rs            checkout / fetch / merge --ff-only / clone (T-17〜T-19)
         ├── graph/
-        │   ├── lane.rs           レーン割り当て（最重要・テスト必須） (T-05)
-        │   └── reach.rs          到達可能集合と ahead/behind (T-09)
+        │   ├── mod.rs            (済) レーン確定の入口。可視 ref の絞り込みもここ
+        │   ├── lane.rs           (済) レーン割り当て（最重要・テスト必須）
+        │   ├── order.rs          (済) topo / date の並べ替え
+        │   ├── component.rs      (済) 連結成分（orphan 判定）
+        │   └── reach.rs          (済) 到達可能集合と ahead/behind
         ├── llm/
         │   ├── client.rs         OpenAI 互換クライアント (T-20)
         │   ├── skill.rs          (T-21)
@@ -1304,13 +1334,15 @@ ahead/behind は git を呼ばずメモリ上のグラフから計算する（§
 
 インタビューで扱わなかった、実装時に判断してよい事項。
 
-- 状態管理ライブラリ（zustand / jotai / Context のみ）
 - AI レビュー出力の Markdown レンダラ
-- CSS の手法（CSS Modules / Tailwind / vanilla-extract）
-
-なお「仮想スクロールの実装」はこの一覧から外した。**TanStack Virtual** を使うことが
-[`../task_lists.md`](../task_lists.md) の T-07 で確定している。
 - `LC_ALL=C` を git 実行時に設定するか（stderr が英語になり検索性は上がるが、ユーザーに見せる
   メッセージは日本語のままの方が読みやすい。パースは機械可読形式のみに依存しているので、
   どちらでも動作は変わらない）
-- レーン再利用の保留行数を 1 行にするか 2 行にするか（Phase 2 で実際に見て決める）
+
+**決着した項目**
+
+- 仮想スクロールの実装 → **TanStack Virtual**（task_lists.md の T-07）
+- 状態管理 → ライブラリを入れず `useSyncExternalStore` の小さなストアで済ませた（`src/store/`）
+- CSS → 素の CSS ＋ テーマトークン（`src/styles/theme.css`）
+- レーン再利用の保留行数 → **2 行**（`RESERVE_ROWS`）。T-08 で 1〜4 を実測したが
+  レーン数は変わらなかったので、既定のまま据え置いた（§15.1）

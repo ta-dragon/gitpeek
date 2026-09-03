@@ -82,9 +82,9 @@ v1 では非対象のままだが、恒久的な非対象ではなくなった�
 
 | 順 | Phase | タスク | 備考 |
 |---|---|---|---|
-| 1 | 1 | T-01 → T-02 → T-03 / T-04 | T-03 と T-04 は T-02 の後なら順不同 |
-| 2 | 2 | T-05 → T-06 → T-07 → **T-08** | **T-08 は判定ゲート。飛ばさない** |
-| 3 | 3 | T-09 → T-10 | |
+| 1 | 1 | T-01 → T-02 → T-03 / T-04 | **済** |
+| 2 | 2 | T-05 → T-06 → T-07 → T-08 → T-27 | **済**（T-08 は判定ゲート。合格） |
+| 3 | 3 | ~~T-09~~ → **T-10** | T-09 は済 |
 | 4 | 4 | T-11 → T-13 → T-14 | T-12 を T-13 より前に済ませておく |
 | 5 | 5 | T-15 / T-16 | 順不同 |
 | 6 | 6-7 | T-17 → T-18 / T-19 | |
@@ -97,6 +97,7 @@ graph LR
   T02 --> T03
   T02 --> T04
   T04 --> T05 --> T06 --> T07 --> T08
+  T07 --> T27
   T03 --> T07
   T05 --> T09 --> T10
   T08 --> T10
@@ -208,6 +209,18 @@ checkout / FF マージの実処理（T-18）／コミット検索（v1.1）
 **参照**: DESIGN.md §7.3, §7.4, 付録 A / CLAUDE.md §2
 
 **依存**: T-08
+
+**T-07 からの申し送り（着手時に確認すること）**
+
+- **差分ペインの器はもう置いてある。** `src/App.tsx` の `SplitPane direction="column"` の
+  下側が `.pending` のプレースホルダになっているので、そこを差し替える。
+  上下比は `state.json` の `paneRatios.graphDiffSplit`。
+- **`Enter`（差分ペインへフォーカス）と `Alt+↑` `Alt+↓`（前 / 次のファイルへ）は
+  T-07 で保留した**（差分ペインが無かったため）。キーボード処理は
+  `src/hooks/useCommitNavigation.ts` にまとまっているので、ここで足す。
+  DESIGN.md §6.5 の表がショートカットの正。
+- **選択中のコミットは `state.json` の `selectedCommit` が正**（`uiState` ストア）。
+  差分側で別に `useState` を持たないこと。リポジトリを切り替えたときに前の選択が残る。
 
 **作成・変更するファイル**: `src-tauri/src/git/diff.rs`(新) / `src/components/diff/CommitDetail.tsx`(新) /
 `src/components/diff/FileList.tsx`(新) / `src/components/diff/DiffPane.tsx`(新) / `src/App.tsx`(変更)
