@@ -242,7 +242,6 @@ export const ja = {
     copyFailed: "クリップボードへコピーできませんでした。",
   },
 
-  // 作業ツリー（T-16。docs/DESIGN.md §7.5）。**read-only なので操作の文言は無い。**
   // fetch（T-17。docs/DESIGN.md §8.3）。
   fetch: {
     title: "fetch",
@@ -264,14 +263,17 @@ export const ja = {
     // 結果。
     summaryTitle: "fetch の結果",
     summary: (success: number, failed: number) => `成功 ${success} / 失敗 ${failed}`,
+    cancelledCount: (n: number) => `中止 ${n}`,
     skipped: (n: number) => `未実行 ${n}`,
     statusSuccess: "成功",
     statusFailed: "失敗",
     statusCancelled: "中止",
     details: "詳細",
-    noRepositories: "fetch できるリポジトリがありません。",
+    // 一括ボタンが押せないときの説明。リモートを持つ登録が 1 つも無い場合。
+    noRepositories: "fetch できるリポジトリがありません（リモートが登録されていません）。",
   },
 
+  // 作業ツリー（T-16。docs/DESIGN.md §7.5）。**read-only なので操作の文言は無い。**
   workingTree: {
     row: "作業ツリー",
     title: "作業ツリーの変更",

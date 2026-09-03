@@ -45,6 +45,10 @@ export function RepositoryList({
   /** 一括。**確認ダイアログは呼び出し側が出す**（docs/DESIGN.md §8.3）。 */
   onFetchAll: () => void;
 }) {
+  // 一括 fetch の相手はリモートを持つ登録だけ。**1 つも無ければボタンを押させない**
+  // （押せるのに何も起きないボタンになる）。
+  const fetchable = entries.some((entry) => (entry.probe?.remotes.length ?? 0) > 0);
+
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; after: boolean } | null>(null);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -101,8 +105,8 @@ export function RepositoryList({
           type="button"
           className="button button--small"
           onClick={onFetchAll}
-          disabled={busy || entries.length === 0}
-          title={ja.repositories.fetchAllHint}
+          disabled={busy || !fetchable}
+          title={fetchable ? ja.repositories.fetchAllHint : ja.fetch.noRepositories}
         >
           {ja.repositories.fetchAll}
         </button>

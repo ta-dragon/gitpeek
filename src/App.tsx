@@ -154,6 +154,9 @@ export default function App() {
 
   // `fetch` は window の同名関数と紛れるので別の名前にする。
   const fetching = useFetch();
+  // **個別のコールバックを取り出して使う。** `fetching` は毎回新しい object なので、
+  // それを依存に置くと `keydown` の登録・解除が毎レンダリング走る。
+  const { fetchOne: startFetch, askAll } = fetching;
 
   /** fetch できる相手だけを集める。リモートが無いリポジトリは一括の対象にしない。 */
   const fetchTargets = useMemo(
@@ -168,9 +171,9 @@ export default function App() {
     (id: string) => {
       const entry = repos.entries.find((candidate) => candidate.id === id);
       if (entry === undefined) return;
-      fetching.fetchOne({ id: entry.id, name: entry.name });
+      startFetch({ id: entry.id, name: entry.name });
     },
-    [repos.entries, fetching],
+    [repos.entries, startFetch],
   );
 
   // Ctrl+P でリポジトリ切替、Ctrl+R / Ctrl+Shift+R で fetch（docs/DESIGN.md §6.5）。
@@ -188,13 +191,13 @@ export default function App() {
       // **`Ctrl+R` は WebView のページ再読込に取られる。** 必ず握り潰すこと。
       if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "r") {
         event.preventDefault();
-        if (event.shiftKey) fetching.askAll(fetchTargets);
+        if (event.shiftKey) askAll(fetchTargets);
         else if (repos.selectedId !== null) fetchOne(repos.selectedId);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [fetching, fetchTargets, fetchOne, repos.selectedId]);
+  }, [askAll, fetchTargets, fetchOne, repos.selectedId]);
 
   const pickFolder = async (title: string): Promise<string | null> => {
     const picked = await open({ directory: true, multiple: false, title });
@@ -301,7 +304,7 @@ export default function App() {
                     }
                     onReorder={(ids) => void repositories.reorder(ids)}
                     onFetch={fetchOne}
-                    onFetchAll={() => fetching.askAll(fetchTargets)}
+                    onFetchAll={() => askAll(fetchTargets)}
                   />
                 }
                 refs={

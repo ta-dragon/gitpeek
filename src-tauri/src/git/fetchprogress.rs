@@ -33,6 +33,13 @@ pub struct LineSplitter {
     buffer: Vec<u8>,
 }
 
+/// 区切りが来ないまま溜め込む上限。ここに達したらそこまでを 1 行として切る。
+///
+/// stderr の中身は**相手のリモートが決められる**（`remote: ` で中継される）。
+/// 区切りを 1 つも寄越さなければ、溜め込みが青天井になるうえ、毎回先頭から
+/// 走査するので二乗に効く。上限で切って、そこまでを 1 行として扱う。
+const MAX_LINE_BYTES: usize = 64 * 1024;
+
 impl LineSplitter {
     pub fn new() -> Self {
         Self::default()
@@ -55,6 +62,12 @@ impl LineSplitter {
             start = index + 1;
         }
         self.buffer.drain(..start);
+
+        // 区切りが来ないまま伸び続けたら、そこまでを 1 行として切り上げる。
+        if self.buffer.len() >= MAX_LINE_BYTES {
+            lines.push(String::from_utf8_lossy(&self.buffer).into_owned());
+            self.buffer.clear();
+        }
         lines
     }
 
@@ -212,6 +225,20 @@ mod tests {
             splitter.push(tail),
             vec!["オブジェクトを受信中:  50% (5/10)".to_string()]
         );
+    }
+
+    /// **区切りを寄越さない相手で溜め込みが青天井にならないこと。**
+    /// stderr の中身はリモート側が決められる。
+    #[test]
+    fn cuts_off_a_line_that_never_ends() {
+        let mut splitter = LineSplitter::new();
+        let chunk = vec![b'x'; 32 * 1024];
+        assert!(splitter.push(&chunk).is_empty(), "上限までは溜める");
+
+        let lines = splitter.push(&chunk);
+        assert_eq!(lines.len(), 1, "上限を超えたら切り上げる");
+        assert_eq!(lines[0].len(), 64 * 1024);
+        assert_eq!(splitter.flush(), None, "切り上げたあとは空になっている");
     }
 
     #[test]

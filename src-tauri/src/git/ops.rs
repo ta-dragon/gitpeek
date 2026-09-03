@@ -64,10 +64,18 @@ pub fn fetch(
     let mut splitter = LineSplitter::new();
     let mut lines: Vec<String> = Vec::new();
 
-    let mut take = |line: String| match classify(&line) {
-        Line::Progress(progress) => on_progress(progress),
-        Line::Body(body) if lines.len() < MAX_LINES => lines.push(body),
-        Line::Body(_) => {}
+    let mut take = |line: String| {
+        // **本文が上限に達していても進捗は流し続ける。** バーが途中で止まる。
+        if lines.len() >= MAX_LINES {
+            if let Some(progress) = parse(&line) {
+                on_progress(progress);
+            }
+            return;
+        }
+        match classify(&line) {
+            Line::Progress(progress) => on_progress(progress),
+            Line::Body(body) => lines.push(body),
+        }
     };
 
     let started = std::time::Instant::now();

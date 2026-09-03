@@ -58,43 +58,48 @@ export function useFetch() {
     if (running.current) return;
     running.current = true;
     cancelled.current = false;
+
     let run = startRun(targets);
     setState({ run, progress: null, pending: null });
 
-    while (hasMore(run)) {
-      const target = currentTarget(run);
-      if (target === null) break;
+    try {
+      while (hasMore(run)) {
+        const target = currentTarget(run);
+        if (target === null) break;
 
-      try {
-        const outcome = await fetchRepository(target.id);
-        run = recordResult(run, outcome);
-      } catch (error) {
-        // 呼び出し自体が失敗した（フォルダが消えている等）。**残りは止めない。**
-        run = recordResult(run, {
-          status: "failed",
-          message: messageOf(error),
-          lines: [],
-          durationMs: 0,
-        });
+        try {
+          const outcome = await fetchRepository(target.id);
+          run = recordResult(run, outcome);
+        } catch (error) {
+          // 呼び出し自体が失敗した（フォルダが消えている等）。**残りは止めない。**
+          run = recordResult(run, {
+            status: "failed",
+            message: messageOf(error),
+            lines: [],
+            durationMs: 0,
+          });
+        }
+
+        if (cancelled.current) run = requestCancel(run);
+        setState((current) => ({ ...current, run, progress: null }));
       }
 
-      if (cancelled.current) run = requestCancel(run);
+      // ref が動いた可能性があるので、一覧（放置警告と ahead/behind の素）を取り直す。
+      await repositories.refresh();
+
+      // 開いているリポジトリだけ履歴を読み直す（docs/DESIGN.md §8.5）。
+      // 開いていないものは、切り替えたときに読めばよい。
+      const open = snapshots.currentRepositoryId();
+      const touched = run.results.some(
+        (result) => result.id === open && result.status !== "failed",
+      );
+      if (touched) await snapshots.reload();
+    } finally {
+      // **必ず外す。** 読み直しで例外が出たまま立てっぱなしにすると、
+      // このセッションでは二度と fetch できなくなる。
+      running.current = false;
       setState((current) => ({ ...current, run, progress: null }));
     }
-
-    // ref が動いた可能性があるので、一覧（放置警告と ahead/behind の素）を取り直す。
-    await repositories.refresh();
-
-    // 開いているリポジトリだけ履歴を読み直す（docs/DESIGN.md §8.5）。
-    // 開いていないものは、切り替えたときに読めばよい。
-    const open = snapshots.currentRepositoryId();
-    const touched = run.results.some(
-      (result) => result.id === open && result.status !== "failed",
-    );
-    if (touched) await snapshots.reload();
-
-    running.current = false;
-    setState((current) => ({ ...current, run, progress: null }));
   }, []);
 
   /** 1 件だけ。**確認は出さない**（対象がひとつなら意図は明らか）。 */

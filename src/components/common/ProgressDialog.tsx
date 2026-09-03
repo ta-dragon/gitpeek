@@ -71,6 +71,9 @@ export function FetchDialog({
         {done && (
           <p className="modal__lead">
             {ja.fetch.summary(summary.success, summary.failed)}
+            {/* **中止と未実行を落とさない。** 落とすと「成功 0 / 失敗 0」だけが残り、
+                何が起きたのか分からなくなる。 */}
+            {summary.cancelled > 0 && ` / ${ja.fetch.cancelledCount(summary.cancelled)}`}
             {summary.skipped > 0 && ` / ${ja.fetch.skipped(summary.skipped)}`}
           </p>
         )}
