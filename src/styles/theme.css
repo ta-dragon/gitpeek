@@ -35,17 +35,22 @@
    * **並び順は隣接レーンの色差で決めてある**（T-08 で測った）。隣り合う 2 レーンは
    * この配列の隣り合う 2 色になるので、順番を入れ替えるときは CIE Lab の色差が
    * どの隣接組でも 60 以上あることを確かめること（olive と brown を隣に置くと 26 まで落ちる）。
+   *
+   * **明るさはライトとダークで別々に決める。** 白地に濃い色を置くと線が重く、
+   * グラフ全体が暗く沈む。ライトは L* 55〜60・白との輝度比 3.1〜3.7 に揃えてある
+   * （下限は 3.0。ホバー行の背景 #e7ebf1 の上でも 2.6 を切らない）。
+   * ダークは背景が暗いぶん L* 62〜74 まで上げられる。
    * ブランチ名のハッシュで色を決める方式は採らない（レーン再利用と相性が悪い）。
    */
   --graph-lane-trunk: #4a5563;
-  --graph-lane-0: #2f6feb;
-  --graph-lane-1: #1a7f5a;
-  --graph-lane-2: #b3541e;
-  --graph-lane-3: #0f7a8a;
-  --graph-lane-4: #a03a5f;
-  --graph-lane-5: #6a7a1f;
-  --graph-lane-6: #8250df;
-  --graph-lane-7: #7a5c1a;
+  --graph-lane-0: #3b82f6;
+  --graph-lane-1: #0e9c6a;
+  --graph-lane-2: #d76f18;
+  --graph-lane-3: #0b95a8;
+  --graph-lane-4: #e0507f;
+  --graph-lane-5: #869b16;
+  --graph-lane-6: #9a6bf5;
+  --graph-lane-7: #a87d1a;
 
   /* マージの中空円を抜く色。行の背景と同じにする。 */
   --graph-node-fill: #ffffff;
