@@ -36,7 +36,11 @@ export const ja = {
     sortRecent: "最終アクセス順",
     dragHint: "ドラッグで並べ替え",
     dragDisabled: "並び順が「手動」のときだけ並べ替えられます。",
-    // 素性の表示。ahead/behind と dirty は T-16 / T-17 で中身が入る。
+    fetch: "fetch",
+    fetchHint: "リモートから取ってきます（取ってくるだけで、作業ツリーには触りません）。",
+    fetchAll: "全て fetch",
+    fetchAllHint: "登録済みのリポジトリを 1 つずつ順に fetch します。",
+    // 素性の表示。ahead/behind は T-17 で中身が入る。
     bare: "bare",
     shallow: "shallow",
     detached: "detached",
@@ -51,6 +55,12 @@ export const ja = {
     scanNotFound: "リポジトリは見つかりませんでした。",
     head: "HEAD",
     path: "パス",
+    // 放置警告。**アイコンとツールチップだけ**にする（docs/DESIGN.md §8.3）。
+    stale: "⏳",
+    staleHint: (days: number | null) =>
+      days === null
+        ? "まだ一度も fetch していません。"
+        : `最後に fetch してから ${days} 日経っています。`,
   },
 
   snapshot: {
@@ -86,10 +96,15 @@ export const ja = {
     progressGraph: "グラフを組み立てています…",
     progressTransfer: "画面へ渡しています…",
     progressCount: (done: number) => `${done.toLocaleString()} 件`,
-    // 分母は前回の件数なので「約」を外さないこと。
+    // **履歴の読み込みでは分母が前回の件数なので「約」を外さないこと。**
+    // 分母が正確な場面（fetch のオブジェクト数など）には exact の方を使う。
     progressOf: (done: number, total: number) =>
       `${done.toLocaleString()} / 約 ${total.toLocaleString()} 件`,
     progressPercent: (ratio: number) => `約 ${Math.round(ratio * 100)}%`,
+    // 分母が正確なとき。**「約」を付けると逆に嘘になる。**
+    progressExactOf: (done: number, total: number) =>
+      `${done.toLocaleString()} / ${total.toLocaleString()} 件`,
+    progressExactPercent: (ratio: number) => `${Math.round(ratio * 100)}%`,
     progressElapsed: (seconds: number) => `${seconds} 秒経過`,
   },
 
@@ -228,6 +243,35 @@ export const ja = {
   },
 
   // 作業ツリー（T-16。docs/DESIGN.md §7.5）。**read-only なので操作の文言は無い。**
+  // fetch（T-17。docs/DESIGN.md §8.3）。
+  fetch: {
+    title: "fetch",
+    running: (name: string) => `${name} を fetch しています…`,
+    ofRepositories: (done: number, total: number) => `リポジトリ ${done} / ${total}`,
+    cancel: "中止",
+    close: "閉じる",
+    // **中止しても取り込み済みの ref は戻らない。** 黙って閉じない。
+    cancelling: "中止しています…",
+
+    // 一括の実行前確認。**1 回だけ出す**（1 件ずつ聞かない）。
+    confirmTitle: "全て fetch しますか？",
+    confirmBody: (n: number) => `${n} 件のリポジトリを 1 つずつ順に fetch します。`,
+    confirmAuth:
+      "資格情報の期限が切れているリモートがあると、認証ウィンドウが前面に出ることがあります。",
+    confirmRun: "実行する",
+    confirmCancel: "やめる",
+
+    // 結果。
+    summaryTitle: "fetch の結果",
+    summary: (success: number, failed: number) => `成功 ${success} / 失敗 ${failed}`,
+    skipped: (n: number) => `未実行 ${n}`,
+    statusSuccess: "成功",
+    statusFailed: "失敗",
+    statusCancelled: "中止",
+    details: "詳細",
+    noRepositories: "fetch できるリポジトリがありません。",
+  },
+
   workingTree: {
     row: "作業ツリー",
     title: "作業ツリーの変更",

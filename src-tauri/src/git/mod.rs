@@ -1,7 +1,9 @@
 pub mod detect;
 pub mod diff;
 pub mod exec;
+pub mod fetchprogress;
 pub mod log;
+pub mod ops;
 pub mod progress;
 pub mod refs;
 pub mod repo;

@@ -40,6 +40,15 @@ pub struct RepositoryProbe {
     pub is_bare: bool,
     pub is_shallow: bool,
     pub head: Option<HeadState>,
+    /// 登録されているリモート名。**空なら fetch の放置警告を出さない**
+    /// （fetch しても `FETCH_HEAD` ができないので、出すと永久に出続ける）。
+    pub remotes: Vec<String>,
+    /// 最後に fetch した時刻（`FETCH_HEAD` の mtime。Unix ミリ秒）。
+    ///
+    /// **アプリ側で記録しない**（docs/DESIGN.md §8.3）。独自に持つと、ターミナルで
+    /// `git fetch` した直後に「10 日 fetch していません」と誤警告する。
+    /// `None` は「一度も fetch していない」。
+    pub last_fetch_at_ms: Option<i64>,
     /// 検出するだけ。**アプリから削除しない**（CLAUDE.md §2）。
     pub index_lock_present: bool,
     /// 人間向けのメッセージ。生の stderr はコマンドログ側に残る。
@@ -63,6 +72,11 @@ pub struct RepositoryEntry {
     pub settings: RepositorySettings,
     /// パスが消えているリポジトリは `None`。UI 側でグレーアウトする。
     pub probe: Option<RepositoryProbe>,
+    /// しばらく fetch していないか（docs/DESIGN.md §8.3）。
+    ///
+    /// **判定は `git::ops::is_stale` の 1 箇所だけ。** フロントで日数を数え直すと、
+    /// 「リモートが無ければ警告しない」「閾値 0 で無効」といった条件が二重管理になる。
+    pub fetch_stale: bool,
 }
 
 impl RepositoryProbe {
@@ -74,6 +88,8 @@ impl RepositoryProbe {
             is_bare: false,
             is_shallow: false,
             head: None,
+            remotes: Vec::new(),
+            last_fetch_at_ms: None,
             index_lock_present: false,
             error,
         }
@@ -131,16 +147,59 @@ pub fn probe(log: &dyn LogSink, program: &str, path: &Path) -> RepositoryProbe {
     };
 
     let index_lock_present = Path::new(&git_dir).join("index.lock").is_file();
+    let last_fetch_at_ms = last_fetch_at_ms(Path::new(&git_dir));
 
     RepositoryProbe {
         is_repository: true,
         head: read_head(log, program, path),
+        remotes: remotes(log, program, path),
+        last_fetch_at_ms,
         git_dir: Some(git_dir),
         work_tree,
         is_bare,
         is_shallow,
         index_lock_present,
         error: None,
+    }
+}
+
+/// 登録されているリモート名。取れなければ空。
+///
+/// `.git/config` を自前で読まないのは、`include` や条件付き include でリモートが
+/// 別ファイルに書けるため。**「リモートが 1 つも無い」の判定を外すと放置警告が
+/// 永久に出続ける**ので、ここは git に聞く。
+fn remotes(log: &dyn LogSink, program: &str, path: &Path) -> Vec<String> {
+    exec::run(log, program, Some(path), &["remote"])
+        .ok()
+        .filter(exec::GitOutput::ok)
+        .map(|output| {
+            output
+                .stdout_lossy()
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `FETCH_HEAD` の mtime を Unix ミリ秒で返す（docs/DESIGN.md §8.3）。
+///
+/// **`<path>/.git` を組み立て直さないこと。** リンクされた作業ツリーでは
+/// `FETCH_HEAD` もその作業ツリーの git dir（`.git/worktrees/<名前>`）側にできる。
+/// ここへ渡ってくる `git_dir` は `rev-parse --absolute-git-dir` の答えなので、
+/// そのまま繋げば両方で当たる。
+fn last_fetch_at_ms(git_dir: &Path) -> Option<i64> {
+    let modified = std::fs::metadata(git_dir.join("FETCH_HEAD"))
+        .ok()?
+        .modified()
+        .ok()?;
+
+    match modified.duration_since(std::time::UNIX_EPOCH) {
+        Ok(since) => Some(since.as_millis() as i64),
+        // 1970 より前（時計がずれている）。負の値として返す。
+        Err(error) => Some(-(error.duration().as_millis() as i64)),
     }
 }
 

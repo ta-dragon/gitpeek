@@ -23,6 +23,7 @@ import {
   type WorkingSelection,
 } from "./lib/workingTree";
 import { CommandPalette } from "./components/common/CommandPalette";
+import { FetchConfirm, FetchDialog } from "./components/common/ProgressDialog";
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
 import { SplitPane } from "./components/common/SplitPane";
@@ -32,6 +33,7 @@ import { Sidebar } from "./components/sidebar/Sidebar";
 import { EmptyState } from "./components/setup/EmptyState";
 import { GitSetupScreen } from "./components/setup/GitSetupScreen";
 import { useCommandLog } from "./hooks/useCommandLog";
+import { useFetch } from "./hooks/useFetch";
 import { useTheme, type ThemePreference } from "./hooks/useTheme";
 import { ja } from "./i18n/ja";
 import { clearCompare, selectCommit, swapEnds } from "./lib/compareSelection";
@@ -146,21 +148,53 @@ export default function App() {
     void snapshots.load(repos.selectedId, false, false, visible);
   }, [repos.selectedId]);
 
-  // Ctrl+P でリポジトリ切替（docs/DESIGN.md §6.5）。
+  const sortMode = uiState.repositoryListSort;
+  const sorted = repositories.sortedEntries(repos.entries, sortMode);
+  const selected = sorted.find((entry) => entry.id === repos.selectedId) ?? null;
+
+  // `fetch` は window の同名関数と紛れるので別の名前にする。
+  const fetching = useFetch();
+
+  /** fetch できる相手だけを集める。リモートが無いリポジトリは一括の対象にしない。 */
+  const fetchTargets = useMemo(
+    () =>
+      sorted
+        .filter((entry) => (entry.probe?.remotes.length ?? 0) > 0)
+        .map((entry) => ({ id: entry.id, name: entry.name })),
+    [sorted],
+  );
+
+  const fetchOne = useCallback(
+    (id: string) => {
+      const entry = repos.entries.find((candidate) => candidate.id === id);
+      if (entry === undefined) return;
+      fetching.fetchOne({ id: entry.id, name: entry.name });
+    },
+    [repos.entries, fetching],
+  );
+
+  // Ctrl+P でリポジトリ切替、Ctrl+R / Ctrl+Shift+R で fetch（docs/DESIGN.md §6.5）。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // 入力欄では横取りしない（他のショートカットと同じ扱い）。
+      if (isTyping(event.target)) return;
+
       if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "p") {
         event.preventDefault();
         setPaletteOpen((current) => !current);
+        return;
+      }
+
+      // **`Ctrl+R` は WebView のページ再読込に取られる。** 必ず握り潰すこと。
+      if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "r") {
+        event.preventDefault();
+        if (event.shiftKey) fetching.askAll(fetchTargets);
+        else if (repos.selectedId !== null) fetchOne(repos.selectedId);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
-
-  const sortMode = uiState.repositoryListSort;
-  const sorted = repositories.sortedEntries(repos.entries, sortMode);
-  const selected = sorted.find((entry) => entry.id === repos.selectedId) ?? null;
+  }, [fetching, fetchTargets, fetchOne, repos.selectedId]);
 
   const pickFolder = async (title: string): Promise<string | null> => {
     const picked = await open({ directory: true, multiple: false, title });
@@ -266,6 +300,8 @@ export default function App() {
                       updateUiState((current) => ({ ...current, repositoryListSort: mode }))
                     }
                     onReorder={(ids) => void repositories.reorder(ids)}
+                    onFetch={fetchOne}
+                    onFetchAll={() => fetching.askAll(fetchTargets)}
                   />
                 }
                 refs={
@@ -304,6 +340,24 @@ export default function App() {
 
       {logOpen && <CommandLogPanel entries={entries} />}
 
+      {/* fetch の確認と進行（docs/DESIGN.md §8.3）。**一括のときだけ確認を 1 回。** */}
+      {fetching.pending !== null && (
+        <FetchConfirm
+          targets={fetching.pending}
+          onConfirm={() => fetching.confirmAll(fetching.pending ?? [])}
+          onCancel={fetching.dismiss}
+        />
+      )}
+
+      {fetching.run !== null && (
+        <FetchDialog
+          run={fetching.run}
+          progress={fetching.progress}
+          onCancel={fetching.cancel}
+          onClose={fetching.dismiss}
+        />
+      )}
+
       {paletteOpen && (
         <CommandPalette
           entries={sorted}
@@ -316,6 +370,16 @@ export default function App() {
       )}
     </div>
   );
+}
+
+/**
+ * 入力欄にフォーカスがあるか。**ショートカットを横取りしない**ための判定
+ * （`useCommitNavigation` / `useFileNavigation` と同じ扱い）。
+ */
+function isTyping(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  if (element === null) return false;
+  return /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName) || element.isContentEditable === true;
 }
 
 /**

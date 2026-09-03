@@ -64,6 +64,20 @@ export type RepositoryProbe = {
   isBare: boolean;
   isShallow: boolean;
   head: HeadState | null;
+  /**
+   * 登録されているリモート名。
+   *
+   * **空なら fetch の放置警告を出さない。** fetch しても `FETCH_HEAD` はできないので、
+   * 出すとローカルだけのリポジトリで永久に出続ける。
+   */
+  remotes: string[];
+  /**
+   * 最後に fetch した時刻（`FETCH_HEAD` の mtime。Unix ミリ秒）。
+   *
+   * **アプリ側では記録していない。** 独自に持つと、ターミナルで `git fetch` した
+   * 直後に「10 日 fetch していません」と誤警告する。null は一度も fetch していない。
+   */
+  lastFetchAtMs: number | null;
   /** 検出するだけ。アプリからは削除しない。 */
   indexLockPresent: boolean;
   error: string | null;
@@ -72,6 +86,13 @@ export type RepositoryProbe = {
 /** 登録内容に実際の状態を添えたもの。`probe` が null ならパスが消えている。 */
 export type RepositoryEntry = RepositorySettings & {
   probe: RepositoryProbe | null;
+  /**
+   * しばらく fetch していないか（docs/DESIGN.md §8.3）。
+   *
+   * **判定は Rust 側の `git::ops::is_stale` の 1 箇所だけ。** ここで日数を数え直すと、
+   * 「リモートが無ければ警告しない」「閾値 0 で無効」が二重管理になる。
+   */
+  fetchStale: boolean;
 };
 
 export function probeRepository(path: string): Promise<RepositoryProbe> {
@@ -187,6 +208,46 @@ export function loadRepositorySnapshot(
     force,
     estimatedCommits,
   });
+}
+
+/* ---------- fetch（`src-tauri/src/git/ops.rs`）---------- */
+
+export type FetchStatus = "success" | "failed" | "cancelled";
+
+export type FetchOutcome = {
+  status: FetchStatus;
+  /** 画面に出す 1 行。失敗の理由はここで人間向けに言い換えてある。 */
+  message: string;
+  /** 進捗ではなかった stderr の行。**Rust 側で秘匿情報を伏せてある。** */
+  lines: string[];
+  durationMs: number;
+};
+
+/** `fetch-progress` イベントの中身。 */
+export type FetchProgress = {
+  /** どのリポジトリの進捗か。一括 fetch では次々と変わる。 */
+  repositoryId: string;
+  /** git が出した見出しそのまま。**翻訳されていることがある。** */
+  label: string;
+  done: number;
+  /** 分母が分からない段階は null（バーは不定表示になる）。 */
+  total: number | null;
+  elapsedMs: number;
+};
+
+/**
+ * リモートから取ってくる（`fetch --all --prune --tags --progress`）。
+ *
+ * **一括 fetch はこれを 1 件ずつ呼ぶ。** 並列にすると認証ウィンドウが同時に何枚も開く。
+ * 中止しても、そこまでに更新された ref は戻らない。
+ */
+export function fetchRepository(repositoryId: string): Promise<FetchOutcome> {
+  return invoke<FetchOutcome>("fetch_repository", { repositoryId });
+}
+
+/** 実行中の fetch を止める。走っていなければ何もしない。 */
+export function cancelFetch(): Promise<void> {
+  return invoke<void>("cancel_fetch");
 }
 
 /* ---------- レーン割り当て（`src-tauri/src/graph/lane.rs`）---------- */
@@ -680,6 +741,14 @@ export function onSnapshotProgress(
   handler: (progress: SnapshotProgress) => void,
 ): Promise<UnlistenFn> {
   return listen<SnapshotProgress>(SNAPSHOT_PROGRESS_EVENT, (event) => handler(event.payload));
+}
+
+const FETCH_PROGRESS_EVENT = "fetch-progress";
+
+export function onFetchProgress(
+  handler: (progress: FetchProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<FetchProgress>(FETCH_PROGRESS_EVENT, (event) => handler(event.payload));
 }
 
 const COMMAND_LOG_EVENT = "command-log";

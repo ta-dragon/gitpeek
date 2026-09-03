@@ -16,6 +16,7 @@ use commandlog::{CommandLog, CommandLogEntry, EmittingLog};
 use git::detect::GitStatus;
 use encoding::TextEncoding;
 use git::diff::{CommitDetail, DiffOptions, DiffTarget, FileChange, FileDiff};
+use git::ops::FetchOutcome;
 use git::status::{WorkingFile, WorkingTree};
 use git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
 use git::repo::{RepositoryEntry, RepositoryProbe};
@@ -73,6 +74,12 @@ pub struct AppState {
     pub store: Store,
     /// 直近に読んだグラフ素材。リポジトリ切替を体感即時にする（docs/DESIGN.md §6.2）。
     pub snapshots: Arc<SnapshotCache>,
+    /// 実行中の fetch を止めるための合図。実行していなければ `None`。
+    ///
+    /// **一括 fetch はフロントが 1 件ずつ呼ぶ**ので、ここで止められるのは
+    /// 「いま走っている 1 件」だけ。次のリポジトリへ進まないようにするのは
+    /// フロント側の責務（docs/DESIGN.md §8.3）。
+    pub fetch_cancel: Mutex<Option<git::exec::Cancel>>,
 }
 
 /// git を検出する。`path` が指定されていればそのフルパスを、無ければ PATH 上の `git` を試す。
@@ -111,6 +118,14 @@ async fn detect_git(
 #[tauri::command]
 fn list_command_log(state: State<'_, AppState>) -> Vec<CommandLogEntry> {
     state.log.entries()
+}
+
+/// いまの時刻を Unix ミリ秒で。放置警告の判定にだけ使う。
+fn now_ms() -> i64 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(since) => since.as_millis() as i64,
+        Err(error) => -(error.duration().as_millis() as i64),
+    }
 }
 
 /// 今回の起動で使う git。未検出なら PATH の `git` を試す。
@@ -437,6 +452,91 @@ async fn load_working_file(
     .map_err(|error| error.to_string())?
 }
 
+/// fetch の途中経過をフロントへ送るイベント名。
+const FETCH_PROGRESS_EVENT: &str = "fetch-progress";
+
+/// 途中経過に**どのリポジトリのものか**を添えて送る（`SNAPSHOT_PROGRESS_EVENT` と同じ理由）。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchProgressEvent<'a> {
+    repository_id: &'a str,
+    #[serde(flatten)]
+    progress: git::fetchprogress::FetchProgress,
+    elapsed_ms: u64,
+}
+
+/// リモートから取ってくる（docs/DESIGN.md §8.3）。
+///
+/// **定期実行はしない。** ここを呼ぶのは利用者の操作だけで、タイマーからは呼ばない
+/// （認証キャッシュが切れていると、何もしていないのに認証ウィンドウが前面に出る）。
+///
+/// 一括 fetch は**フロントが 1 件ずつこれを呼ぶ**。並列にすると認証ウィンドウが
+/// 同時に何枚も開く。
+#[tauri::command]
+async fn fetch_repository(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+) -> Result<FetchOutcome, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    // 中止の合図を先に置く。**実行が終わったら必ず外す**（次の fetch が
+    // 前回の「中止済み」を引き継いで即座に止まらないように）。
+    let cancel = git::exec::Cancel::new();
+    if let Ok(mut slot) = state.fetch_cancel.lock() {
+        *slot = Some(cancel.clone());
+    }
+
+    let started = std::time::Instant::now();
+    let running = cancel.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        git::ops::fetch(
+            &EmittingLog::new(&handle, &log),
+            &program,
+            &path,
+            &running,
+            &mut |progress| {
+                let _ = handle.emit(
+                    FETCH_PROGRESS_EVENT,
+                    FetchProgressEvent {
+                        repository_id: &repository.id,
+                        progress,
+                        elapsed_ms: started.elapsed().as_millis() as u64,
+                    },
+                );
+            },
+        )
+    })
+    .await
+    .map_err(|error| error.to_string());
+
+    if let Ok(mut slot) = state.fetch_cancel.lock() {
+        *slot = None;
+    }
+
+    outcome?
+}
+
+/// 実行中の fetch を止める。走っていなければ何もしない。
+///
+/// **止めても、そこまでに更新された ref は戻らない。** 結果の文言でそう伝えている。
+#[tauri::command]
+async fn cancel_fetch(state: State<'_, AppState>) -> Result<(), String> {
+    if let Ok(slot) = state.fetch_cancel.lock() {
+        if let Some(cancel) = slot.as_ref() {
+            cancel.cancel();
+        }
+    }
+    Ok(())
+}
+
 /// 差分の出どころ。フロントの `DiffScope` と同じ形（`kind` で分かれる）。
 ///
 /// **真偽値を並べるのではなく種類で分ける。** `parent` / `sha` / `symmetric` /
@@ -530,6 +630,9 @@ async fn list_repositories(
     let program = git_program(&state);
     let log = state.log.clone();
     let handle = app.clone();
+    // 放置警告の閾値。既定 7 日、0 で無効（docs/DESIGN.md §8.3）。
+    let threshold_days = state.store.settings()?.settings.fetch.stale_warning_days;
+    let now_ms = now_ms();
 
     tauri::async_runtime::spawn_blocking(move || {
         let sink = EmittingLog::new(&handle, &log);
@@ -540,7 +643,20 @@ async fn list_repositories(
                 let probe = path
                     .is_dir()
                     .then(|| git::repo::probe(&sink, &program, &path));
-                RepositoryEntry { settings, probe }
+                // **判定はここ 1 箇所。** フロントで日数を数え直さない。
+                let fetch_stale = probe.as_ref().is_some_and(|probe| {
+                    git::ops::is_stale(
+                        !probe.remotes.is_empty(),
+                        probe.last_fetch_at_ms,
+                        now_ms,
+                        threshold_days,
+                    )
+                });
+                RepositoryEntry {
+                    settings,
+                    probe,
+                    fetch_stale,
+                }
             })
             .collect()
     })
@@ -590,6 +706,7 @@ pub fn run() {
                 git_path: Mutex::new(None),
                 store,
                 snapshots: Arc::new(SnapshotCache::new()),
+                fetch_cancel: Mutex::new(None),
             });
             Ok(())
         })
@@ -609,6 +726,8 @@ pub fn run() {
             load_file_diff,
             load_working_tree,
             load_working_file,
+            fetch_repository,
+            cancel_fetch,
             load_settings,
             save_settings,
             load_ui_state,

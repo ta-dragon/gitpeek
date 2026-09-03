@@ -10,7 +10,10 @@ export type SortMode = "manual" | "recent";
  * リポジトリ一覧。追加・登録解除・並べ替え・再指定。
  *
  * パスが消えている行はグレーアウトし、「再指定 / 登録解除」を出す（docs/DESIGN.md §3.6）。
- * ahead/behind バッジと dirty マークは**場所だけ確保**する（中身は T-17 / T-16）。
+ *
+ * **fetch の放置警告はアイコンとツールチップだけ**（docs/DESIGN.md §8.3）。
+ * モーダルもバナーも出さない。判定は Rust 側（`entry.fetchStale`）に任せてあり、
+ * ここで日数を数え直さない。
  */
 export function RepositoryList({
   entries,
@@ -24,6 +27,8 @@ export function RepositoryList({
   onRelocate,
   onSortModeChange,
   onReorder,
+  onFetch,
+  onFetchAll,
 }: {
   entries: RepositoryEntry[];
   selectedId: string | null;
@@ -36,6 +41,9 @@ export function RepositoryList({
   onRelocate: (id: string) => void;
   onSortModeChange: (mode: SortMode) => void;
   onReorder: (orderedIds: string[]) => void;
+  onFetch: (id: string) => void;
+  /** 一括。**確認ダイアログは呼び出し側が出す**（docs/DESIGN.md §8.3）。 */
+  onFetchAll: () => void;
 }) {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; after: boolean } | null>(null);
@@ -88,6 +96,15 @@ export function RepositoryList({
         </button>
         <button type="button" className="button button--small" onClick={onScan} disabled={busy}>
           {ja.repositories.scanShort}
+        </button>
+        <button
+          type="button"
+          className="button button--small"
+          onClick={onFetchAll}
+          disabled={busy || entries.length === 0}
+          title={ja.repositories.fetchAllHint}
+        >
+          {ja.repositories.fetchAll}
         </button>
       </header>
 
@@ -159,6 +176,13 @@ export function RepositoryList({
           y={menu.y}
           onClose={() => setMenu(null)}
           items={[
+            {
+              label: ja.repositories.fetch,
+              title: ja.repositories.fetchHint,
+              // リモートが無いリポジトリでは意味が無いので出さない。
+              disabled: busy || !hasRemotes(entries, menu.id),
+              onSelect: () => onFetch(menu.id),
+            },
             {
               label: ja.repositories.relocate,
               title: ja.repositories.relocateHint,
@@ -236,7 +260,7 @@ function RepositoryRow({
       </div>
 
       <div className="repo__marks">
-        {/* ahead/behind と dirty の場所を確保しておく（T-17 / T-16 で埋まる）。 */}
+        {/* ahead/behind の場所を確保しておく（T-17 で ref の更新までは入った）。 */}
         <span className="repo__badges">{entry.probe && <ProbeBadges entry={entry} />}</span>
       </div>
 
@@ -273,6 +297,15 @@ function ProbeBadges({ entry }: { entry: RepositoryEntry }) {
 
   return (
     <>
+      {/* 放置警告。**アイコンとツールチップだけ**（docs/DESIGN.md §8.3）。 */}
+      {entry.fetchStale && (
+        <span
+          className="repo__stale"
+          title={ja.repositories.staleHint(daysSince(probe.lastFetchAtMs))}
+        >
+          {ja.repositories.stale}
+        </span>
+      )}
       {probe.isBare && <span className="badge">{ja.repositories.bare}</span>}
       {probe.isShallow && <span className="badge">{ja.repositories.shallow}</span>}
       {probe.head?.kind === "detached" && (
@@ -286,6 +319,18 @@ function ProbeBadges({ entry }: { entry: RepositoryEntry }) {
       )}
     </>
   );
+}
+
+/** リモートを持っているか。持っていなければ fetch のメニューを出さない。 */
+function hasRemotes(entries: RepositoryEntry[], id: string): boolean {
+  const entry = entries.find((candidate) => candidate.id === id);
+  return (entry?.probe?.remotes.length ?? 0) > 0;
+}
+
+/** ツールチップに出す日数。一度も fetch していなければ null。 */
+function daysSince(lastFetchAtMs: number | null): number | null {
+  if (lastFetchAtMs === null) return null;
+  return Math.floor((Date.now() - lastFetchAtMs) / (24 * 60 * 60 * 1000));
 }
 
 /** ドロップ位置を示す線をどちら側に引くか。 */

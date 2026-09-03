@@ -23,6 +23,9 @@ body {
 /* ---------- 共通部品 ---------- */
 
 .button {
+  /* ラベルを行の途中で折らない。狭いペインでは**ボタンごと次の行へ落とす**
+     （「全て fetch」が「全て / fetch」に割れて読めなくなる）。 */
+  white-space: nowrap;
   padding: 4px 12px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -458,6 +461,9 @@ body {
 
 .repos__header {
   display: flex;
+  /* サイドバーは 180px まで縮む。ボタンが 3 つ並ぶと入らないので、
+     潰れる前に折り返させる（T-17 で「全て fetch」が増えた）。 */
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   padding: 8px 10px;
@@ -686,6 +692,111 @@ body {
 .menu__item:disabled {
   color: var(--text-faint);
   cursor: default;
+}
+
+/* ---------- モーダル（fetch の進行と確認。T-17）---------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--overlay);
+}
+
+.modal__box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(480px, 100%);
+  /* 結果が何十件になっても画面から溢れない。中身側でスクロールさせる。 */
+  max-height: 80vh;
+  padding: 20px 24px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: 0 8px 32px var(--overlay);
+}
+
+.modal__box--wide {
+  width: min(680px, 100%);
+}
+
+.modal__title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.modal__lead {
+  margin: 0;
+}
+
+.modal__note {
+  margin: 0;
+  color: var(--text-dim);
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 結果の一覧。**1 件の失敗で全体を止めない**ので、成功と失敗が混ざる。
+   `flex: 1 1 0` にしないこと — 箱の高さは中身で決まるので、基準 0 では
+   配る余白が無く、一覧が 0px に潰れる（CLAUDE.md §6 の裏返し）。 */
+.fetchResults {
+  flex: 0 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.fetchResults__row {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+
+.fetchResults__row--failed .badge {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.fetchResults__name {
+  font-family: var(--font-mono);
+}
+
+.fetchResults__message {
+  color: var(--text-dim);
+}
+
+.fetchResults__detail {
+  grid-column: 1 / -1;
+}
+
+.fetchResults__raw {
+  margin: 4px 0 0;
+  padding: 8px;
+  overflow-x: auto;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-family: var(--font-mono);
+  white-space: pre;
+}
+
+/* 放置警告は**アイコンとツールチップだけ**（docs/DESIGN.md §8.3）。
+   モーダルもバナーも出さない。 */
+.repo__stale {
+  cursor: help;
 }
 
 /* ---------- コマンドパレット (Ctrl+P) ---------- */

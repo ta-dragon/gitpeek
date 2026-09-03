@@ -31,6 +31,9 @@
 #   diverged       上流と分岐したクローン（ahead 2 / behind 3）
 #   dirty          作業ツリーが汚れたリポジトリ（ステージ済み / 未ステージ / 未追跡）
 #   conflict       マージ衝突で止まったリポジトリ（unmerged なパス）
+#   fetch-src      fetch の上流を動かすための作業用リポジトリ
+#   fetch-origin.git  fetch の上流（bare）
+#   fetch-client   clone 後に上流が動いたクローン（T-17。fetch すると ref が増減する）
 
 set -eu
 
@@ -291,6 +294,29 @@ git_ -C "$repo" add -A
 git_ -C "$repo" commit --quiet -m "main 側"
 # 衝突して止まる。止まった状態がほしいので失敗を無視する。
 git_ -C "$repo" merge --quiet --no-edit other || true
+
+# --- fetch の検証用（T-17）--------------------------------------------------
+# clone した**あとで**上流を動かす。fetch すると
+#   ・main が 1 つ進む
+#   ・feature が増える
+#   ・gone が --prune で消える
+# の 3 つが同時に起きる。
+new_repo fetch-src
+commit a.txt "最初"
+git_ -C "$repo" branch gone
+
+git_ clone --quiet --bare "$root/fetch-src" "$root/fetch-origin.git"
+git_ clone --quiet "$root/fetch-origin.git" "$root/fetch-client"
+
+repo=$root/fetch-src
+commit b.txt "上流で追加"
+git_ -C "$repo" branch feature
+git_ -C "$repo" push --quiet "$root/fetch-origin.git" main feature
+git_ -C "$repo" push --quiet "$root/fetch-origin.git" --delete gone
+
+# **`FETCH_HEAD` を消しておく。** clone が置いていくことがあり、そのままだと
+# 「一度も fetch していない」状態を作れない（放置警告の検証に使う）。
+rm -f "$root/fetch-client/.git/FETCH_HEAD"
 
 echo "生成しました: $root"
 ls "$root"

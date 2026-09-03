@@ -8,6 +8,8 @@
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::commandlog::{CommandLogEntry, LogSink};
@@ -209,10 +211,162 @@ pub fn run_streaming(
     }
 }
 
+/// 中止の合図。長い実行を外から止めるために渡す。
+///
+/// クローンしても同じ旗を指す。**中止しても、既に更新された ref は戻らない**ので、
+/// 呼び出し側は「途中まで進んでいる」ことを結果に書くこと（docs/DESIGN.md §8.3）。
+#[derive(Debug, Clone, Default)]
+pub struct Cancel(Arc<AtomicBool>);
+
+impl Cancel {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// **stderr** を読みながら `on_stderr` に渡しつつ実行する。中止もできる。
+///
+/// [`run_streaming`] と読む向きが逆なのは、**git の進捗が stderr に出る**ため
+/// （`fetch --progress` / `clone --progress`）。[`run_streaming`] は stderr を別スレッドで
+/// 最後まで読み切ってから返すので、そのままでは進捗が全部終わってから 1 度に届く。
+///
+/// stdout はここでは別スレッドで読み切る。fetch の stdout は空なので量は問題にならないが、
+/// **読まずに放置するとパイプが埋まって git 側が止まる**ので必ず吸い出す。
+///
+/// 中止は 2 段構えにしてある。読み取りは呼び出し元スレッドを塞ぐので、
+/// **旗を見張る別スレッドから子プロセスを落とす**。fetch は進捗を出し続けるので
+/// 実際には読み取りの合間の判定でだいたい間に合うが、認証待ちのように**何も出ない
+/// まま止まる**場面があるため、見張りの方が本命になる。
+///
+/// なお、落とせるのは**起動した git 本体だけ**で、その子（`git-remote-https` など）は
+/// 残りうる。親が死ねば追って終わるが、即座ではない。
+pub fn run_progress(
+    log: &dyn LogSink,
+    program: &str,
+    repo: Option<&Path>,
+    args: &[&str],
+    cancel: &Cancel,
+    on_stderr: &mut dyn FnMut(&[u8]),
+) -> Result<GitOutput, String> {
+    let mut command = build(program, repo, args);
+    let started = Instant::now();
+
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let message = error.to_string();
+            let duration_ms = started.elapsed().as_millis() as u64;
+            record(log, program, repo, args, None, &message, duration_ms);
+            return Err(message);
+        }
+    };
+
+    let child = Arc::new(Mutex::new(child));
+
+    // パイプを先に取り出す。ここだけ短く lock する（見張りと奪い合わないように）。
+    let (mut stderr_pipe, stdout_pipe) = {
+        let mut guard = child.lock().expect("子プロセスの lock");
+        (guard.stderr.take(), guard.stdout.take())
+    };
+
+    // stdout は読み捨てず吸い出す。放置するとパイプが埋まって git が書き込みで止まる。
+    let stdout_reader = std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        if let Some(mut pipe) = stdout_pipe {
+            let _ = pipe.read_to_end(&mut buffer);
+        }
+        buffer
+    });
+
+    // 中止の見張り。読み取りが塞がっていても子を落とせる唯一の経路。
+    let finished = Arc::new(AtomicBool::new(false));
+    let watchdog = {
+        let child = Arc::clone(&child);
+        let finished = Arc::clone(&finished);
+        let cancel = cancel.clone();
+        std::thread::spawn(move || {
+            while !finished.load(Ordering::SeqCst) {
+                if cancel.is_cancelled() {
+                    if let Ok(mut guard) = child.lock() {
+                        let _ = guard.kill();
+                    }
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        })
+    };
+
+    let mut stderr_bytes = Vec::new();
+    let mut read_error = None;
+    if let Some(pipe) = stderr_pipe.as_mut() {
+        let mut chunk = vec![0u8; 16 * 1024];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(read) => {
+                    stderr_bytes.extend_from_slice(&chunk[..read]);
+                    on_stderr(&chunk[..read]);
+                    if cancel.is_cancelled() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    read_error = Some(error.to_string());
+                    break;
+                }
+            }
+        }
+    }
+
+    // **`wait()` より先に見張りを畳む。** `wait()` は lock を握ったまま子の終了を待つので、
+    // その間に見張りが lock を取りに来ると、二者が待ち合って固まる。
+    if cancel.is_cancelled() {
+        if let Ok(mut guard) = child.lock() {
+            let _ = guard.kill();
+        }
+    }
+    finished.store(true, Ordering::SeqCst);
+    let _ = watchdog.join();
+
+    let status = child.lock().expect("子プロセスの lock").wait();
+    let stdout = stdout_reader.join().unwrap_or_default();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+    let duration_ms = started.elapsed().as_millis() as u64;
+
+    match (status, read_error) {
+        (Ok(status), None) => {
+            let exit_code = status.code();
+            record(log, program, repo, args, exit_code, &stderr, duration_ms);
+            Ok(GitOutput {
+                stdout,
+                stderr,
+                exit_code,
+            })
+        }
+        (status, read_error) => {
+            let message = read_error.unwrap_or_else(|| match status {
+                Ok(_) => String::new(),
+                Err(error) => error.to_string(),
+            });
+            record(log, program, repo, args, None, &message, duration_ms);
+            Err(message)
+        }
+    }
+}
+
 /// 固定オプションと固定環境変数を付けた `Command` を組み立てる。
 ///
-/// **[`run`] と [`run_streaming`] の両方がここを通る。** 片方だけに付け足すと、
-/// 経路によって挙動が変わる（日本語パスが化ける、認証で固まる）。
+/// **[`run`] / [`run_streaming`] / [`run_progress`] のすべてがここを通る。** 一部だけに
+/// 付け足すと、経路によって挙動が変わる（日本語パスが化ける、認証で固まる）。
 fn build(program: &str, repo: Option<&Path>, args: &[&str]) -> Command {
     let mut command = Command::new(program);
     command.args(FIXED_ARGS);
