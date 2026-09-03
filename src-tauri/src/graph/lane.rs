@@ -5,7 +5,9 @@
 //! 1. **lane 0 は幹に予約する。** 既定ブランチの第一親チェーンは必ず lane 0 を
 //!    一直線に通り、幹以外は決して lane 0 に乗らない
 //! 2. レーン再利用は最小空きレーンだが、**解放直後の [`RESERVE_ROWS`] 行は保留**する。
-//!    即座に再利用すると、1 本の線が交差直後に無関係なブランチへ化けて見える
+//!    即座に再利用すると、1 本の線が交差直後に無関係なブランチへ化けて見える。
+//!    **ルートコミットで終わったレーンは二度と配らない**（線がその場で止まるので、
+//!    再利用すると同じ色の線が穴を空けて続いているように見える）
 //! 3. マージコミットの第 2 親は**右側に新しいレーンを起こす**
 //! 4. **レーン数に上限を設けない**（横スクロールで見せる）
 //!
@@ -127,6 +129,8 @@ pub fn assign_lanes(commits: &[CommitMeta], trunk: &HashSet<String>) -> LaneLayo
     let mut active: Vec<Option<String>> = Vec::new();
     // 直近に解放されたレーン (レーン番号, 解放した行)。
     let mut freed: Vec<(usize, usize)> = Vec::new();
+    // ルートコミットで終わったレーン。**二度と配らない**（下の理由を見よ）。
+    let mut retired: HashSet<usize> = HashSet::new();
 
     let mut rows = Vec::with_capacity(commits.len());
     let mut max_lane = 0usize;
@@ -146,7 +150,7 @@ pub fn assign_lanes(commits: &[CommitMeta], trunk: &HashSet<String>) -> LaneLayo
                 // 子が予約していたレーンを引き継ぐ。
                 Some(lane) => lane,
                 // どの子からも待たれていない＝ブランチの先端。
-                None => allocate_lane(&mut active, &freed, row_index),
+                None => allocate_lane(&mut active, &freed, &retired, row_index),
             }
         };
 
@@ -173,7 +177,7 @@ pub fn assign_lanes(commits: &[CommitMeta], trunk: &HashSet<String>) -> LaneLayo
             } else {
                 // 第 2 親以降は右に新レーンを起こす。allocate_lane は lane 0 を
                 // 返さないので、幹へ戻るマージでも幹は 1 本のまま保たれる。
-                allocate_lane(&mut active, &freed, row_index)
+                allocate_lane(&mut active, &freed, &retired, row_index)
             };
             active[to_lane] = Some(parent.clone());
             edges.push(Edge {
@@ -186,9 +190,16 @@ pub fn assign_lanes(commits: &[CommitMeta], trunk: &HashSet<String>) -> LaneLayo
         }
 
         // ルートコミット。ここでレーンが終わる。
+        //
+        // **このレーンは以降ずっと空けておく。** 他の終わり方（マージされた、
+        // 同じ親を待つレーンに畳まれた）では線が別レーンへ曲がって続くので、
+        // 見た目に「終わった」と分かる。ルートだけは線がその場で止まるので、
+        // 数行後に同じレーンを別の枝が使うと**同じ色の線が穴を空けて続いている**
+        // ように見える（onyx の orphan ブランチで実際に起きた）。
+        // ルートはリポジトリに数個しかないので、空けたままの費用はほぼ無い。
         if commit.parents.is_empty() {
             active[lane] = None;
-            freed.push((lane, row_index));
+            retired.insert(lane);
         }
 
         max_lane = max_lane.max(lane);
@@ -223,17 +234,17 @@ fn waiting_for(active: &[Option<String>], sha: &str) -> Option<usize> {
 }
 
 /// 空きレーンを 1 つ取る。**lane 0 は幹の予約なので、空いていても配らない。**
+/// ルートで終わったレーン（`retired`）も配らない。
 fn allocate_lane(
     active: &mut Vec<Option<String>>,
     freed: &[(usize, usize)],
+    retired: &HashSet<usize>,
     row_index: usize,
 ) -> usize {
     // lane 0 は飛ばす。空いていても幹の席なので配らない。
-    let free = active
-        .iter()
-        .enumerate()
-        .skip(1)
-        .find(|(lane, slot)| slot.is_none() && !is_reserved(freed, *lane, row_index));
+    let free = active.iter().enumerate().skip(1).find(|(lane, slot)| {
+        slot.is_none() && !retired.contains(lane) && !is_reserved(freed, *lane, row_index)
+    });
     if let Some((lane, _)) = free {
         return lane;
     }
@@ -445,14 +456,15 @@ pub mod tests {
 
     #[test]
     fn a_freed_lane_is_not_reused_immediately() {
-        // b がルートで lane 1 を解放した直後に、別の枝先端 d が現れる。
-        // 解放直後の RESERVE_ROWS 行は再利用しないので lane 2 に乗る。
+        // b は c で幹に畳まれ、lane 1 が 3 行目で空く。その次の行に別の枝先端 d が
+        // 現れるが、解放直後の RESERVE_ROWS 行は再利用しないので lane 2 に乗る。
         let (_, layout) = layout_of(&[
             ("m", &["a", "b"]),
-            ("a", &["r"]),
-            ("b", &[]),
-            ("d", &["r"]),
-            ("r", &[]),
+            ("a", &["c"]),
+            ("b", &["c"]),
+            ("c", &["c2"]),
+            ("d", &["c2"]),
+            ("c2", &[]),
         ]);
 
         assert_eq!(row(&layout, "b").lane, 1);
@@ -462,6 +474,27 @@ pub mod tests {
 
     #[test]
     fn a_freed_lane_is_reused_after_the_reserve() {
+        // 上と同じ形で、解放から d までを 3 行空ける。
+        let (_, layout) = layout_of(&[
+            ("m", &["a", "b"]),
+            ("a", &["c"]),
+            ("b", &["c"]),
+            ("c", &["c2"]),
+            ("c2", &["c3"]),
+            ("c3", &["c4"]),
+            ("d", &["c4"]),
+            ("c4", &[]),
+        ]);
+
+        assert_eq!(row(&layout, "b").lane, 1);
+        // lane 1 の解放は 3 行目、d は 6 行目。保留は 2 行なので再利用できる。
+        assert_eq!(row(&layout, "d").lane, 1);
+    }
+
+    #[test]
+    fn a_lane_that_ended_at_a_root_is_never_reused() {
+        // b はルート（親なし）。線がその場で止まるので、このレーンは以降配らない。
+        // 数行後に別の枝が同じレーンに乗ると、同じ色の線が穴を空けて続いて見える。
         let (_, layout) = layout_of(&[
             ("m", &["a", "b"]),
             ("a", &["a2"]),
@@ -473,8 +506,8 @@ pub mod tests {
         ]);
 
         assert_eq!(row(&layout, "b").lane, 1);
-        // b の解放は 3 行目、d は 6 行目。保留は 2 行なので再利用できる。
-        assert_eq!(row(&layout, "d").lane, 1);
+        // 保留期間はとうに過ぎているが、ルートで終わったレーンには戻さない。
+        assert_eq!(row(&layout, "d").lane, 2);
     }
 
     #[test]
