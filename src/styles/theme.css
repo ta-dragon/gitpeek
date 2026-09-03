@@ -32,16 +32,19 @@
    * グラフのレーン色（docs/DESIGN.md §5.2）。
    * lane 0 は必ず幹なので無彩色寄りの固定色にし、幹を主張させる。
    * 枝は 8 色ローテーション。彩度を抑え、隣り合っても喧嘩しない並びにする。
+   * **並び順は隣接レーンの色差で決めてある**（T-08 で測った）。隣り合う 2 レーンは
+   * この配列の隣り合う 2 色になるので、順番を入れ替えるときは CIE Lab の色差が
+   * どの隣接組でも 60 以上あることを確かめること（olive と brown を隣に置くと 26 まで落ちる）。
    * ブランチ名のハッシュで色を決める方式は採らない（レーン再利用と相性が悪い）。
    */
   --graph-lane-trunk: #4a5563;
   --graph-lane-0: #2f6feb;
   --graph-lane-1: #1a7f5a;
   --graph-lane-2: #b3541e;
-  --graph-lane-3: #8250df;
-  --graph-lane-4: #0f7a8a;
-  --graph-lane-5: #a03a5f;
-  --graph-lane-6: #6a7a1f;
+  --graph-lane-3: #0f7a8a;
+  --graph-lane-4: #a03a5f;
+  --graph-lane-5: #6a7a1f;
+  --graph-lane-6: #8250df;
   --graph-lane-7: #7a5c1a;
 
   /* マージの中空円を抜く色。行の背景と同じにする。 */
@@ -81,10 +84,10 @@
     --graph-lane-0: #5b9dff;
     --graph-lane-1: #45c08a;
     --graph-lane-2: #e08a4a;
-    --graph-lane-3: #b088f0;
-    --graph-lane-4: #3fb6c8;
-    --graph-lane-5: #e0759c;
-    --graph-lane-6: #a8bf4a;
+    --graph-lane-3: #3fb6c8;
+    --graph-lane-4: #e0759c;
+    --graph-lane-5: #a8bf4a;
+    --graph-lane-6: #b088f0;
     --graph-lane-7: #c9a94f;
 
     --graph-node-fill: #1a1e25;
@@ -117,10 +120,10 @@
   --graph-lane-0: #5b9dff;
   --graph-lane-1: #45c08a;
   --graph-lane-2: #e08a4a;
-  --graph-lane-3: #b088f0;
-  --graph-lane-4: #3fb6c8;
-  --graph-lane-5: #e0759c;
-  --graph-lane-6: #a8bf4a;
+  --graph-lane-3: #3fb6c8;
+  --graph-lane-4: #e0759c;
+  --graph-lane-5: #a8bf4a;
+  --graph-lane-6: #b088f0;
   --graph-lane-7: #c9a94f;
 
   --graph-node-fill: #1a1e25;
