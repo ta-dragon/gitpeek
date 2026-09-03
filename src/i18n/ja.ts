@@ -324,14 +324,17 @@ export const ja = {
     lineEndingMixed: "改行コード混在",
     lineEndingMixedHint: (lf: number, crlf: number, cr: number) =>
       `1 つのファイルに複数の改行コードがあります（LF ${lf} / CRLF ${crlf} / CR ${cr}）。`,
-    // 可視化記号。**本文ではない**ので、コピーに混ざらないよう別要素で出す。
+    /*
+     * 可視化記号（サクラエディタに合わせる）。**本文ではない**ので、
+     * コピーに混ざらないよう別要素で出す。
+     * CR は「行頭へ戻る」、LF は「次の行へ送る」。CRLF はその 2 つが続く。
+     */
     eolMarks: {
-      lf: "␊",
-      crlf: "␍␊",
-      cr: "␍",
+      lf: "↓",
+      crlf: "→↓",
+      cr: "→",
     },
-    eolNone: "∅",
-    noNewlineMark: "⏎̸",
+    noNewlineMark: "改行なし",
     noNewline: "ファイルの末尾に改行がありません。",
 
     // hunk の見出し。git の `@@ -a,b +c,d @@` と同じ意味を日本語で添える。

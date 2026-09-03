@@ -95,11 +95,16 @@
     --danger: #f8737f;
     --ok: #56d364;
 
-    /* 暗い地なので、地色は沈ませて語の強調だけを持ち上げる。 */
-    --diff-add-bg: #10251b;
-    --diff-add-word: #1f5236;
-    --diff-del-bg: #2a1417;
-    --diff-del-word: #6d2329;
+    /*
+     * **地色を沈ませすぎない。** 最初は #10251b / #2a1417 にしていたが、ペインの地
+     * (--bg-inset #101318) との輝度比が 1.2 程度しかなく、変更行が見分けられなかった。
+     * 特に緑は青みの強い地に埋もれる。地との比を 1.4〜1.6、語の強調は地色との比を
+     * 1.9 以上に取り直してある。
+     */
+    --diff-add-bg: #164026;
+    --diff-add-word: #2f7a4c;
+    --diff-del-bg: #52212a;
+    --diff-del-word: #9c3a42;
 
     --graph-lane-trunk: #9aa6b6;
     --graph-lane-0: #5b9dff;
@@ -137,11 +142,11 @@
   --danger: #f8737f;
   --ok: #56d364;
 
-  /* 暗い地なので、地色は沈ませて語の強調だけを持ち上げる。 */
-  --diff-add-bg: #10251b;
-  --diff-add-word: #1f5236;
-  --diff-del-bg: #2a1417;
-  --diff-del-word: #6d2329;
+  /* 上の @media と同じ値。理由もそちらに書いてある。 */
+  --diff-add-bg: #164026;
+  --diff-add-word: #2f7a4c;
+  --diff-del-bg: #52212a;
+  --diff-del-word: #9c3a42;
 
   --graph-lane-trunk: #9aa6b6;
   --graph-lane-0: #5b9dff;

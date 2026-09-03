@@ -32,12 +32,15 @@ export function WordDiff({
               <span key={index}>{segment.text}</span>
             ),
           )}
-      {showLineEndings && (
+      {showLineEndings && line.ending !== null && (
         <span className="dline__eol" aria-hidden="true">
-          {line.ending === null ? ja.diff.eolNone : ja.diff.eolMarks[line.ending]}
+          {ja.diff.eolMarks[line.ending]}
         </span>
       )}
-      {/* 末尾に改行が無いことは、可視化トグルに関わらず知らせる（差分の意味が変わる）。 */}
+      {/*
+       * 末尾に改行が無いことは**可視化トグルに関わらず**知らせる（差分の意味が変わる）。
+       * 記号ではなく言葉にしてある — 「無い」ことを表す記号は伝わらない。
+       */}
       {line.ending === null && (
         <span className="dline__note" title={ja.diff.noNewline}>
           {ja.diff.noNewlineMark}

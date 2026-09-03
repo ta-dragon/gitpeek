@@ -1674,8 +1674,15 @@ body {
   user-select: none;
 }
 
+/* 記号は行末に貼り付ける（サクラエディタと同じ見え方にする）。 */
+.dline__eol {
+  letter-spacing: -0.05em;
+}
+
 .dline__note {
+  margin-left: 6px;
   color: var(--danger);
+  font-size: 11px;
 }
 
 /* hunk の切れ目。ここで行が飛んでいる。 */
