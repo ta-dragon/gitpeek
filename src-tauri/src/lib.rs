@@ -1,4 +1,5 @@
 pub mod commandlog;
+pub mod encoding;
 pub mod git;
 pub mod graph;
 pub mod model;

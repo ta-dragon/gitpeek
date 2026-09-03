@@ -820,6 +820,25 @@ ref ツリー（§6.4）の「3 件以上で畳む」とは規則が違う — �
 
 **自動判別。** UTF-8 として妥当なら UTF-8、失敗したら Shift_JIS → EUC-JP の順で試行する。
 判別結果をファイルごとにステータス表示し、手動で上書き可能にする。
+実装は `src-tauri/src/encoding.rs`（T-12）。
+
+**バイナリ判定を先に行う。** 先頭 8000 バイトに NUL があればバイナリとし、デコードしない。
+**範囲を git と同じにしてある** — 広げると、git が差分を出したファイルをこちらだけが
+バイナリ扱いする食い違いが起きる。BOM 付き UTF-16 もここでバイナリになる（git も同じ）。
+
+**試行は置換なしの厳密デコード**で行い、どれも通らなければ **UTF-8 の置換ありデコード**に
+落として `lossy` を立てる。ASCII 部分は読めるので、この環境では最も傷が浅い。
+**UTF-8 BOM は取り除いてから**判別する（残すと差分の先頭に U+FEFF が出る）。
+
+**この方式の限界を承知で採っている。** EUC-JP のひらがなは 1 バイトずつが Shift_JIS の
+半角カナとして妥当なので、**厳密デコードが通ってしまい Shift_JIS と判定される**
+（`encoding.rs` の `euc_jp_hiragana_is_misdetected_as_shift_jis` が固定している）。
+置換文字も出ないので、**画面に化けた半角カナが並ぶまで気付けない**。
+
+- 直す手段は**手動上書き**である。だから上書き API を最初から持たせてある
+- 統計的推定（`chardetng` 等）は v1 では入れない。判別の当たり外れが入力次第になり、
+  「なぜこのファイルだけ違う結果か」を説明できなくなる。**順序なら常に説明できる**
+- EUC-JP のリポジトリを常用することになったら v1.1 で再検討する
 
 ### 9.2 改行コード
 
@@ -828,6 +847,13 @@ ref ツリー（§6.4）の「3 件以上で畳む」とは規則が違う — �
 - **1 ファイル内で混在したら警告アイコン**
 
   Linux 用シェルスクリプトに CRLF が混入すると実行時に壊れるため、目視で気づけることに実利がある
+
+**CRLF を CR と LF に二重計上しない。** 数え方を間違えると全ファイルが「混在」になり、
+警告が意味を失う。
+
+**数え上げは渡したバイト列そのものに対して行う。** 何を渡すかは呼び出し側が決める。
+**diff 出力をまるごと渡してはいけない** — ヘッダ行（`@@` や `+++`）は常に LF なので、
+CRLF のファイルが全部「混在」と出る。**内容行だけを渡すこと。**
 
 ### 9.3 ファイル属性
 
@@ -1315,7 +1341,7 @@ Phase 9 完了 ＋ **実リポジトリを 5 個以上登録して 1 週間実�
 ## 16. ディレクトリ構成
 
 `(済)` は実在するファイル。それ以外は未作成で、括弧内は作られるタスク。
-**最終更新は T-11 完了時点。**
+**最終更新は T-12 完了時点。**
 
 ```
 gitviewer/
@@ -1336,7 +1362,8 @@ gitviewer/
 │   │   ├── commits/              (済) CommitList / CommitRow / RefChips /
 │   │   │                              ScrollbarRefMarkers
 │   │   ├── sidebar/              (済) RepositoryList / Sidebar / RefTree / RefTreeNode
-│   │   ├── diff/                 (済) DiffPane / CommitDetail / FileList
+│   │   ├── diff/                 (済) DiffPane（中央下）/ CommitInfo（右）/
+│   │   │                              CommitDetail / FileList / useCommitFiles
 │   │   │                              差分本体の描画は T-13
 │   │   ├── review/               AI レビュードロワー (T-23)
 │   │   ├── commandlog/           (済) git コマンドログパネル
@@ -1344,7 +1371,7 @@ gitviewer/
 │   │   └── common/               (済) SplitPane / ContextMenu / CommandPalette /
 │   │                                  NoticeBar / LoadProgress / ErrorBoundary
 │   ├── hooks/                    (済) useTheme / useCommandLog / useCommitNavigation
-│   │                                  （ファイル移動と Enter は DiffPane 側 — §6.5）
+│   │                                  （ファイル移動と Enter は useCommitFiles 側 — §6.5）
 │   ├── lib/
 │   │   ├── graphPath.ts          (済) レーン配列 -> SVG パス（純関数・テスト対象）
 │   │   ├── relativeTime.ts       (済) 相対日時（純関数・テスト対象）
@@ -1396,7 +1423,7 @@ gitviewer/
         │   ├── json.rs           (済) アトミック書き込み
         │   └── reviews.rs        (T-23)
         ├── commandlog.rs         (済) git コマンドログのリングバッファ
-        ├── encoding.rs           文字コード自動判別 (T-12)
+        ├── encoding.rs           (済) 文字コード判別・改行検出 (T-12)
         ├── secret.rs             Windows 資格情報マネージャー (T-20)
         ├── redact.rs             (済) マスキング（全ログ出力がここを通る）
         └── logging.rs            ログファイル (T-24)

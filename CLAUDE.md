@@ -184,6 +184,8 @@ GIT_SSH_COMMAND=ssh -o BatchMode=yes     # 無いとパスフレーズ待ちで�
 - **変更ファイル一覧**: 追加 / 変更 / 削除 / **リネーム（前後がずれないこと）** /
   バイナリ（増減が 0 ではなく「無い」こと）/ サブディレクトリ / ルートコミット /
   マージコミットの親切替
+- **文字コードと改行**: UTF-8 / BOM 付き UTF-8 / Shift_JIS / EUC-JP / どれでもないバイト列 /
+  NUL 入り（バイナリ）／ **CRLF を CR と LF に二重計上しないこと** / 混在の検出
 - **LLM**: JSON パース失敗時の Markdown フォールバック経路
 - 結合テスト用リポジトリはスクリプトで生成する（手元の実リポジトリに依存しない）。
   生成先は `%TEMP%\givsoner-test-repos`
@@ -236,6 +238,9 @@ npm run typecheck      # tsc --noEmit
 
 - ビルド・実行は Windows のみ。ただし**閲覧対象には Linux 由来のソースが含まれる**前提で
   文字コード（UTF-8 / Shift_JIS / EUC-JP 自動判別）と改行コード（LF/CRLF 混在の警告）を扱う。
+  **文字コードの判別は `src-tauri/src/encoding.rs` を通す**（`exec.rs` の `stdout_lossy` を
+  ファイル内容に使わない）。判別は順序で決めているので **EUC-JP のひらがなは Shift_JIS と
+  判定される**。直す手段は手動上書きであり、統計的推定は入れない（DESIGN.md §9.1）。
 - **Rust は 1.85 以上が必須**（Tauri v2 自体は 1.77.2+ だが、依存の `time` が edition2024 を
   要求する）。ビルドが通らなくなったらまず `rustup update stable`。
 - 開発時の起動はリポジトリ直下の **`Givsoner.bat`**（ダブルクリック可）。中身は

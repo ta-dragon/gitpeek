@@ -337,6 +337,34 @@ export function loadChangedFiles(
   return invoke<FileChange[]>("load_changed_files", { repositoryId, sha, parent });
 }
 
+/* ---------- 文字コードと改行（`src-tauri/src/encoding.rs`）---------- */
+
+/**
+ * 判別・指定できる文字コード（docs/DESIGN.md §9.1）。
+ *
+ * **判別は順序で決めている**（UTF-8 → Shift_JIS → EUC-JP）ため、
+ * EUC-JP のひらがなは Shift_JIS と判定される。直す手段は手動上書き。
+ */
+export type TextEncoding = "utf8" | "shiftJis" | "eucJp";
+
+export type LineEnding = "lf" | "crlf" | "cr";
+
+/** 改行の内訳。**CRLF は CR と LF に二重計上されていない**。 */
+export type LineEndingCounts = { lf: number; crlf: number; cr: number };
+
+export type DecodedText = {
+  text: string;
+  encoding: TextEncoding;
+  /** UTF-8 BOM を取り除いたか。 */
+  hadBom: boolean;
+  /** 置換文字（U+FFFD）が出たか。手動上書きを間違えたときの合図。 */
+  lossy: boolean;
+  lineEndings: LineEndingCounts;
+};
+
+/** バイナリはデコードしない。`size` は元のバイト数。 */
+export type Decoded = ({ kind: "binary"; size: number }) | ({ kind: "text" } & DecodedText);
+
 /* ---------- settings.json（`src-tauri/src/store/settings.rs`）---------- */
 
 export type ThemePreference = "system" | "light" | "dark";
