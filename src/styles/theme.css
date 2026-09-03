@@ -21,8 +21,17 @@
   --text-faint: #94a0ae;
 
   --accent: #2f6feb;
+  /*
+   * **primary ボタンの hover は accent 系で持つこと。** 中立の --bg-hover を当てると、
+   * 文字（--accent-contrast）との輝度比が 4.57 → 1.20 まで落ちて文字が地に溶け、
+   * 「押せない」ように見える（実測。T-17 の目視で見つかった）。
+   * この値は文字と 5.67、既定の accent と 1.24 倍の差がある。
+   */
+  --accent-hover: #2560d4;
   --accent-contrast: #ffffff;
   --danger: #cf222e;
+  /* 「一部だけ成功」を表す色。danger（5.36）と同程度の読みやすさで選んである。 */
+  --warning: #9a6700;
   --ok: #1a7f37;
 
   /*
@@ -91,8 +100,11 @@
     --text-faint: #626c7a;
 
     --accent: #5b9dff;
+    /* ライト側と同じ理由。ダークでは 6.95 → 1.30 まで落ちていた。 */
+    --accent-hover: #7ab0ff;
     --accent-contrast: #0d1117;
     --danger: #f8737f;
+    --warning: #e3b341;
     --ok: #56d364;
 
     /*
@@ -143,8 +155,10 @@
   --text-faint: #626c7a;
 
   --accent: #5b9dff;
+  --accent-hover: #7ab0ff;
   --accent-contrast: #0d1117;
   --danger: #f8737f;
+  --warning: #e3b341;
   --ok: #56d364;
 
   /* 上の @media と同じ値。理由もそちらに書いてある。 */

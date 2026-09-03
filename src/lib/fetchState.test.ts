@@ -84,6 +84,7 @@ describe("中止", () => {
 
     expect(summarize(state)).toEqual({
       success: 1,
+      partial: 0,
       failed: 0,
       cancelled: 1,
       skipped: 1,
@@ -97,14 +98,26 @@ describe("summarize", () => {
     let state = run();
     state = recordResult(state, outcome("failed"));
     state = recordResult(state, outcome("success"));
-    state = recordResult(state, outcome("success"));
+    state = recordResult(state, outcome("partial"));
 
     expect(summarize(state)).toEqual({
-      success: 2,
+      success: 1,
+      partial: 1,
       failed: 1,
       cancelled: 0,
       skipped: 0,
       total: 3,
     });
+  });
+
+  /** **一部成功を成功にも失敗にも混ぜない。** 混ぜると何が起きたか分からなくなる。 */
+  it("一部成功を独立して数える", () => {
+    let state = startRun([{ id: "a", name: "alpha" }]);
+    state = recordResult(state, outcome("partial"));
+
+    const summary = summarize(state);
+    expect(summary.partial).toBe(1);
+    expect(summary.success).toBe(0);
+    expect(summary.failed).toBe(0);
   });
 });

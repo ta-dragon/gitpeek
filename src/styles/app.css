@@ -50,6 +50,14 @@ body {
   color: var(--accent-contrast);
 }
 
+/*
+ * **primary の hover を上書きし直す。** 上の `.button:hover` が中立の --bg-hover を
+ * 当ててしまい、白文字との輝度比が 1.2 まで落ちて「無効」に見えていた。
+ */
+.button--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
 .input,
 .select {
   padding: 4px 8px;
@@ -769,6 +777,12 @@ body {
 .fetchResults__row--failed .badge {
   border-color: var(--danger);
   color: var(--danger);
+}
+
+/* 一部だけ成功。**失敗と同じ色にしない** — やり直せば直るものと区別が付かなくなる。 */
+.fetchResults__row--partial .badge {
+  border-color: var(--warning);
+  color: var(--warning);
 }
 
 .fetchResults__name {

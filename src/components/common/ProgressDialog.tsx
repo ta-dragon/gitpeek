@@ -18,7 +18,7 @@ import {
   type FetchRun,
   type FetchTarget,
 } from "../../lib/fetchState";
-import type { FetchProgress } from "../../lib/ipc";
+import type { FetchProgress, FetchStatus } from "../../lib/ipc";
 import { LoadProgress } from "./LoadProgress";
 
 export function FetchDialog({
@@ -71,6 +71,7 @@ export function FetchDialog({
         {done && (
           <p className="modal__lead">
             {ja.fetch.summary(summary.success, summary.failed)}
+            {summary.partial > 0 && ` / ${ja.fetch.partialCount(summary.partial)}`}
             {/* **中止と未実行を落とさない。** 落とすと「成功 0 / 失敗 0」だけが残り、
                 何が起きたのか分からなくなる。 */}
             {summary.cancelled > 0 && ` / ${ja.fetch.cancelledCount(summary.cancelled)}`}
@@ -102,13 +103,15 @@ export function FetchDialog({
   );
 }
 
+const STATUS_LABEL: Record<FetchStatus, string> = {
+  success: ja.fetch.statusSuccess,
+  partial: ja.fetch.statusPartial,
+  failed: ja.fetch.statusFailed,
+  cancelled: ja.fetch.statusCancelled,
+};
+
 function ResultRow({ result }: { result: FetchResult }) {
-  const label =
-    result.status === "success"
-      ? ja.fetch.statusSuccess
-      : result.status === "failed"
-        ? ja.fetch.statusFailed
-        : ja.fetch.statusCancelled;
+  const label = STATUS_LABEL[result.status];
 
   return (
     <li className={`fetchResults__row fetchResults__row--${result.status}`}>

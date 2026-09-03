@@ -266,6 +266,9 @@ export const ja = {
     cancelledCount: (n: number) => `中止 ${n}`,
     skipped: (n: number) => `未実行 ${n}`,
     statusSuccess: "成功",
+    // 一部だけ取り込めた。**失敗と分ける** — ブランチは取り込めているため。
+    statusPartial: "一部",
+    partialCount: (n: number) => `一部 ${n}`,
     statusFailed: "失敗",
     statusCancelled: "中止",
     details: "詳細",

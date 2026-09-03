@@ -212,7 +212,14 @@ export function loadRepositorySnapshot(
 
 /* ---------- fetch（`src-tauri/src/git/ops.rs`）---------- */
 
-export type FetchStatus = "success" | "failed" | "cancelled";
+/**
+ * fetch の結果。
+ *
+ * `partial` は**一部だけ取り込めた**（いまのところ上流がタグを付け替えていて、
+ * そのタグだけ更新できなかった場合）。**失敗と分けている** — ブランチは取り込めて
+ * いるのに「失敗」と出ると、直しようがないのに壊れたように見える。
+ */
+export type FetchStatus = "success" | "partial" | "failed" | "cancelled";
 
 export type FetchOutcome = {
   status: FetchStatus;

@@ -34,6 +34,8 @@
 #   fetch-src      fetch の上流を動かすための作業用リポジトリ
 #   fetch-origin.git  fetch の上流（bare）
 #   fetch-client   clone 後に上流が動いたクローン（T-17。fetch すると ref が増減する）
+#   fetch-tag-origin.git / fetch-tag-client
+#                  上流がタグを付け替えたクローン（T-17。fetch がタグの上書きを拒む）
 
 set -eu
 
@@ -317,6 +319,23 @@ git_ -C "$repo" push --quiet "$root/fetch-origin.git" --delete gone
 # **`FETCH_HEAD` を消しておく。** clone が置いていくことがあり、そのままだと
 # 「一度も fetch していない」状態を作れない（放置警告の検証に使う）。
 rm -f "$root/fetch-client/.git/FETCH_HEAD"
+
+# --- タグの付け替え（T-17）---------------------------------------------------
+# 上流が同じ名前のタグを別のコミットへ付け替えた状態を作る。fetch すると
+#   ! [rejected]  v1 -> v1  (would clobber existing tag)
+# になり、`--force` 無しでは更新できない。**アプリはタグを書き換えない**
+# （CLAUDE.md §1）ので、そのことを利用者へ伝えられるかの検証に使う。
+new_repo fetch-tag-src
+commit a.txt "最初"
+git_ -C "$repo" tag v1
+
+git_ clone --quiet --bare "$root/fetch-tag-src" "$root/fetch-tag-origin.git"
+git_ clone --quiet "$root/fetch-tag-origin.git" "$root/fetch-tag-client"
+
+repo=$root/fetch-tag-src
+commit b.txt "付け替えの先"
+git_ -C "$repo" tag -f v1
+git_ -C "$repo" push --quiet --force "$root/fetch-tag-origin.git" v1
 
 echo "生成しました: $root"
 ls "$root"

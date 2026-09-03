@@ -232,3 +232,46 @@ fn credentials_in_a_remote_url_are_masked() {
         "平文のトークンが結果に残っている:\n{text}",
     );
 }
+
+/// **上流がタグを付け替えたときに「失敗」で片付けないこと。**
+///
+/// git は `--force` 無しでは同名タグを上書きしないので、fetch は非ゼロで終わる。
+/// だがブランチは取り込めているので、そのまま「失敗しました」と出すと、
+/// 直しようがないのに壊れたように見える（利用者の報告で分かった）。
+#[test]
+fn a_retagged_upstream_is_partial_and_says_what_to_run() {
+    let dir = tempfile::tempdir().expect("一時ディレクトリ");
+    let origin = dir.path().join("fetch-tag-origin.git");
+    let client = dir.path().join("fetch-tag-client");
+    copy_dir(&fixtures().join("fetch-tag-origin.git"), &origin);
+    copy_dir(&fixtures().join("fetch-tag-client"), &client);
+
+    let url = origin.display().to_string();
+    let output = exec::run(
+        &log(),
+        "git",
+        Some(&client),
+        &["remote", "set-url", "origin", &url],
+    )
+    .expect("remote set-url");
+    assert!(output.ok(), "{}", output.stderr);
+
+    let outcome = ops::fetch(&log(), "git", &client, &Cancel::new(), &mut |_| {})
+        .expect("fetch を起動できること");
+
+    assert_eq!(outcome.status, FetchStatus::Partial, "{outcome:#?}");
+    assert!(outcome.message.contains("v1"), "どのタグかを言うこと: {}", outcome.message);
+    assert!(
+        outcome.message.contains("git fetch --tags --force"),
+        "自分で直す方法まで言うこと: {}",
+        outcome.message,
+    );
+    assert!(
+        outcome
+            .lines
+            .iter()
+            .any(|line| line.contains("would clobber existing tag")),
+        "生の行も残すこと: {:#?}",
+        outcome.lines,
+    );
+}

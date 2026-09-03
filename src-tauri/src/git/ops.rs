@@ -32,6 +32,11 @@ const MAX_LINES: usize = 200;
 #[serde(rename_all = "camelCase")]
 pub enum FetchStatus {
     Success,
+    /// 一部だけ取り込めた。**いまのところタグの衝突だけ**（`clobbered_tags`）。
+    ///
+    /// 失敗と分けているのは、ブランチは取り込めているのに「失敗しました」と出ると、
+    /// 直しようがないのに壊れたように見えるため。
+    Partial,
     Failed,
     /// 利用者が止めた。**途中まで取り込まれている**ことに注意（下記）。
     Cancelled,
@@ -111,12 +116,72 @@ pub fn fetch(
         });
     }
 
+    // 上流がタグを付け替えただけなら、ブランチは取り込めている。
+    // **「失敗」と言わない** — 直しようがないのに壊れたように見える。
+    let tags = clobbered_tags(&lines);
+    if !tags.is_empty() && !output.stderr.contains("fatal:") {
+        return Ok(FetchOutcome {
+            status: FetchStatus::Partial,
+            message: explain_clobbered_tags(&tags),
+            lines,
+            duration_ms,
+        });
+    }
+
     Ok(FetchOutcome {
         status: FetchStatus::Failed,
         message: explain(&output.stderr),
         lines,
         duration_ms,
     })
+}
+
+/// 上書きを拒まれたタグ名。
+///
+/// git はこう出す（先頭の `!` は `redact` 前の `trim` で残る）:
+///
+/// ```text
+/// ! [rejected]        v4.6.6     -> v4.6.6  (would clobber existing tag)
+/// ```
+///
+/// **上流はタグを付け替えることがある。** 同じ名前が手元と上流で別のコミットを指すと、
+/// git は `--force` なしでは上書きしない。Givsoner はタグを書き換えないので
+/// （CLAUDE.md §1）、**何が起きたかと、自分で直す方法**までを伝える。
+fn clobbered_tags(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .filter(|line| line.contains("would clobber existing tag"))
+        .filter_map(|line| rejected_name(line))
+        .collect()
+}
+
+/// `… -> <名前>  (…)` の `<名前>`。
+fn rejected_name(line: &str) -> Option<String> {
+    let (_, right) = line.split_once("->")?;
+    let name = right.split_whitespace().next()?;
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// タグが弾かれたときの説明。**自分で直せる形にする。**
+fn explain_clobbered_tags(tags: &[String]) -> String {
+    // 名前は 3 つまで。20 件あるときに全部並べても読めない。
+    let shown = tags
+        .iter()
+        .take(3)
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let rest = tags.len().saturating_sub(3);
+    let names = if rest > 0 {
+        format!("{shown} ほか {rest} 件")
+    } else {
+        shown
+    };
+
+    format!(
+        "タグ {} 件を更新できませんでした（{names}）。上流が同じ名前のタグを別のコミットへ付け替えています。Givsoner はタグを書き換えないので、手元を上流に合わせるならターミナルで `git fetch --tags --force` を実行してください（同じ名前のタグを手元で付け直していた場合は、そちらが上書きされます）。",
+        tags.len(),
+    )
 }
 
 /// stderr の 1 行の振り分け。
@@ -220,7 +285,7 @@ pub fn is_stale(
 
 #[cfg(test)]
 mod tests {
-    use super::{classify, explain, is_stale, Line, FETCH_ARGS};
+    use super::{classify, clobbered_tags, explain, explain_clobbered_tags, is_stale, Line, FETCH_ARGS};
 
     const DAY: i64 = 24 * 60 * 60 * 1000;
 
@@ -234,6 +299,49 @@ mod tests {
         for banned in ["--prune-tags", "--depth", "--recurse-submodules", "--force"] {
             assert!(!FETCH_ARGS.contains(&banned), "{banned} を付けてはいけない");
         }
+    }
+
+    /// **タグの衝突を拾えること。** これを落とすと、ブランチが取り込めているのに
+    /// 「失敗しました」としか出ず、利用者にはどうしようもなくなる。
+    #[test]
+    fn picks_up_tags_that_could_not_be_updated() {
+        let lines = vec![
+            "From https://example.com/foo/bar".to_string(),
+            "! [rejected]        v4.6.6     -> v4.6.6  (would clobber existing tag)".to_string(),
+            "! [rejected]        v4.6.7     -> v4.6.7  (would clobber existing tag)".to_string(),
+            "* [new branch]      release    -> origin/release".to_string(),
+        ];
+        assert_eq!(clobbered_tags(&lines), vec!["v4.6.6", "v4.6.7"]);
+    }
+
+    /// 似て非なる拒否（非 fast-forward）を混ぜないこと。
+    #[test]
+    fn ignores_rejections_that_are_not_tag_clobbers() {
+        let lines = vec![
+            "! [rejected]        main       -> main  (non-fast-forward)".to_string(),
+            "error: some local refs could not be updated".to_string(),
+        ];
+        assert!(clobbered_tags(&lines).is_empty());
+    }
+
+    /// **自分で直す方法まで書く。** 「失敗しました」だけでは手が無い。
+    #[test]
+    fn the_tag_message_says_what_to_run() {
+        let tags: Vec<String> = (1..=5).map(|n| format!("v4.6.{n}")).collect();
+        let message = explain_clobbered_tags(&tags);
+
+        assert!(message.contains("5 件"), "{message}");
+        assert!(message.contains("v4.6.1, v4.6.2, v4.6.3"), "{message}");
+        assert!(message.contains("ほか 2 件"), "並べ切らずに畳むこと: {message}");
+        assert!(message.contains("git fetch --tags --force"), "{message}");
+    }
+
+    /// 3 件以下なら「ほか」を付けない。
+    #[test]
+    fn the_tag_message_does_not_pad_a_short_list() {
+        let message = explain_clobbered_tags(&["v1".to_string()]);
+        assert!(message.contains("（v1）"), "{message}");
+        assert!(!message.contains("ほか"), "{message}");
     }
 
     /// **本文は必ず伏せてから返す**（CLAUDE.md §4）。ここが画面とログへの入口。

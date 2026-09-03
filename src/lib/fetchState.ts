@@ -67,6 +67,8 @@ export function isDone(run: FetchRun): boolean {
 
 export type FetchSummary = {
   success: number;
+  /** 一部だけ取り込めた（タグの衝突）。**成功にも失敗にも混ぜない。** */
+  partial: number;
   failed: number;
   cancelled: number;
   /** 中止で一度も実行されなかったぶん。**「成功でも失敗でもない」を潰さない。** */
@@ -80,6 +82,7 @@ export function summarize(run: FetchRun): FetchSummary {
 
   return {
     success: count("success"),
+    partial: count("partial"),
     failed: count("failed"),
     cancelled: count("cancelled"),
     skipped: run.targets.length - run.results.length,
