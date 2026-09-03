@@ -1,7 +1,8 @@
 //! コミット本文と変更ファイル一覧の取得（docs/DESIGN.md §7.3, §7.4 / 付録 A）。
 //!
-//! **差分の本体はここでは扱わない**（T-13）。ここが返すのは「どのファイルが
-//! どう変わり、何行増減したか」までで、hunk には踏み込まない。
+//! 差分の本体（unified diff の取得と hunk へのパース）もここにある（T-13）。
+//! **パースを Rust 側に置いたのは改行コードの数え上げのため** — 内容行だけを数える必要が
+//! あり、ヘッダ行と内容行を分ける時点でパースそのものだから（docs/DESIGN.md §9.2）。
 //!
 //! マージコミットの差分は一意に決まらないので、**親は呼び出し側が指定する**
 //! （既定は第 1 親 — docs/DESIGN.md §7.4）。`--cc` は v1 では使わない。
@@ -12,6 +13,7 @@ use std::path::Path;
 use serde::Serialize;
 
 use crate::commandlog::LogSink;
+use crate::encoding::{self, LineEnding, LineEndingCounts, TextEncoding};
 use crate::git::exec;
 
 /// フィールド区切り（Unit Separator）。コミットメッセージにまず現れない。
@@ -319,9 +321,365 @@ fn count(field: &str) -> Option<u32> {
     field.trim().parse().ok()
 }
 
+/* ---------- 差分本体（T-13） ---------- */
+
+/// 差分 1 行の種類。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffLineKind {
+    /// 変わっていない行。両側に出る。
+    Context,
+    Added,
+    Removed,
+}
+
+/// 差分の 1 行。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiffLine {
+    pub kind: DiffLineKind,
+    /// 変更前の行番号。追加行では `None`。
+    pub old_line: Option<u32>,
+    /// 変更後の行番号。削除行では `None`。
+    pub new_line: Option<u32>,
+    /// **末尾の CR を落とした**本文。行中の CR は残す（CR 単独のファイルは 1 行になる）。
+    pub text: String,
+    /// この行の改行。**`None` は「ファイル末尾に改行が無い」**
+    /// （`\ No newline at end of file` が付いていた）。
+    pub ending: Option<LineEnding>,
+}
+
+/// hunk 1 つ。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hunk {
+    pub old_start: u32,
+    pub old_lines: u32,
+    pub new_start: u32,
+    pub new_lines: u32,
+    /// `@@ ... @@` の後ろ（関数名など）。git が付けなければ空。
+    pub heading: String,
+    pub lines: Vec<DiffLine>,
+}
+
+/// ファイル 1 つ分の差分。
+///
+/// **モードとリネーム元は持たない。** 呼び出し側は [`FileChange`] で既に持っているので、
+/// 差分ヘッダを作るために git を呼び直す必要はない（docs/DESIGN.md §9.3）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDiff {
+    pub path: String,
+    /// `Binary files ... differ` だった。`hunks` は空になる。
+    pub binary: bool,
+    pub encoding: TextEncoding,
+    pub had_bom: bool,
+    /// 置換文字が出た。手動上書きを間違えたときの合図。
+    pub lossy: bool,
+    pub line_endings: LineEndingCounts,
+    /// 代表の改行コード。**Rust 側で計算して渡す**（同じ規則を 2 言語で持たない）。
+    pub dominant_line_ending: Option<LineEnding>,
+    pub mixed_line_endings: bool,
+    pub hunks: Vec<Hunk>,
+}
+
+/// どのコミットのどのファイルを、どちらの親と比べるか。
+#[derive(Debug, Clone, Copy)]
+pub struct DiffTarget<'a> {
+    /// `None` はルートコミット（空ツリーとの差分）。
+    pub parent: Option<&'a str>,
+    pub sha: &'a str,
+    /// 変更後のパス。
+    pub path: &'a str,
+    /// **リネームのときは必ず入れる**（下記 [`file_diff`] の注意）。
+    pub old_path: Option<&'a str>,
+}
+
+/// 差分の取り方。画面のトグルがそのまま入る。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DiffOptions {
+    /// `-U<N>`。既定は `settings.json` の `ui.contextLines`。
+    pub context_lines: u32,
+    /// `-w`。
+    pub ignore_whitespace: bool,
+    /// 文字コードの手動上書き。`None` なら自動判別。
+    pub encoding: Option<TextEncoding>,
+}
+
+impl Default for DiffOptions {
+    fn default() -> Self {
+        Self {
+            context_lines: 3,
+            ignore_whitespace: false,
+            encoding: None,
+        }
+    }
+}
+
+/// ファイル 1 つの差分を取る。
+///
+/// `parent` が `None` ならルートコミット（空ツリーとの差分）。
+///
+/// **リネームでは `old_path` も渡すこと。** pathspec に新しいパスだけを渡すと、
+/// git は対になる側が見えずリネームを検出できず、**全行が追加された新規ファイル**として
+/// 出る（実測）。
+pub fn file_diff(
+    log: &dyn LogSink,
+    program: &str,
+    repo: &Path,
+    target: &DiffTarget<'_>,
+    options: &DiffOptions,
+) -> Result<FileDiff, String> {
+    let context = format!("-U{}", options.context_lines);
+
+    let mut args: Vec<&str> = match target.parent {
+        Some(_) => vec!["diff", "-M", &context],
+        // `git diff` はルートコミットを片側に取れない。`-p` が無いと patch が出ない。
+        None => vec![
+            "diff-tree",
+            "-p",
+            "-M",
+            &context,
+            "--root",
+            "--no-commit-id",
+            "-r",
+        ],
+    };
+    if options.ignore_whitespace {
+        args.push("-w");
+    }
+    if let Some(parent) = target.parent {
+        args.push(parent);
+    }
+    args.push(target.sha);
+    args.push("--");
+    // リネーム元を先に置く。`--` の後ろは pathspec なので順序は問われない。
+    if let Some(old_path) = target.old_path {
+        if old_path != target.path {
+            args.push(old_path);
+        }
+    }
+    args.push(target.path);
+
+    let output = exec::run(log, program, Some(repo), &args)?;
+    if !output.ok() {
+        return Err(output.failure("差分を取得できませんでした"));
+    }
+
+    // **ここで文字コードを判別する**（docs/DESIGN.md §9.1）。`stdout_lossy` は使わない。
+    Ok(match encoding::decode(&output.stdout, options.encoding) {
+        encoding::Decoded::Binary { .. } => FileDiff {
+            path: target.path.to_string(),
+            binary: true,
+            encoding: options.encoding.unwrap_or(TextEncoding::Utf8),
+            had_bom: false,
+            lossy: false,
+            line_endings: LineEndingCounts::default(),
+            dominant_line_ending: None,
+            mixed_line_endings: false,
+            hunks: Vec::new(),
+        },
+        encoding::Decoded::Text(text) => {
+            let parsed = parse_patch(&text.text);
+            FileDiff {
+                path: target.path.to_string(),
+                binary: parsed.binary,
+                encoding: text.encoding,
+                had_bom: text.had_bom,
+                lossy: text.lossy,
+                line_endings: parsed.line_endings,
+                dominant_line_ending: parsed.line_endings.dominant(),
+                mixed_line_endings: parsed.line_endings.mixed(),
+                hunks: parsed.hunks,
+            }
+        }
+    })
+}
+
+/// パースの結果。改行の集計は**内容行だけ**を対象にする。
+struct ParsedPatch {
+    hunks: Vec<Hunk>,
+    binary: bool,
+    line_endings: LineEndingCounts,
+}
+
+/// unified diff を hunk に分解する。
+///
+/// 見るのは `@@` 以降だけ。`diff --git` や `index` などのヘッダ行は読み飛ばす
+/// （必要な情報は [`FileChange`] 側に揃っている）。
+///
+/// **改行コードの集計はヘッダ行を含めない。** diff のヘッダは常に LF なので、
+/// 混ぜると CRLF のファイルが全部「混在」になる（docs/DESIGN.md §9.2）。
+fn parse_patch(patch: &str) -> ParsedPatch {
+    let mut hunks: Vec<Hunk> = Vec::new();
+    let mut binary = false;
+    // 新しい側（context + added）と古い側を別々に数え、あとでどちらかを採る。
+    let mut new_side = LineEndingCounts::default();
+    let mut old_side = LineEndingCounts::default();
+
+    let mut old_line = 0u32;
+    let mut new_line = 0u32;
+
+    // 末尾の改行で必ず空要素が出る。そのまま回すと偽の空行が 1 件増える。
+    for raw in patch.strip_suffix('\n').unwrap_or(patch).split('\n') {
+        // `Binary files a/x and b/x differ` / `GIT binary patch`
+        if hunks.is_empty() && (raw.starts_with("Binary files ") || raw.starts_with("GIT binary patch")) {
+            binary = true;
+            continue;
+        }
+
+        if raw.starts_with("@@") {
+            if let Some(header) = parse_hunk_header(raw) {
+                old_line = header.old_start;
+                new_line = header.new_start;
+                hunks.push(header.hunk);
+            }
+            continue;
+        }
+
+        // hunk に入るまでのヘッダ行（`--- a/x` などが `-` で始まる）は読み飛ばす。
+        let Some(hunk) = hunks.last_mut() else {
+            continue;
+        };
+
+        // `\ No newline at end of file` は**直前の行に付く印**であり、行ではない。
+        if raw.starts_with('\\') {
+            if let Some(line) = hunk.lines.last_mut() {
+                let side = match line.kind {
+                    DiffLineKind::Removed => &mut old_side,
+                    _ => &mut new_side,
+                };
+                // 数えてしまった改行を取り消す。
+                match line.ending {
+                    Some(LineEnding::Crlf) => side.crlf = side.crlf.saturating_sub(1),
+                    Some(LineEnding::Lf) => side.lf = side.lf.saturating_sub(1),
+                    Some(LineEnding::Cr) | None => {}
+                }
+                line.ending = None;
+            }
+            continue;
+        }
+
+        let (kind, body) = match raw.as_bytes().first() {
+            Some(b' ') => (DiffLineKind::Context, &raw[1..]),
+            Some(b'+') => (DiffLineKind::Added, &raw[1..]),
+            Some(b'-') => (DiffLineKind::Removed, &raw[1..]),
+            // 空行は「空のコンテキスト行」。git は通常 " " を出すが、
+            // 末尾の split で必ず 1 件出るので、そこで hunk を壊さないように受けておく。
+            None => (DiffLineKind::Context, raw),
+            // hunk の後ろに次のファイルのヘッダが続く場合（pathspec を 2 つ渡したとき）。
+            _ => continue,
+        };
+
+        // 末尾の CR は CRLF の名残。**本文からは落とす**（画面に制御文字を出さない）。
+        let (text, ending) = match body.strip_suffix('\r') {
+            Some(stripped) => (stripped, LineEnding::Crlf),
+            None => (body, LineEnding::Lf),
+        };
+        // 行中に残る CR は「CR だけで改行しているファイル」。git は 1 行として出す。
+        let inner_cr = text.matches('\r').count() as u32;
+
+        let side = match kind {
+            DiffLineKind::Removed => &mut old_side,
+            _ => &mut new_side,
+        };
+        match ending {
+            LineEnding::Crlf => side.crlf += 1,
+            _ => side.lf += 1,
+        }
+        side.cr += inner_cr;
+
+        let (old_no, new_no) = match kind {
+            DiffLineKind::Context => {
+                let pair = (Some(old_line), Some(new_line));
+                old_line += 1;
+                new_line += 1;
+                pair
+            }
+            DiffLineKind::Added => {
+                let pair = (None, Some(new_line));
+                new_line += 1;
+                pair
+            }
+            DiffLineKind::Removed => {
+                let pair = (Some(old_line), None);
+                old_line += 1;
+                pair
+            }
+        };
+
+        hunk.lines.push(DiffLine {
+            kind,
+            old_line: old_no,
+            new_line: new_no,
+            text: text.to_string(),
+            ending: Some(ending),
+        });
+    }
+
+    // **新しい側で数える。** 画面のステータスは「今このファイルがどうなっているか」を
+    // 指すため。削除だけの差分（ファイルごと消えた）では新しい側が空なので古い側を採る。
+    let line_endings = if new_side == LineEndingCounts::default() {
+        old_side
+    } else {
+        new_side
+    };
+
+    ParsedPatch {
+        hunks,
+        binary,
+        line_endings,
+    }
+}
+
+struct HunkHeader {
+    hunk: Hunk,
+    old_start: u32,
+    new_start: u32,
+}
+
+/// `@@ -12,7 +12,9 @@ fn main()` を読む。
+///
+/// 1 行だけの側は個数が省略される（`-1 +1,2`）。省略時は 1 件。
+fn parse_hunk_header(line: &str) -> Option<HunkHeader> {
+    let rest = line.strip_prefix("@@ ")?;
+    let (ranges, heading) = match rest.split_once(" @@") {
+        Some((ranges, heading)) => (ranges, heading.strip_prefix(' ').unwrap_or(heading)),
+        None => return None,
+    };
+
+    let mut parts = ranges.split_whitespace();
+    let (old_start, old_lines) = parse_range(parts.next()?.strip_prefix('-')?)?;
+    let (new_start, new_lines) = parse_range(parts.next()?.strip_prefix('+')?)?;
+
+    Some(HunkHeader {
+        hunk: Hunk {
+            old_start,
+            old_lines,
+            new_start,
+            new_lines,
+            heading: heading.to_string(),
+            lines: Vec::new(),
+        },
+        old_start,
+        new_start,
+    })
+}
+
+/// `12,7` または `12`。
+fn parse_range(field: &str) -> Option<(u32, u32)> {
+    match field.split_once(',') {
+        Some((start, count)) => Some((start.parse().ok()?, count.parse().ok()?)),
+        None => Some((field.parse().ok()?, 1)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_changes, parse_detail, ChangeStatus};
+    use super::{
+        parse_changes, parse_detail, parse_patch, ChangeStatus, DiffLineKind, LineEnding,
+        LineEndingCounts,
+    };
 
     /// 実際の `git show -s --format=...` の出力を組み立てる。
     fn detail_record(fields: &[&str]) -> String {
@@ -510,4 +868,267 @@ mod tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].additions, None);
     }
+
+    /* ---------- 差分本体のパース（T-13） ---------- */
+
+    /// 変更 1 件。**行番号が hunk の開始位置から数えられていること**を見る。
+    #[test]
+    fn parses_a_single_hunk() {
+        let patch = r#"diff --git a/f.txt b/f.txt
+index 422c2b7..33d5d3b 100644
+--- a/f.txt
++++ b/f.txt
+@@ -10,3 +10,4 @@ fn main()
+ a
+-b
++B
++c
+"#;
+        let parsed = parse_patch(patch);
+
+        assert_eq!(parsed.hunks.len(), 1);
+        let hunk = &parsed.hunks[0];
+        assert_eq!(hunk.old_start, 10);
+        assert_eq!(hunk.old_lines, 3);
+        assert_eq!(hunk.new_start, 10);
+        assert_eq!(hunk.new_lines, 4);
+        assert_eq!(hunk.heading, "fn main()");
+
+        let shape: Vec<(DiffLineKind, Option<u32>, Option<u32>, &str)> = hunk
+            .lines
+            .iter()
+            .map(|line| {
+                (
+                    line.kind,
+                    line.old_line,
+                    line.new_line,
+                    line.text.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (DiffLineKind::Context, Some(10), Some(10), "a"),
+                (DiffLineKind::Removed, Some(11), None, "b"),
+                (DiffLineKind::Added, None, Some(11), "B"),
+                (DiffLineKind::Added, None, Some(12), "c"),
+            ]
+        );
+    }
+
+    /// **`---` / `+++` のヘッダ行を内容行として数えないこと。**
+    /// hunk に入る前は `-` `+` で始まる行が出る。
+    #[test]
+    fn header_lines_are_not_content() {
+        let patch = r#"diff --git a/f.txt b/f.txt
+new file mode 100644
+index 0000000..3e75765
+--- /dev/null
++++ b/f.txt
+@@ -0,0 +1,2 @@
++one
++two
+"#;
+        let parsed = parse_patch(patch);
+        assert_eq!(parsed.hunks.len(), 1);
+        assert_eq!(parsed.hunks[0].lines.len(), 2);
+        assert!(parsed.hunks[0]
+            .lines
+            .iter()
+            .all(|line| line.kind == DiffLineKind::Added));
+    }
+
+    #[test]
+    fn parses_a_deletion_only_hunk() {
+        let patch = r#"diff --git a/f.txt b/f.txt
+deleted file mode 100644
+index d00491f..0000000
+--- a/f.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-x
+-y
+"#;
+        let parsed = parse_patch(patch);
+        let lines = &parsed.hunks[0].lines;
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].old_line, Some(1));
+        assert_eq!(lines[1].old_line, Some(2));
+        assert!(lines.iter().all(|line| line.new_line.is_none()));
+    }
+
+    /// 複数 hunk。**2 つ目の行番号が 1 つ目の続きではなくヘッダから始まること。**
+    #[test]
+    fn parses_multiple_hunks() {
+        let patch = r#"--- a/f.txt
++++ b/f.txt
+@@ -1,2 +1,2 @@
+ a
+-b
++B
+@@ -20,2 +20,2 @@ tail
+ y
+-z
++Z
+"#;
+        let parsed = parse_patch(patch);
+
+        assert_eq!(parsed.hunks.len(), 2);
+        assert_eq!(parsed.hunks[1].lines[0].old_line, Some(20));
+        assert_eq!(parsed.hunks[1].heading, "tail");
+    }
+
+    /// 個数が省略された hunk ヘッダ（`-1 +1,2`）は 1 件として読む。
+    #[test]
+    fn hunk_header_without_counts() {
+        let patch = r#"@@ -1 +1,2 @@
+-a
++a
++b
+"#;
+        let parsed = parse_patch(patch);
+        assert_eq!(parsed.hunks[0].old_lines, 1);
+        assert_eq!(parsed.hunks[0].new_lines, 2);
+    }
+
+    /// `\ No newline at end of file` は**直前の行に付く印**であり、行ではない。
+    #[test]
+    fn no_newline_marker_is_not_a_line() {
+        let patch = r#"@@ -1,2 +1,2 @@
+ a
+-b
++B
+\ No newline at end of file
+"#;
+        let parsed = parse_patch(patch);
+
+        assert_eq!(parsed.hunks[0].lines.len(), 3);
+        let last = parsed.hunks[0].lines.last().unwrap();
+        assert_eq!(last.text, "B");
+        assert_eq!(last.ending, None);
+        // 印の付いた行のぶんを数え直していること（context の 1 件だけが残る）。
+        assert_eq!(parsed.line_endings.lf, 1);
+    }
+
+    #[test]
+    fn binary_files_have_no_hunks() {
+        let patch = r#"diff --git a/blob.bin b/blob.bin
+index e158ec5..00f8da4 100644
+Binary files a/blob.bin and b/blob.bin differ
+"#;
+        let parsed = parse_patch(patch);
+        assert!(parsed.binary);
+        assert!(parsed.hunks.is_empty());
+    }
+
+    /// 内容の変わらないリネームやモード変更だけの差分。**エラーにしない。**
+    #[test]
+    fn rename_without_content_change_has_no_hunks() {
+        let patch = r#"diff --git a/old.txt b/new.txt
+similarity index 100%
+rename from old.txt
+rename to new.txt
+"#;
+        let parsed = parse_patch(patch);
+        assert!(parsed.hunks.is_empty());
+        assert!(!parsed.binary);
+    }
+
+    #[test]
+    fn empty_patch_is_empty() {
+        let parsed = parse_patch("");
+        assert!(parsed.hunks.is_empty());
+        assert_eq!(parsed.line_endings, LineEndingCounts::default());
+    }
+
+    /// モード変更（`100644` → `100755`）でヘッダが増えても内容行を取り違えない。
+    #[test]
+    fn mode_change_header_is_skipped() {
+        let patch = r#"diff --git a/s.sh b/s.sh
+old mode 100644
+new mode 100755
+index 1111111..2222222
+--- a/s.sh
++++ b/s.sh
+@@ -1,1 +1,1 @@
+-echo old
++echo new
+"#;
+        let parsed = parse_patch(patch);
+        assert_eq!(parsed.hunks[0].lines.len(), 2);
+        assert_eq!(parsed.hunks[0].lines[0].text, "echo old");
+    }
+
+    /// シンボリックリンクは中身がリンク先 1 行になる（型変更のヘッダは読み飛ばす）。
+    #[test]
+    fn symlink_content_is_the_target_path() {
+        let patch = r#"diff --git a/link b/link
+new file mode 120000
+index 0000000..3333333
+--- /dev/null
++++ b/link
+@@ -0,0 +1 @@
++../target/file
+\ No newline at end of file
+"#;
+        let parsed = parse_patch(patch);
+        assert_eq!(parsed.hunks[0].lines[0].text, "../target/file");
+        assert_eq!(parsed.hunks[0].lines[0].ending, None);
+    }
+
+    /// CRLF のファイル。**CR を本文に残さず、改行コードとして数える。**
+    #[test]
+    fn crlf_lines_are_counted_not_shown() {
+        // 生の CR を含む patch を組み立てる（raw 文字列には書けない）。
+        let cr = '\u{0d}';
+        let patch = format!(
+            "@@ -1,2 +1,2 @@\n a{cr}\n-b{cr}\n+B{cr}\n",
+        );
+        let parsed = parse_patch(&patch);
+
+        let lines = &parsed.hunks[0].lines;
+        assert_eq!(lines[0].text, "a", "本文に CR を残さないこと");
+        assert_eq!(lines[0].ending, Some(LineEnding::Crlf));
+        // 新しい側（context + added）だけを数える。
+        assert_eq!(
+            parsed.line_endings,
+            LineEndingCounts {
+                lf: 0,
+                crlf: 2,
+                cr: 0
+            }
+        );
+        assert!(!parsed.line_endings.mixed());
+    }
+
+    /// LF と CRLF の混在。**警告を出す根拠になるので、ここは落とせない。**
+    #[test]
+    fn mixed_line_endings_are_detected() {
+        let cr = '\u{0d}';
+        let patch = format!("@@ -1,2 +1,2 @@\n a\n+B{cr}\n");
+        let parsed = parse_patch(&patch);
+
+        assert_eq!(
+            parsed.line_endings,
+            LineEndingCounts {
+                lf: 1,
+                crlf: 1,
+                cr: 0
+            }
+        );
+        assert!(parsed.line_endings.mixed());
+    }
+
+    /// 削除だけの差分（ファイルごと消えた）では、古い側の改行を数える。
+    #[test]
+    fn deletion_only_counts_the_old_side() {
+        let cr = '\u{0d}';
+        let patch = format!("@@ -1,2 +0,0 @@\n-x{cr}\n-y{cr}\n");
+        let parsed = parse_patch(&patch);
+
+        assert_eq!(parsed.line_endings.crlf, 2);
+        assert_eq!(parsed.line_endings.dominant(), Some(LineEnding::Crlf));
+    }
+
 }

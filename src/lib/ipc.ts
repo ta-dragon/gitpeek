@@ -337,6 +337,76 @@ export function loadChangedFiles(
   return invoke<FileChange[]>("load_changed_files", { repositoryId, sha, parent });
 }
 
+/* ---------- 差分本体（`src-tauri/src/git/diff.rs`）---------- */
+
+export type DiffLineKind = "context" | "added" | "removed";
+
+export type DiffLine = {
+  kind: DiffLineKind;
+  /** 変更前の行番号。追加行では null。 */
+  oldLine: number | null;
+  /** 変更後の行番号。削除行では null。 */
+  newLine: number | null;
+  /** **末尾の CR は落としてある。** 行中の CR は残る（CR だけのファイル）。 */
+  text: string;
+  /** この行の改行。**null は「ファイル末尾に改行が無い」**。 */
+  ending: LineEnding | null;
+};
+
+export type Hunk = {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  /** `@@ ... @@` の後ろ（関数名など）。無ければ空。 */
+  heading: string;
+  lines: DiffLine[];
+};
+
+/**
+ * ファイル 1 つ分の差分。
+ *
+ * **モードとリネーム元は入っていない。** `FileChange` に既にあるので、
+ * 差分ヘッダを作るために取り直さない（docs/DESIGN.md §9.3）。
+ */
+export type FileDiff = {
+  path: string;
+  /** `Binary files ... differ` だった。`hunks` は空。 */
+  binary: boolean;
+  encoding: TextEncoding;
+  hadBom: boolean;
+  lossy: boolean;
+  lineEndings: LineEndingCounts;
+  /** 代表の改行コード。**Rust 側で計算済み**（同じ規則を 2 言語で持たない）。 */
+  dominantLineEnding: LineEnding | null;
+  mixedLineEndings: boolean;
+  hunks: Hunk[];
+};
+
+/** コンテキスト行の選択肢。「すべて」は十分大きな `-U` で代用する。 */
+export const ALL_CONTEXT_LINES = 1_000_000;
+
+/**
+ * ファイル 1 つの差分を取る。
+ *
+ * **リネームでは `oldPath` を必ず渡すこと。** 新しいパスだけを渡すと git は
+ * リネームを検出できず、**全行が追加された新規ファイル**として返す。
+ * `parent` は `loadChangedFiles` と同じく **null がルートコミット**。
+ */
+export function loadFileDiff(options: {
+  repositoryId: string;
+  sha: string;
+  parent: string | null;
+  path: string;
+  oldPath: string | null;
+  contextLines: number;
+  ignoreWhitespace: boolean;
+  /** 文字コードの手動上書き。null なら自動判別。 */
+  forcedEncoding: TextEncoding | null;
+}): Promise<FileDiff> {
+  return invoke<FileDiff>("load_file_diff", options);
+}
+
 /* ---------- 文字コードと改行（`src-tauri/src/encoding.rs`）---------- */
 
 /**

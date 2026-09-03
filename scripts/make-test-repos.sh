@@ -19,6 +19,7 @@
 #   orphan         合流しない orphan ブランチ（幹と繋がらない島）
 #   japanese       日本語ファイル名・日本語ディレクトリ
 #   changes        追加 / 変更 / 削除 / リネーム / バイナリ（T-11）
+#                  ＋ Shift_JIS のファイルと CRLF のファイル（T-13）
 #   empty-subject  subject が空のコミット
 #   empty          コミット 0 件（unborn HEAD）
 #   detached       detached HEAD
@@ -153,6 +154,11 @@ mkdir -p "$repo/sub"
 printf 'x\n' >"$repo/sub/keep.txt"
 # NUL を含むファイルはバイナリとして扱われ、numstat が `-` を返す。
 printf 'bin\000\001\002' >"$repo/blob.bin"
+# 差分本体の文字コード判別と改行検出用（T-13）。
+# sjis.txt は「// 日本語」を Shift_JIS で、crlf.txt は UTF-8 で改行だけ CRLF。
+# core.autocrlf=false を付けてあるので、CRLF はそのままコミットされる。
+printf '// \223\372\226\173\214\352\n1\n' >"$repo/sjis.txt"
+printf 'a\r\nb\r\n' >"$repo/crlf.txt"
 git_ -C "$repo" add -A
 git_ -C "$repo" commit --quiet -m "最初のコミット"
 
@@ -162,6 +168,8 @@ rm "$repo/消える.txt"
 printf 'y\nz\n' >>"$repo/sub/keep.txt"
 printf 'new\n' >"$repo/追加.txt"
 printf 'bin\000\011\011' >"$repo/blob.bin"
+printf '// \223\372\226\173\214\352\n1\n2\n' >"$repo/sjis.txt"
+printf 'a\r\nB\r\n' >"$repo/crlf.txt"
 git_ -C "$repo" add -A
 printf '変更の種類ひととおり\n\n本文の段落。\n' |
   git_ -C "$repo" commit --quiet -F -

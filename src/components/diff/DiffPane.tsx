@@ -1,24 +1,115 @@
 /**
- * 中央下の差分ペイン（docs/DESIGN.md §7.3）。
+ * 中央下の差分ペイン（docs/DESIGN.md §7.2, §7.3）。
  *
  * **ここは差分本体だけ**を出す。コミット詳細と変更ファイル一覧は右ペイン
- * （`CommitInfo`）へ移した。**中身は T-13 で入る**ので、いまは器と見出しだけ置く。
+ * （`CommitInfo`）にある。
  *
- * 取得は `useCommitFiles` が持っている（詳細・一覧と同じ 1 回の取得を分け合う）。
+ * 差分の取得はここが持つ（一覧の取得とは別物で、**選んだファイルの分だけ**取りに行く）。
+ * hunk へのパースと文字コード判別は Rust 側（`git/diff.rs`）で済んでいる。
  */
+import { useEffect, useRef, useState } from "react";
+
 import { ja } from "../../i18n/ja";
+import {
+  loadFileDiff,
+  type FileChange,
+  type FileDiff,
+  type TextEncoding,
+  type UiSettings,
+} from "../../lib/ipc";
+import { DiffToolbar } from "./DiffToolbar";
+import { SideBySide } from "./SideBySide";
+import { Unified } from "./Unified";
 import type { CommitFiles } from "./useCommitFiles";
 
-export function DiffPane({
-  sha,
-  selectedFile,
-  files,
-}: {
+type Props = {
+  repositoryId: string;
   sha: string | null;
   selectedFile: string | null;
   files: CommitFiles;
-}) {
-  const change = files.changes.find((entry) => entry.path === selectedFile) ?? null;
+  ui: UiSettings;
+  onUiChange: (change: Partial<UiSettings>) => void;
+};
+
+export function DiffPane({
+  repositoryId,
+  sha,
+  selectedFile,
+  files,
+  ui,
+  onUiChange,
+}: Props) {
+  const [diff, setDiff] = useState<FileDiff | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /**
+   * 文字コードの手動上書き。**永続化しない。**
+   * ファイルごとの判断なので、別のファイルへ持ち越すと黙って化ける。
+   */
+  const [forcedEncoding, setForcedEncoding] = useState<TextEncoding | null>(null);
+  const [retry, setRetry] = useState(0);
+
+  const latest = useRef(0);
+
+  const change: FileChange | null =
+    files.changes.find((entry) => entry.path === selectedFile) ?? null;
+  // ルートコミットは親が無い。`null` が「空ツリーとの差分」を意味する。
+  const parent = files.detail?.parents[files.parentIndex] ?? null;
+
+  // ファイルやコミットが変われば上書きは意味を失う。自動判別へ戻す。
+  useEffect(() => {
+    setForcedEncoding(null);
+  }, [repositoryId, sha, selectedFile]);
+
+  useEffect(() => {
+    const request = (latest.current += 1);
+
+    if (sha === null || change === null) {
+      setDiff(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    void (async () => {
+      try {
+        const loaded = await loadFileDiff({
+          repositoryId,
+          sha,
+          parent,
+          path: change.path,
+          // **リネームでは古いパスも渡す。** 渡さないと git がリネームを検出できず、
+          // 全行が追加された新規ファイルとして返る。
+          oldPath: change.oldPath,
+          contextLines: ui.contextLines,
+          ignoreWhitespace: ui.ignoreWhitespace,
+          forcedEncoding,
+        });
+        if (request !== latest.current) return;
+        setDiff(loaded);
+        setLoading(false);
+      } catch (caught) {
+        if (request !== latest.current) return;
+        setDiff(null);
+        setLoading(false);
+        setError(messageOf(caught));
+      }
+    })();
+    // `change` そのものではなくパスを見る（一覧を取り直すたびに再取得しない）。
+  }, [
+    repositoryId,
+    sha,
+    parent,
+    change?.path,
+    change?.oldPath,
+    ui.contextLines,
+    ui.ignoreWhitespace,
+    forcedEncoding,
+    retry,
+  ]);
 
   return (
     // `tabIndex` は `Enter` でここへフォーカスを移すため（キーボードだけで差分へ入れる）。
@@ -30,20 +121,113 @@ export function DiffPane({
           {change.oldPath !== null && (
             <span className="dpane__aside">{ja.diff.renamedFrom(change.oldPath)}</span>
           )}
+          {/* モードとシンボリックリンクは一覧の情報で分かる。git を呼び直さない。 */}
+          {isSymlink(change) && <span className="dpane__aside">{ja.diff.symlink}</span>}
+          {modeChanged(change) && (
+            <span className="dpane__aside">
+              {ja.diff.modeChanged(change.oldMode, change.newMode)}
+            </span>
+          )}
         </header>
       )}
 
-      {/* T-13 で差分本体が入る。 */}
+      {sha !== null && change !== null && (
+        <DiffToolbar
+          diff={diff}
+          layout={ui.diffLayout}
+          contextLines={ui.contextLines}
+          ignoreWhitespace={ui.ignoreWhitespace}
+          showLineEndings={ui.showLineEndings}
+          forcedEncoding={forcedEncoding}
+          onLayoutChange={(diffLayout) => onUiChange({ diffLayout })}
+          onContextLinesChange={(contextLines) => onUiChange({ contextLines })}
+          onIgnoreWhitespaceChange={(ignoreWhitespace) => onUiChange({ ignoreWhitespace })}
+          onShowLineEndingsChange={(showLineEndings) => onUiChange({ showLineEndings })}
+          onForcedEncodingChange={setForcedEncoding}
+        />
+      )}
+
       <div className="dpane__body">
-        <p className="dpane__pending">
-          {sha === null
-            ? ja.diff.empty
-            : selectedFile === null
-              ? ja.diff.selectFile
-              : ja.diff.bodyPending}
-        </p>
-        {files.loading && <p className="dpane__detail">{ja.diff.loading}</p>}
+        <Body
+          sha={sha}
+          change={change}
+          diff={diff}
+          loading={loading}
+          error={error}
+          layout={ui.diffLayout}
+          showLineEndings={ui.showLineEndings}
+          onRetry={() => {
+            setError(null);
+            setRetry((count) => count + 1);
+          }}
+        />
       </div>
     </div>
   );
+}
+
+function Body({
+  sha,
+  change,
+  diff,
+  loading,
+  error,
+  layout,
+  showLineEndings,
+  onRetry,
+}: {
+  sha: string | null;
+  change: FileChange | null;
+  diff: FileDiff | null;
+  loading: boolean;
+  error: string | null;
+  layout: UiSettings["diffLayout"];
+  showLineEndings: boolean;
+  onRetry: () => void;
+}) {
+  if (sha === null) return <p className="dpane__pending">{ja.diff.empty}</p>;
+  if (change === null) return <p className="dpane__pending">{ja.diff.selectFile}</p>;
+
+  if (error !== null) {
+    return (
+      <div className="dpane__notice">
+        <p className="dpane__error">{ja.diff.diffFailed}</p>
+        <p className="dpane__detail">{error}</p>
+        <button type="button" className="button" onClick={onRetry}>
+          {ja.diff.retry}
+        </button>
+      </div>
+    );
+  }
+
+  // 読み込み中は前のファイルの差分を出したままにしない（別のファイルに見える）。
+  if (diff === null || loading) return <p className="dpane__pending">{ja.diff.loading}</p>;
+
+  if (diff.binary) return <p className="dpane__pending">{ja.diff.binaryBody}</p>;
+  // リネームやモード変更だけの差分。エラーではない。
+  if (diff.hunks.length === 0) return <p className="dpane__pending">{ja.diff.noHunks}</p>;
+
+  return layout === "unified" ? (
+    <Unified hunks={diff.hunks} showLineEndings={showLineEndings} />
+  ) : (
+    <SideBySide hunks={diff.hunks} showLineEndings={showLineEndings} />
+  );
+}
+
+/** シンボリックリンクのモードは `120000`。追加・削除では片側が `000000` になる。 */
+function isSymlink(change: FileChange): boolean {
+  return change.oldMode === "120000" || change.newMode === "120000";
+}
+
+function modeChanged(change: FileChange): boolean {
+  return (
+    change.oldMode !== change.newMode &&
+    change.oldMode !== "000000" &&
+    change.newMode !== "000000"
+  );
+}
+
+function messageOf(error: unknown): string {
+  if (typeof error === "string") return error;
+  return error instanceof Error ? error.message : String(error);
 }

@@ -1532,13 +1532,9 @@ body {
   font-size: 12px;
 }
 
+/* 差分は上から流す。**中央寄せにしない**（1 行だけの差分が真ん中に浮く）。 */
 .dpane__body {
-  display: flex;
   flex: 1 1 0;
-  flex-direction: column;
-  gap: 4px;
-  align-items: center;
-  justify-content: center;
   min-height: 0;
   overflow: auto;
   background: var(--bg-inset);
@@ -1546,7 +1542,178 @@ body {
 
 .dpane__pending {
   margin: 0;
+  padding: 16px;
   color: var(--text-faint);
+  text-align: center;
+}
+
+/* ---------- 差分本体のツールバー（T-13） ---------- */
+
+.dbar {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  font-size: 12px;
+}
+
+.dbar__field,
+.dbar__check {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.dbar__status {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+}
+
+/* 文字化けと改行コードの混在。**気付けることに実利があるので目立たせる。** */
+.dbar__warn {
+  padding: 0 6px;
+  border-radius: var(--radius);
+  background: var(--diff-del-bg);
+  color: var(--danger);
+}
+
+/* ---------- 差分本体 ---------- */
+
+/*
+ * 差分の 1 行。**行ごとに grid を作る**（列を縦に 4 本並べるのではなく）。
+ * 本文を折り返しても左右が同じ行に留まるのは、行が 1 つの grid だからである。
+ */
+.dtable {
+  --dgutter: 3.6em;
+
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.drow {
+  display: grid;
+  align-items: stretch;
+}
+
+.drow--split {
+  grid-template-columns: var(--dgutter) minmax(0, 1fr) var(--dgutter) minmax(0, 1fr);
+}
+
+.drow--unified {
+  grid-template-columns: var(--dgutter) var(--dgutter) minmax(0, 1fr);
+}
+
+.dline__no {
+  padding: 0 6px;
+  border-right: 1px solid var(--border);
+  color: var(--text-faint);
+  text-align: right;
+  /* 行番号はコピーに混ぜない。 */
+  user-select: none;
+}
+
+.dline {
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+  padding-right: 8px;
+}
+
+.dline--added {
+  background: var(--diff-add-bg);
+}
+
+.dline--removed {
+  background: var(--diff-del-bg);
+}
+
+/* 対になる行が無いところ。**行が無いことを示すだけ**で、行番号も持たない。 */
+.dline--empty {
+  background: var(--bg-inset);
+}
+
+.dline__mark {
+  color: var(--text-faint);
+  user-select: none;
+}
+
+/*
+ * **折り返す。** 横スクロールにすると、左右のペインで別々にスクロールが要るか、
+ * 親に 2 本目のスクロールバーが生える（CLAUDE.md §6）。折り返せば行の対応も崩れない。
+ */
+.dline__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 行内で変わったところ。地色より一段濃くする。 */
+.dline__word {
+  border-radius: 2px;
+  background: var(--diff-add-word);
+  color: inherit;
+}
+
+.dline--removed .dline__word {
+  background: var(--diff-del-word);
+}
+
+/* 改行の可視化記号と「改行なし」の印。**本文ではない**ので選択に混ぜない。 */
+.dline__eol,
+.dline__note {
+  color: var(--text-faint);
+  user-select: none;
+}
+
+.dline__note {
+  color: var(--danger);
+}
+
+/* hunk の切れ目。ここで行が飛んでいる。 */
+.dhunk {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 2px 8px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.dhunk:first-child {
+  border-top: none;
+}
+
+.dhunk__range {
+  font-family: var(--font-mono);
+}
+
+.dhunk__heading {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 読み込み中・バイナリ・失敗の案内。差分の代わりに真ん中へ出す。 */
+.dpane__notice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding: 16px;
+  text-align: center;
 }
 
 /* ---------- 右ペイン: コミット詳細 ＋ 変更ファイル一覧 ---------- */

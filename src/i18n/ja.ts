@@ -281,9 +281,62 @@ export const ja = {
     },
     keyHint: "Alt+↑ / Alt+↓ でファイル移動",
 
-    // 中央下 — 差分本体（T-13 で入る）。
-    bodyPending: "差分の本体は T-13 で表示します。",
+    // 中央下 — 差分本体（T-13）。
     selectFile: "ファイルを選ぶと、ここに差分が出ます。",
+    diffFailed: "差分を取得できませんでした",
+    binaryBody: "バイナリファイルのため、差分は表示できません。",
+    noHunks: "内容の変更はありません（リネームやモードの変更だけです）。",
+    symlink: "シンボリックリンク",
+
+    // ツールバー。表示の切替は settings.json に残す（文字コードの上書きだけ残さない）。
+    viewLabel: "表示",
+    layoutSideBySide: "並べて",
+    layoutUnified: "1 列",
+    contextLabel: "前後",
+    contextLines: (n: number) => `${n} 行`,
+    contextAll: "すべて",
+    ignoreWhitespace: "空白を無視",
+    ignoreWhitespaceHint: "空白だけの違いを差分に出しません（git diff -w）。",
+    showLineEndings: "改行を表示",
+
+    // 文字コード（docs/DESIGN.md §9.1）。
+    encodingLabel: "文字コード",
+    encodingAuto: (name: string) => `自動（${name}）`,
+    encodingAutoUnknown: "自動",
+    encodingNames: {
+      utf8: "UTF-8",
+      shiftJis: "Shift_JIS",
+      eucJp: "EUC-JP",
+    },
+    encodingHint:
+      "判別は UTF-8 → Shift_JIS → EUC-JP の順です。当たらないときは指定し直してください。",
+    lossy: "文字化けの可能性",
+    lossyHint: "指定した文字コードで読めない部分がありました。指定を変えてみてください。",
+
+    // 改行コード（docs/DESIGN.md §9.2）。
+    lineEndingNames: {
+      lf: "LF",
+      crlf: "CRLF",
+      cr: "CR",
+    },
+    lineEndingNone: "改行なし",
+    lineEndingHint: "このファイルの改行コードです。",
+    lineEndingMixed: "改行コード混在",
+    lineEndingMixedHint: (lf: number, crlf: number, cr: number) =>
+      `1 つのファイルに複数の改行コードがあります（LF ${lf} / CRLF ${crlf} / CR ${cr}）。`,
+    // 可視化記号。**本文ではない**ので、コピーに混ざらないよう別要素で出す。
+    eolMarks: {
+      lf: "␊",
+      crlf: "␍␊",
+      cr: "␍",
+    },
+    eolNone: "∅",
+    noNewlineMark: "⏎̸",
+    noNewline: "ファイルの末尾に改行がありません。",
+
+    // hunk の見出し。git の `@@ -a,b +c,d @@` と同じ意味を日本語で添える。
+    hunkRange: (oldStart: number, oldLines: number, newStart: number, newLines: number) =>
+      `@@ -${oldStart},${oldLines} +${newStart},${newLines} @@`,
   },
 
   graph: {

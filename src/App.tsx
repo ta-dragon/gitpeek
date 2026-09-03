@@ -30,7 +30,12 @@ import {
 } from "./lib/ipc";
 import * as repositories from "./store/repositories";
 import { useRepositories } from "./store/repositories";
-import { dismissSettingsNotice, initSettings, useSettings } from "./store/settings";
+import {
+  dismissSettingsNotice,
+  initSettings,
+  updateSettings,
+  useSettings,
+} from "./store/settings";
 import * as snapshots from "./store/snapshot";
 import { useSnapshot } from "./store/snapshot";
 import {
@@ -396,7 +401,7 @@ function RepositoryPanel({
       data={data}
       layout={layout}
       order={snapshot.order}
-      dateFormat={settings.settings.ui.dateFormat}
+      ui={settings.settings.ui}
       jumpTo={jumpTo}
       onNotice={onNotice}
     />
@@ -417,7 +422,7 @@ function CommitWorkspace({
   data,
   layout,
   order,
-  dateFormat,
+  ui,
   jumpTo,
   onNotice,
 }: {
@@ -425,7 +430,8 @@ function CommitWorkspace({
   data: NonNullable<ReturnType<typeof useSnapshot>["data"]>;
   layout: NonNullable<ReturnType<typeof useSnapshot>["layout"]>;
   order: ReturnType<typeof useSnapshot>["order"];
-  dateFormat: UiSettings["dateFormat"];
+  /** 差分の表示設定もここから配る（`settings.json` の `ui`）。 */
+  ui: UiSettings;
   jumpTo: { sha: string; nonce: number } | null;
   onNotice: (message: string) => void;
 }) {
@@ -487,7 +493,7 @@ function CommitWorkspace({
               refs={data.refs}
               head={data.head}
               columns={perRepository.columnWidths}
-              dateFormat={dateFormat}
+              dateFormat={ui.dateFormat}
               selectedSha={perRepository.selectedCommit}
               jumpTo={jumpTo}
               order={order}
@@ -498,9 +504,17 @@ function CommitWorkspace({
           }
           second={
             <DiffPane
+              repositoryId={entry.id}
               sha={perRepository.selectedCommit}
               selectedFile={perRepository.selectedFile}
               files={files}
+              ui={ui}
+              onUiChange={(change) =>
+                void updateSettings((current) => ({
+                  ...current,
+                  ui: { ...current.ui, ...change },
+                }))
+              }
             />
           }
         />

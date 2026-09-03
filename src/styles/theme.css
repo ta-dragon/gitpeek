@@ -25,6 +25,16 @@
   --danger: #cf222e;
   --ok: #1a7f37;
 
+  /*
+   * 差分の色（docs/DESIGN.md §7.2）。行の地色と語単位の強調で 2 段。
+   * **明るさはライトとダークで別に決める**（CLAUDE.md §6）。ライトは白地なので
+   * 地色を淡く、語の強調をはっきりさせる。
+   */
+  --diff-add-bg: #e8fbee;
+  --diff-add-word: #a8e5bb;
+  --diff-del-bg: #fdecea;
+  --diff-del-word: #f5b7b1;
+
   /* モーダルの背景を覆う色（コマンドパレット）。 */
   --overlay: rgba(16, 19, 24, 0.35);
 
@@ -85,6 +95,12 @@
     --danger: #f8737f;
     --ok: #56d364;
 
+    /* 暗い地なので、地色は沈ませて語の強調だけを持ち上げる。 */
+    --diff-add-bg: #10251b;
+    --diff-add-word: #1f5236;
+    --diff-del-bg: #2a1417;
+    --diff-del-word: #6d2329;
+
     --graph-lane-trunk: #9aa6b6;
     --graph-lane-0: #5b9dff;
     --graph-lane-1: #45c08a;
@@ -120,6 +136,12 @@
   --accent-contrast: #0d1117;
   --danger: #f8737f;
   --ok: #56d364;
+
+  /* 暗い地なので、地色は沈ませて語の強調だけを持ち上げる。 */
+  --diff-add-bg: #10251b;
+  --diff-add-word: #1f5236;
+  --diff-del-bg: #2a1417;
+  --diff-del-word: #6d2329;
 
   --graph-lane-trunk: #9aa6b6;
   --graph-lane-0: #5b9dff;

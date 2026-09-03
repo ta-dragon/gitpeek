@@ -3,10 +3,16 @@
 //! 形ごとの期待値は `src/git/diff.rs` のユニットテスト側で見る。
 //! ここで見るのは「**実物の git 出力でも同じ形が返る**」ことと、
 //! ルートコミット・マージコミットという**別コマンドを使う経路**が動くこと。
+//!
+//! 差分本体（T-13）もここで通す。**リネームの pathspec と文字コード・改行**は
+//! 実物でしか確かめられない。
 
 mod common;
 
-use givsoner_lib::git::diff::{self, ChangeStatus, FileChange};
+use givsoner_lib::encoding::{LineEnding, TextEncoding};
+use givsoner_lib::git::diff::{
+    self, ChangeStatus, DiffLineKind, DiffOptions, DiffTarget, FileChange, FileDiff,
+};
 use givsoner_lib::git::snapshot;
 use givsoner_lib::model::{CommitMeta, RepositorySnapshot};
 
@@ -82,7 +88,8 @@ fn reads_every_kind_of_change() {
     let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
     let changes = changes_of("changes", Some(&head.parents[0]), &head.sha);
 
-    assert_eq!(changes.len(), 5, "5 ファイル変わっているはず: {changes:#?}");
+    // リネーム / 追加 / 削除 / サブディレクトリ / バイナリ / Shift_JIS / CRLF。
+    assert_eq!(changes.len(), 7, "7 ファイル変わっているはず: {changes:#?}");
 
     let renamed = find(&changes, "リネーム後.txt");
     assert_eq!(renamed.status, ChangeStatus::Renamed);
@@ -130,7 +137,7 @@ fn a_root_commit_lists_every_file_as_added() {
 
     let changes = changes_of("changes", None, &root.sha);
 
-    assert_eq!(changes.len(), 4, "最初のコミットは 4 ファイル: {changes:#?}");
+    assert_eq!(changes.len(), 6, "最初のコミットは 6 ファイル: {changes:#?}");
     assert!(
         changes.iter().all(|change| change.status == ChangeStatus::Added),
         "ルートコミットは全部 Added のはず"
@@ -199,4 +206,261 @@ fn an_unknown_sha_is_an_error() {
     assert!(
         diff::changed_files(&log(), "git", &fixtures().join("linear"), None, missing).is_err()
     );
+}
+
+/* ---------- 差分本体（T-13） ---------- */
+
+fn diff_of(
+    repo: &str,
+    parent: Option<&str>,
+    sha: &str,
+    path: &str,
+    old_path: Option<&str>,
+    options: &DiffOptions,
+) -> FileDiff {
+    diff::file_diff(
+        &log(),
+        "git",
+        &fixtures().join(repo),
+        &DiffTarget {
+            parent,
+            sha,
+            path,
+            old_path,
+        },
+        options,
+    )
+    .unwrap_or_else(|error| panic!("{repo}:{path} の差分を取れません: {error}"))
+}
+
+/// 行を `+a` / `-b` / ` c` の形に潰して並びを見る。
+fn shape(diff: &FileDiff) -> Vec<String> {
+    diff.hunks
+        .iter()
+        .flat_map(|hunk| {
+            hunk.lines.iter().map(|line| {
+                let mark = match line.kind {
+                    DiffLineKind::Context => ' ',
+                    DiffLineKind::Added => '+',
+                    DiffLineKind::Removed => '-',
+                };
+                format!("{mark}{}", line.text)
+            })
+        })
+        .collect()
+}
+
+#[test]
+fn reads_a_hunk_of_a_modified_file() {
+    let snapshot = snapshot_of("changes");
+    let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
+
+    let diff = diff_of(
+        "changes",
+        Some(&head.parents[0]),
+        &head.sha,
+        "sub/keep.txt",
+        None,
+        &DiffOptions::default(),
+    );
+
+    assert!(!diff.binary);
+    assert_eq!(shape(&diff), vec![" x", "+y", "+z"]);
+    assert_eq!(diff.hunks[0].new_start, 1);
+}
+
+/// **リネームは古いパスも渡さないと検出できない。**
+///
+/// 新しいパスだけを pathspec に渡すと、git は対になる側が見えないので
+/// 「全行が追加された新規ファイル」として出す。ここが崩れると、リネームのたびに
+/// 差分が全行追加になって読めなくなる。
+#[test]
+fn rename_needs_both_paths_in_the_pathspec() {
+    let snapshot = snapshot_of("changes");
+    let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
+
+    let paired = diff_of(
+        "changes",
+        Some(&head.parents[0]),
+        &head.sha,
+        "リネーム後.txt",
+        Some("old.txt"),
+        &DiffOptions::default(),
+    );
+    assert_eq!(shape(&paired), vec![" a", " b", " c", "+d"]);
+
+    // 古いパスを渡さなかった場合（＝やってはいけない呼び方）。
+    let alone = diff_of(
+        "changes",
+        Some(&head.parents[0]),
+        &head.sha,
+        "リネーム後.txt",
+        None,
+        &DiffOptions::default(),
+    );
+    assert_eq!(shape(&alone), vec!["+a", "+b", "+c", "+d"]);
+}
+
+/// ルートコミットは `git diff` では出せないので `diff-tree -p --root` を使う。
+#[test]
+fn reads_the_root_commit_diff() {
+    let snapshot = snapshot_of("changes");
+    let root = commit_by_subject(&snapshot, "最初のコミット");
+    assert!(root.parents.is_empty(), "ルートコミットのはず");
+
+    let diff = diff_of(
+        "changes",
+        None,
+        &root.sha,
+        "sub/keep.txt",
+        None,
+        &DiffOptions::default(),
+    );
+
+    assert_eq!(shape(&diff), vec!["+x"]);
+    assert_eq!(diff.hunks[0].old_lines, 0);
+}
+
+/// Shift_JIS のファイルが化けずに出ること（docs/DESIGN.md §9.1）。
+#[test]
+fn decodes_a_shift_jis_file() {
+    let snapshot = snapshot_of("changes");
+    let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
+
+    let diff = diff_of(
+        "changes",
+        Some(&head.parents[0]),
+        &head.sha,
+        "sjis.txt",
+        None,
+        &DiffOptions::default(),
+    );
+
+    assert_eq!(diff.encoding, TextEncoding::ShiftJis);
+    assert!(!diff.lossy);
+    assert!(
+        diff.hunks[0]
+            .lines
+            .iter()
+            .any(|line| line.text.contains("日本語")),
+        "実際の行: {:?}",
+        shape(&diff)
+    );
+}
+
+/// 手動上書きで判別を飛ばせること。**間違った指定なら化けて `lossy` が立つ。**
+#[test]
+fn forced_encoding_reaches_the_decoder() {
+    let snapshot = snapshot_of("changes");
+    let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
+
+    let diff = diff_of(
+        "changes",
+        Some(&head.parents[0]),
+        &head.sha,
+        "sjis.txt",
+        None,
+        &DiffOptions {
+            encoding: Some(TextEncoding::Utf8),
+            ..DiffOptions::default()
+        },
+    );
+
+    assert_eq!(diff.encoding, TextEncoding::Utf8);
+    assert!(diff.lossy, "UTF-8 として読めないので置換文字が出るはず");
+}
+
+/// CRLF のファイル。**本文に CR を残さず、改行コードとして数える。**
+#[test]
+fn detects_crlf_line_endings() {
+    let snapshot = snapshot_of("changes");
+    let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
+
+    let diff = diff_of(
+        "changes",
+        Some(&head.parents[0]),
+        &head.sha,
+        "crlf.txt",
+        None,
+        &DiffOptions::default(),
+    );
+
+    assert_eq!(diff.dominant_line_ending, Some(LineEnding::Crlf));
+    assert!(!diff.mixed_line_endings);
+    assert_eq!(diff.line_endings.lf, 0);
+    assert!(
+        shape(&diff).iter().all(|line| !line.contains('\r')),
+        "本文に CR が残っている: {:?}",
+        shape(&diff)
+    );
+}
+
+/// LF のファイルは LF と出ること（CRLF の判定が全部に効いていないことの裏取り）。
+#[test]
+fn detects_lf_line_endings() {
+    let snapshot = snapshot_of("changes");
+    let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
+
+    let diff = diff_of(
+        "changes",
+        Some(&head.parents[0]),
+        &head.sha,
+        "sub/keep.txt",
+        None,
+        &DiffOptions::default(),
+    );
+
+    assert_eq!(diff.dominant_line_ending, Some(LineEnding::Lf));
+    assert!(!diff.mixed_line_endings);
+}
+
+#[test]
+fn binary_files_have_no_hunks() {
+    let snapshot = snapshot_of("changes");
+    let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
+
+    let diff = diff_of(
+        "changes",
+        Some(&head.parents[0]),
+        &head.sha,
+        "blob.bin",
+        None,
+        &DiffOptions::default(),
+    );
+
+    assert!(diff.binary);
+    assert!(diff.hunks.is_empty());
+}
+
+/// コンテキスト行の増減が効くこと。
+#[test]
+fn context_lines_change_the_surrounding_lines() {
+    let snapshot = snapshot_of("changes");
+    let head = commit_by_subject(&snapshot, "変更の種類ひととおり");
+
+    let none = diff_of(
+        "changes",
+        Some(&head.parents[0]),
+        &head.sha,
+        "リネーム後.txt",
+        Some("old.txt"),
+        &DiffOptions {
+            context_lines: 0,
+            ..DiffOptions::default()
+        },
+    );
+    assert_eq!(shape(&none), vec!["+d"]);
+
+    let wide = diff_of(
+        "changes",
+        Some(&head.parents[0]),
+        &head.sha,
+        "リネーム後.txt",
+        Some("old.txt"),
+        &DiffOptions {
+            context_lines: 10,
+            ..DiffOptions::default()
+        },
+    );
+    assert_eq!(shape(&wide), vec![" a", " b", " c", "+d"]);
 }

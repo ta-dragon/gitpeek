@@ -14,7 +14,8 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, State};
 
 use commandlog::{CommandLog, CommandLogEntry, EmittingLog};
 use git::detect::GitStatus;
-use git::diff::{CommitDetail, FileChange};
+use encoding::TextEncoding;
+use git::diff::{CommitDetail, DiffOptions, DiffTarget, FileChange, FileDiff};
 use git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
 use git::repo::{RepositoryEntry, RepositoryProbe};
 use git::snapshot::SnapshotCache;
@@ -387,6 +388,57 @@ async fn load_changed_files(
     .map_err(|error| error.to_string())?
 }
 
+/// ファイル 1 つ分の差分（docs/DESIGN.md §7.2, §9）。
+///
+/// **`old_path` はリネームのときに必ず渡す。** pathspec に新しいパスだけを渡すと、
+/// git は対になる側が見えずリネームを検出できず、全行が追加された新規ファイルとして出る。
+///
+/// `forced_encoding` は画面からの手動上書き。`None` なら自動判別（§9.1）。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn load_file_diff(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    sha: String,
+    parent: Option<String>,
+    path: String,
+    old_path: Option<String>,
+    context_lines: u32,
+    ignore_whitespace: bool,
+    forced_encoding: Option<TextEncoding>,
+) -> Result<FileDiff, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo_path = PathBuf::from(&repository.path);
+        if !repo_path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", repo_path.display()));
+        }
+        git::diff::file_diff(
+            &EmittingLog::new(&handle, &log),
+            &program,
+            &repo_path,
+            &DiffTarget {
+                parent: parent.as_deref(),
+                sha: &sha,
+                path: &path,
+                old_path: old_path.as_deref(),
+            },
+            &DiffOptions {
+                context_lines,
+                ignore_whitespace,
+                encoding: forced_encoding,
+            },
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// 登録済みリポジトリを素性付きで返す。パスが消えていれば `probe` は `null`。
 #[tauri::command]
 async fn list_repositories(
@@ -473,6 +525,7 @@ pub fn run() {
             compute_branch_status,
             load_commit_detail,
             load_changed_files,
+            load_file_diff,
             load_settings,
             save_settings,
             load_ui_state,
