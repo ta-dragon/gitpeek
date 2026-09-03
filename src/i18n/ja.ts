@@ -227,6 +227,65 @@ export const ja = {
     copyFailed: "クリップボードへコピーできませんでした。",
   },
 
+  diff: {
+    // 1 段目 — コミット詳細。
+    empty: "コミットを選んでください。",
+    loading: "読み込んでいます…",
+    failed: "コミットの内容を取得できませんでした",
+    retry: "もう一度試す",
+    author: "作者",
+    committer: "コミッター",
+    parents: "親",
+    sha: "SHA",
+    noParent: "なし（ルートコミット）",
+    // author と committer が同じなら 1 行にまとめる。
+    sameAsAuthor: "作者と同じ",
+    copySha: "SHA をコピー",
+    copied: (text: string) => `コピーしました: ${text}`,
+    copyFailed: "クリップボードへコピーできませんでした。",
+
+    // マージコミットの親選択（docs/DESIGN.md §7.4）。
+    compareWith: "比較する親",
+    parentNth: (n: number) => `第 ${n} 親`,
+    mergeNote: "マージコミットの差分は親ごとに異なります。",
+
+    // 2 段目 — 変更ファイル一覧。
+    files: "変更ファイル",
+    fileCount: (n: number) => `${n} ファイル`,
+    additions: (n: number) => `+${n}`,
+    deletions: (n: number) => `-${n}`,
+    binaryCount: (n: number) => `バイナリ ${n}`,
+    noFiles: "変更されたファイルはありません。",
+    layoutFlat: "フラット",
+    layoutTree: "ツリー",
+    layoutLabel: "一覧",
+    binary: "バイナリ",
+    renamedFrom: (oldPath: string) => `${oldPath} から`,
+    modeChanged: (oldMode: string, newMode: string) => `モード ${oldMode} → ${newMode}`,
+    // 状態の 1 文字。色はテーマトークンで付ける。
+    statusAdded: "A",
+    statusModified: "M",
+    statusDeleted: "D",
+    statusRenamed: "R",
+    statusCopied: "C",
+    statusTypeChanged: "T",
+    statusUnknown: "?",
+    statusName: {
+      added: "追加",
+      modified: "変更",
+      deleted: "削除",
+      renamed: "リネーム",
+      copied: "コピー",
+      typeChanged: "型変更",
+      unknown: "不明",
+    },
+    keyHint: "Alt+↑ / Alt+↓ でファイル移動",
+
+    // 3 段目 — 差分本体（T-13 で入る）。
+    bodyPending: "差分の本体は T-13 で表示します。",
+    selectFile: "ファイルを選ぶと、ここに差分が出ます。",
+  },
+
   graph: {
     title: "コミットグラフ",
     // 仮想スクロールが入るまでの仮の蓋（T-07 で外す）。
@@ -245,8 +304,6 @@ export const ja = {
     title: "Phase 2 — コミットグラフ",
     body: "リポジトリの登録・切替、全コミットの一括取得、レーン計算とグラフ描画までが動いています。",
     next: "実装フェーズは CLAUDE.md §9 を参照。",
-    // 中央下（差分ペイン）は T-11 まで空。
-    diffPlaceholder: "コミットを選ぶと、ここに詳細と差分が出ます（Phase 4）。",
   },
 
   commandLog: {

@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, State};
 
 use commandlog::{CommandLog, CommandLogEntry, EmittingLog};
 use git::detect::GitStatus;
+use git::diff::{CommitDetail, FileChange};
 use git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
 use git::repo::{RepositoryEntry, RepositoryProbe};
 use git::snapshot::SnapshotCache;
@@ -251,7 +252,7 @@ async fn load_repository_snapshot(
 /// `for-each-ref` 1 回で返るので、**レーンのために別経路で `git log` を呼ばない**。
 /// 並び順の切替も `git log` を再実行せず、メモリ上で並べ替えるだけ（§4.3）。
 ///
-/// 可視 ref による絞り込みは T-09 で足す。ここでは全コミットを対象にする。
+/// `visible_refs` で絞ると到達可能集合を計算し直して行と線が実際に減る（§4.4）。
 #[tauri::command]
 async fn compute_lane_layout(
     app: AppHandle,
@@ -318,6 +319,68 @@ async fn compute_branch_status(
             &Reporting::silent(),
         )?;
         Ok(graph::reach::all_branch_status(&snapshot))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// コミット 1 件の本文（docs/DESIGN.md §7.3）。
+///
+/// 一覧に載っているメタ情報と重なるが、**コミッターと本文はここでしか取れない**。
+/// スナップショットに全コミットの本文まで載せると、数万コミットで数百 MB になる。
+#[tauri::command]
+async fn load_commit_detail(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    sha: String,
+) -> Result<CommitDetail, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        git::diff::commit_detail(&EmittingLog::new(&handle, &log), &program, &path, &sha)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// 変更ファイル一覧（docs/DESIGN.md §7.3）。
+///
+/// **`parent` はフロントが決める。** マージコミットは差分が一意に決まらないので
+/// 既定を第 1 親にし、ドロップダウンで切り替えられるようにしてある（§7.4）。
+/// `None` はルートコミット（空ツリーとの差分）を意味する。
+#[tauri::command]
+async fn load_changed_files(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    sha: String,
+    parent: Option<String>,
+) -> Result<Vec<FileChange>, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        git::diff::changed_files(
+            &EmittingLog::new(&handle, &log),
+            &program,
+            &path,
+            parent.as_deref(),
+            &sha,
+        )
     })
     .await
     .map_err(|error| error.to_string())?
@@ -407,6 +470,8 @@ pub fn run() {
             load_repository_snapshot,
             compute_lane_layout,
             compute_branch_status,
+            load_commit_detail,
+            load_changed_files,
             load_settings,
             save_settings,
             load_ui_state,

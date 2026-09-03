@@ -261,6 +261,82 @@ export function computeBranchStatus(repositoryId: string): Promise<BranchStatus[
   return invoke<BranchStatus[]>("compute_branch_status", { repositoryId });
 }
 
+/* ---------- コミット詳細と変更ファイル（`src-tauri/src/git/diff.rs`）---------- */
+
+/**
+ * コミット 1 件の本文。
+ *
+ * 一覧の [`CommitMeta`] と重なるが、**コミッターと本文はここにしかない**。
+ * 全コミットの本文をスナップショットに載せると数万コミットで数百 MB になるので、
+ * 選択したコミットのぶんだけ取りに行く。
+ */
+export type CommitDetail = {
+  sha: string;
+  shortSha: string;
+  /** 第 1 親が先頭。ルートコミットは空。 */
+  parents: string[];
+  authorName: string;
+  authorEmail: string;
+  authorTime: number;
+  committerName: string;
+  committerEmail: string;
+  committerTime: number;
+  subject: string;
+  /** subject を除いた本文。無ければ空文字。 */
+  body: string;
+};
+
+export type ChangeStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  /** 通常ファイル ↔ シンボリックリンクなど。 */
+  | "typeChanged"
+  | "unknown";
+
+export type FileChange = {
+  /** 変更後のパス。差分の取得と表示にはこちらを使う。 */
+  path: string;
+  /** リネーム / コピー元。それ以外は null。 */
+  oldPath: string | null;
+  status: ChangeStatus;
+  /** **バイナリでは null**（numstat が `-` を返す）。0 と取り違えないこと。 */
+  additions: number | null;
+  deletions: number | null;
+  /** 変更前後のファイルモード（`100644` / 追加や削除では `000000`）。 */
+  oldMode: string;
+  newMode: string;
+};
+
+/** 行数が取れないファイル。numstat が `-` を返すのはバイナリのときだけ。 */
+export function isBinaryChange(change: FileChange): boolean {
+  return change.additions === null && change.deletions === null;
+}
+
+export function loadCommitDetail(
+  repositoryId: string,
+  sha: string,
+): Promise<CommitDetail> {
+  return invoke<CommitDetail>("load_commit_detail", { repositoryId, sha });
+}
+
+/**
+ * 変更ファイル一覧。
+ *
+ * **`parent` は呼び出し側が決める。** マージコミットは差分が一意に決まらないので、
+ * 既定は第 1 親（docs/DESIGN.md §7.4）。**ルートコミットでは null** を渡すこと
+ * （空ツリーとの差分になる）。
+ */
+export function loadChangedFiles(
+  repositoryId: string,
+  sha: string,
+  parent: string | null,
+): Promise<FileChange[]> {
+  return invoke<FileChange[]>("load_changed_files", { repositoryId, sha, parent });
+}
+
 /* ---------- settings.json（`src-tauri/src/store/settings.rs`）---------- */
 
 export type ThemePreference = "system" | "light" | "dark";

@@ -1479,14 +1479,337 @@ body {
   transform: rotate(45deg);
 }
 
-/* 中央下。T-11（コミット詳細と差分）が入るまでの空き。 */
-.pending {
+/* ---------- 差分ペイン（docs/DESIGN.md §7.3） ---------- */
+
+/*
+ * 3 段構成: コミット詳細 → 変更ファイル一覧 → 差分本体。
+ * **スクロールする段の flex-basis は 0**（CLAUDE.md §6。中身の高さを基準にすると
+ * 隣の段が潰れる）。詳細は中身なり、一覧と本体が残りを分け合う。
+ */
+.dpane {
   display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  outline: none;
+}
+
+/* Enter でここへフォーカスを移したことが分かるように（docs/DESIGN.md §6.5）。 */
+.dpane:focus-visible {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.dpane--empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   align-items: center;
   justify-content: center;
-  height: 100%;
   padding: 16px;
-  border-top: 1px solid var(--border);
   background: var(--bg-inset);
   color: var(--text-faint);
+}
+
+.dpane__error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.dpane__detail {
+  margin: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dpane__body {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  background: var(--bg-inset);
+}
+
+.dpane__pending {
+  margin: 0;
+  color: var(--text-faint);
+}
+
+/* ---------- 1 段目: コミット詳細 ---------- */
+
+/* 詰まったら縮んでよい（中でスクロールする）。一覧の下限を守るのが先。 */
+.cdetail {
+  flex: 0 1 auto;
+  max-height: 50%;
+  overflow: auto;
+  padding: 8px 12px;
+}
+
+.cdetail__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cdetail__subject {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  /* 長い subject でヘッダを壊さない。全文はツールチップではなく本文で読む。 */
+  overflow-wrap: anywhere;
+}
+
+.cdetail__sha {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cdetail__sha:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/*
+ * 本文は改行と字下げをそのまま出す。折り返しはする。
+ * **本文の中だけでスクロールさせる。** 長いメッセージで下の facts が押し出されると、
+ * マージの親ドロップダウン（§7.4）が見えなくなる。
+ */
+.cdetail__body {
+  max-height: 96px;
+  overflow: auto;
+  margin: 6px 0 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.cdetail__facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
+.cdetail__facts dt {
+  color: var(--text-faint);
+}
+
+.cdetail__facts dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+  min-width: 0;
+}
+
+.cdetail__aside {
+  color: var(--text-faint);
+}
+
+.cdetail__mono {
+  font-family: var(--font-mono);
+}
+
+.cdetail__parentPick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+/* ---------- 2 段目: 変更ファイル一覧 ---------- */
+
+/*
+ * **下限はここに置く。** `.flist__body` に `min-height` を書いても、親の
+ * `min-height: 0` が min-content の制約を切ってしまうので効かない。
+ * 見出し ＋ 4 行ぶんを一覧の最低限とする。
+ */
+.flist {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 112px;
+  border-top: 1px solid var(--border);
+}
+
+.flist__head {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-inset);
+  font-size: 12px;
+}
+
+.flist__title {
+  font-weight: 600;
+}
+
+.flist__count,
+.flist__aside {
+  color: var(--text-faint);
+}
+
+.flist__add {
+  color: var(--ok);
+  font-family: var(--font-mono);
+}
+
+.flist__del {
+  color: var(--danger);
+  font-family: var(--font-mono);
+}
+
+.flist__layout {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  color: var(--text-dim);
+}
+
+.flist__body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.flist__empty {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--text-dim);
+}
+
+.flist__rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flist__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 22px;
+  padding-right: 12px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.flist__row:hover {
+  background: var(--bg-hover);
+}
+
+.flist__row--selected {
+  background: var(--bg-hover);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.flist__dir {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  height: 22px;
+  padding-right: 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.flist__dirName {
+  font-weight: 600;
+}
+
+/* 状態の 1 文字。幅を固定してファイル名の桁を揃える。 */
+.flist__status {
+  flex: none;
+  width: 12px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  text-align: center;
+}
+
+.flist__status--added {
+  color: var(--ok);
+}
+
+.flist__status--deleted {
+  color: var(--danger);
+}
+
+.flist__status--renamed,
+.flist__status--copied,
+.flist__status--typeChanged {
+  color: var(--accent);
+}
+
+/*
+ * パスは 1 行。**削るのはディレクトリ側だけ**にして、ファイル名は必ず残す
+ * （docs/DESIGN.md §7.3）。`direction: rtl` で末尾を残す手もあるが、
+ * インライン要素の並びまで反転してディレクトリがファイル名の後ろに出る。
+ */
+.flist__path {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.flist__dirPart {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-faint);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.flist__name {
+  flex: none;
+  color: inherit;
+  white-space: nowrap;
+}
+
+/* 増減バー。幅はそのコミット内で最大のファイルを 100% とした割合。 */
+.flist__bar {
+  display: flex;
+  flex: none;
+  height: 8px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.flist__barAdd {
+  background: var(--ok);
+}
+
+.flist__barDel {
+  background: var(--danger);
 }

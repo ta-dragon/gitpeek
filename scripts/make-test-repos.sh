@@ -18,6 +18,7 @@
 #   two-roots      ルートコミット 2 つ（無関係な履歴の合流）
 #   orphan         合流しない orphan ブランチ（幹と繋がらない島）
 #   japanese       日本語ファイル名・日本語ディレクトリ
+#   changes        追加 / 変更 / 削除 / リネーム / バイナリ（T-11）
 #   empty-subject  subject が空のコミット
 #   empty          コミット 0 件（unborn HEAD）
 #   detached       detached HEAD
@@ -141,6 +142,29 @@ git_ -C "$repo" checkout --quiet main
 new_repo japanese
 commit "日本語ファイル名.txt" "日本語のファイル"
 commit "ディレクトリ/入れ子のファイル.txt" "入れ子も置く"
+
+# --- 変更の種類ひととおり ---------------------------------------------------
+# T-11 の変更ファイル一覧用。2 つ目のコミットに全種類を詰める。
+# **リネームは raw も numstat もパスを 2 つ食う**ので、その前後がずれないことを見る。
+new_repo changes
+printf 'a\nb\nc\n' >"$repo/old.txt"
+printf '1\n' >"$repo/消える.txt"
+mkdir -p "$repo/sub"
+printf 'x\n' >"$repo/sub/keep.txt"
+# NUL を含むファイルはバイナリとして扱われ、numstat が `-` を返す。
+printf 'bin\000\001\002' >"$repo/blob.bin"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "最初のコミット"
+
+git_ -C "$repo" mv old.txt "リネーム後.txt"
+printf 'a\nb\nc\nd\n' >"$repo/リネーム後.txt"
+rm "$repo/消える.txt"
+printf 'y\nz\n' >>"$repo/sub/keep.txt"
+printf 'new\n' >"$repo/追加.txt"
+printf 'bin\000\011\011' >"$repo/blob.bin"
+git_ -C "$repo" add -A
+printf '変更の種類ひととおり\n\n本文の段落。\n' |
+  git_ -C "$repo" commit --quiet -F -
 
 # --- 空 subject -------------------------------------------------------------
 new_repo empty-subject

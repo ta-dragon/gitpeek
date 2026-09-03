@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 
 import { CommandLogPanel } from "./components/commandlog/CommandLogPanel";
 import { CommitList } from "./components/commits/CommitList";
+import { DiffPane } from "./components/diff/DiffPane";
 import { CommandPalette } from "./components/common/CommandPalette";
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
@@ -257,7 +258,7 @@ export default function App() {
                   onScan={() => void handleScan()}
                 />
               ) : (
-                <RepositoryPanel entry={selected} jumpTo={jumpTo} />
+                <RepositoryPanel entry={selected} jumpTo={jumpTo} onNotice={setMessage} />
               )
             }
           />
@@ -334,14 +335,16 @@ function RefTreePanel({
  * 選択中リポジトリの中身。
  *
  * 履歴を読み終えていればコミットリストを、そうでなければ素性と読み込み状態の
- * カードを出す。**下半分は T-11（コミット詳細と差分）まで空**。
+ * カードを出す。下半分は差分ペイン（3 段目の差分本体は T-13 で入る）。
  */
 function RepositoryPanel({
   entry,
   jumpTo,
+  onNotice,
 }: {
   entry: RepositoryEntry | null;
   jumpTo: { sha: string; nonce: number } | null;
+  onNotice: (message: string) => void;
 }) {
   const snapshot = useSnapshot();
   const settings = useSettings();
@@ -389,6 +392,9 @@ function RepositoryPanel({
   const setColumns = (columns: ColumnWidths) => {
     updateRepositoryUiState(entry.id, (current) => ({ ...current, columnWidths: columns }));
   };
+  const selectFile = (path: string | null) => {
+    updateRepositoryUiState(entry.id, (current) => ({ ...current, selectedFile: path }));
+  };
 
   return (
     <SplitPane
@@ -420,9 +426,14 @@ function RepositoryPanel({
         />
       }
       second={
-        <div className="pending">
-          <p>{ja.phase.diffPlaceholder}</p>
-        </div>
+        <DiffPane
+          repositoryId={entry.id}
+          sha={perRepository.selectedCommit}
+          commits={data.commits}
+          selectedFile={perRepository.selectedFile}
+          onSelectFile={selectFile}
+          onNotice={onNotice}
+        />
       }
     />
   );

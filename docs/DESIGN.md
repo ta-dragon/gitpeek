@@ -632,10 +632,15 @@ VS Code 風を基本に、リスト移動のみ vim 風の `j` / `k` も受け�
 
 ツールバーの入力欄に SHA を貼るとそのコミットへジャンプする（前方一致可）。
 
-**この表は v1 の最終形であり、現時点で全部が効くわけではない。** T-09 完了時点で
-効くのは `Ctrl+P` / `↑` `↓` / `j` `k` / `Alt+←` `Alt+→` / `Ctrl+H` / `Home` / `End` と
-SHA ジャンプ。残りは対応する機能を作る Phase で足し、最後に T-25 で揃える。
-実装は `src/hooks/useCommitNavigation.ts`。
+**この表は v1 の最終形であり、現時点で全部が効くわけではない。** T-11 完了時点で
+効くのは `Ctrl+P` / `↑` `↓` / `j` `k` / `Alt+←` `Alt+→` / `Alt+↑` `Alt+↓` / `Enter` /
+`Ctrl+H` / `Home` / `End` と SHA ジャンプ。残りは対応する機能を作る Phase で足し、
+最後に T-25 で揃える。
+
+実装は 2 箇所に分かれている。**コミットの移動は `src/hooks/useCommitNavigation.ts`、
+ファイルの移動とフォーカス移動は `src/components/diff/DiffPane.tsx`**。
+ファイル一覧を持っているのが差分ペインなので、そこで処理するほうが状態を渡さずに済む。
+どちらも入力欄にフォーカスがあるときは横取りしない。
 
 ---
 
@@ -673,6 +678,29 @@ SHA ジャンプ。残りは対応する機能を作る Phase で足し、最後
 ファイル間の移動は一覧クリック ＋ `Alt+↑` / `Alt+↓`。
 **全ファイルを縦に連結してスクロールする方式は採らない**（大きな差分で確実に重くなる）。
 
+**一覧は 1 回の git 実行で作る。** `diff --raw --numstat -z -M` は raw 区間と numstat 区間を
+1 本の NUL 列に続けて出すので、状態（A/M/D/R）とファイルモードを raw から、増減行数と
+バイナリ判定を numstat から取れる。2 回呼ぶ必要はない。**リネームだけ raw も numstat も
+パスを 2 つ食う**ので、そこを数え違えると以降が全部 1 件ずつずれる。
+
+**ルートコミットは `git diff` では出せない。** 親が無いので片側を指定できず、
+`diff-tree --raw --numstat -z -M --root --no-commit-id -r <sha>` を使う。
+API では親を `Option<String>` にし、`None` がルートを意味する
+（空ツリーの SHA を定数で埋め込む手もあるが、SHA-256 リポジトリで値が変わる）。
+
+**バイナリの増減は `null` であって 0 ではない。** numstat が `-` を返すので、
+0 行の変更と区別できるようにしておく。合計にも足さず、「バイナリ N 件」として別に数える。
+
+**ディレクトリツリーは子が 1 つだけの連なりを 1 行にまとめる**（`src/components/diff`）。
+ref ツリー（§6.4）の「3 件以上で畳む」とは規則が違う — ファイルは実際のディレクトリ構造が
+そのまま意味を持つので、1 件でもディレクトリはディレクトリとして出す。
+**ディレクトリの開閉は持たない**（1 コミットの変更ファイルは高々数十件で、
+畳む手間より全部見えているほうが速い）。
+
+**フラット表示で削るのはディレクトリ側だけ**にして、ファイル名は必ず残す。
+`direction: rtl` で末尾を残す手は、インライン要素の並びまで反転してディレクトリが
+ファイル名の後ろに出る（T-11 の目視で確認）。
+
 ### 7.4 マージコミットの差分
 
 マージコミットは親が 2 つあるため「差分」が一意に決まらない。`git show` の既定はマージコミットに
@@ -681,6 +709,16 @@ SHA ジャンプ。残りは対応する機能を作る Phase で足し、最後
 - **既定は第 1 親との差分**（`git diff <merge>^1 <merge>`）
 - ヘッダに親を選ぶドロップダウンを出し、明示的に第 2 親も選べる
 - `--cc`（combined diff）は v1.1
+
+**ドロップダウンはコミット詳細の見出し行に置く**（作者・親を並べた欄ではない）。
+本文が長いと欄までスクロールしなければ見えず、**どの親との差分を見ているか分からないまま
+一覧を読むことになる**（T-11 の目視で確認）。
+
+**親の subject は取り直さない。** 全コミットが手元にあるので（§4.1）一覧から引く。
+
+**選んだ親は永続化しない。** 別のコミットへ移れば意味を失う値なので、`state.json` に
+残すと「前に開いたマージの第 2 親」が無関係なコミットに適用されかねない。
+コミットが変わったら第 1 親へ戻す。
 
 ### 7.5 作業ツリー
 
@@ -1168,7 +1206,8 @@ detached / 複数行メッセージ / タグ / bare / クローン / 上流と�
 **純関数のみ**テストする。コンポーネントテストはしない。
 現在の対象は「レーン配列 → SVG パス文字列」（`src/lib/graphPath.ts`）、
 相対日時（`src/lib/relativeTime.ts`）、
-「ref 一覧 → 階層構造」と可視 ref の操作（`src/lib/refTree.ts`）。
+「ref 一覧 → 階層構造」と可視 ref の操作（`src/lib/refTree.ts`）、
+「パス一覧 → ディレクトリツリー」（`src/lib/fileTree.ts`）。
 
 テストランナーは **Vitest**（Vite プロジェクトなので `vite.config.ts` に `test` を足すだけで済む）。
 導入は T-06 で行う。
@@ -1260,7 +1299,7 @@ Phase 9 完了 ＋ **実リポジトリを 5 個以上登録して 1 週間実�
 ## 16. ディレクトリ構成
 
 `(済)` は実在するファイル。それ以外は未作成で、括弧内は作られるタスク。
-**最終更新は T-10 完了時点。**
+**最終更新は T-11 完了時点。**
 
 ```
 gitviewer/
@@ -1281,17 +1320,20 @@ gitviewer/
 │   │   ├── commits/              (済) CommitList / CommitRow / RefChips /
 │   │   │                              ScrollbarRefMarkers
 │   │   ├── sidebar/              (済) RepositoryList / Sidebar / RefTree / RefTreeNode
-│   │   ├── diff/                 差分ペイン (T-11, T-13)
+│   │   ├── diff/                 (済) DiffPane / CommitDetail / FileList
+│   │   │                              差分本体の描画は T-13
 │   │   ├── review/               AI レビュードロワー (T-23)
 │   │   ├── commandlog/           (済) git コマンドログパネル
 │   │   ├── setup/                (済) 空状態と git 未検出画面
 │   │   └── common/               (済) SplitPane / ContextMenu / CommandPalette /
 │   │                                  NoticeBar / LoadProgress / ErrorBoundary
 │   ├── hooks/                    (済) useTheme / useCommandLog / useCommitNavigation
+│   │                                  （ファイル移動と Enter は DiffPane 側 — §6.5）
 │   ├── lib/
 │   │   ├── graphPath.ts          (済) レーン配列 -> SVG パス（純関数・テスト対象）
 │   │   ├── relativeTime.ts       (済) 相対日時（純関数・テスト対象）
 │   │   ├── refTree.ts            (済) ref 一覧 -> 階層構造（純関数・テスト対象）
+│   │   ├── fileTree.ts           (済) パス一覧 -> ディレクトリツリー（純関数・テスト対象）
 │   │   └── ipc.ts                (済) Tauri invoke ラッパ
 │   ├── store/                    (済) settings / uiState / repositories / snapshot
 │   └── styles/                   (済) theme.css（トークン）/ app.css / graph.css
@@ -1303,7 +1345,8 @@ gitviewer/
     │   ├── repositories.rs       (済) 判定とスキャン (T-02)
     │   ├── snapshot.rs           (済) 全件取得と ref の印 (T-04, T-27)
     │   ├── lanes.rs              (済) 生成リポジトリでのレーン不変条件 (T-05)
-    │   └── reach.rs              (済) 到達可能集合と ahead/behind (T-09)
+    │   ├── reach.rs              (済) 到達可能集合と ahead/behind (T-09)
+    │   └── diff.rs               (済) コミット本文と変更ファイル一覧 (T-11)
     └── src/
         ├── main.rs               (済)
         ├── lib.rs                (済) Tauri コマンドの登録と AppState
@@ -1317,7 +1360,8 @@ gitviewer/
         │   ├── snapshot.rs       (済) 全件取得の組み立てと LRU キャッシュ
         │   ├── progress.rs       (済) 途中経過の型と受け口（§4.6）
         │   ├── status.rs         (T-16)
-        │   ├── diff.rs           (T-11, T-13)
+        │   ├── diff.rs           (済) コミット本文と変更ファイル一覧 (T-11)
+        │   │                          hunk のパースは T-13 でここに足す
         │   └── ops.rs            checkout / fetch / merge --ff-only / clone (T-17〜T-19)
         ├── graph/
         │   ├── mod.rs            (済) レーン確定の入口。可視 ref の絞り込みもここ

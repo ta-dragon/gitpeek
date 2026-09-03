@@ -1,4 +1,5 @@
 pub mod detect;
+pub mod diff;
 pub mod exec;
 pub mod log;
 pub mod progress;
