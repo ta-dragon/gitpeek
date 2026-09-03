@@ -101,7 +101,9 @@ export default function App() {
   // リポジトリを選んだら全コミットを一括で読む（docs/DESIGN.md §4.1）。
   // 直前のリポジトリの分は Rust 側の LRU に残っているので、戻りは体感即時になる。
   useEffect(() => {
-    void snapshots.load(repos.selectedId);
+    // 可視 ref はリポジトリごとの設定（settings.json）。切替のたびに読み直す。
+    const visible = repositories.selectedRepository()?.visibleRefs;
+    void snapshots.load(repos.selectedId, false, false, visible);
   }, [repos.selectedId]);
 
   // Ctrl+P でリポジトリ切替（docs/DESIGN.md §6.5）。

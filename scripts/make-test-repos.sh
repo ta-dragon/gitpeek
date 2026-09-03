@@ -25,6 +25,8 @@
 #   tags           軽量タグ・注釈付きタグ・グラフ外のタグ
 #   bare.git       bare リポジトリ
 #   cloned         bare.git のクローン（リモート追跡ブランチと upstream）
+#   upstream.git   diverged の上流（bare）
+#   diverged       上流と分岐したクローン（ahead 2 / behind 3）
 
 set -eu
 
@@ -188,6 +190,27 @@ git_ clone --quiet --bare "$root/linear" "$root/bare.git"
 # --- クローン ---------------------------------------------------------------
 # リモート追跡ブランチ・upstream・origin/HEAD を持つ唯一のリポジトリ。
 git_ clone --quiet "$root/bare.git" "$root/cloned"
+
+# --- 上流と分岐したクローン -------------------------------------------------
+# ahead/behind の検証用。上流を 3 つ、手元を 2 つ進めて分岐させる。
+# bare.git を使い回すと `cloned` の検証が変わってしまうので、別の上流を立てる。
+git_ clone --quiet --bare "$root/linear" "$root/upstream.git"
+git_ clone --quiet "$root/upstream.git" "$root/diverged"
+
+# 上流だけを進める。押し込み役のクローンは用が済んだら消す。
+git_ clone --quiet "$root/upstream.git" "$root/pusher"
+repo=$root/pusher
+commit up1.txt "上流 1"
+commit up2.txt "上流 2"
+commit up3.txt "上流 3"
+git_ -C "$repo" push --quiet origin main
+rm -rf "$root/pusher"
+
+# 手元だけを進めてから、上流の動きを取り込む（マージはしない）。
+repo=$root/diverged
+commit local1.txt "手元 1"
+commit local2.txt "手元 2"
+git_ -C "$repo" fetch --quiet origin
 
 echo "生成しました: $root"
 ls "$root"

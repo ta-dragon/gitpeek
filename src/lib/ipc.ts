@@ -220,17 +220,45 @@ export type LaneLayout = {
   maxLane: number;
 };
 
+/** 表示する ref を全部にしておく既定値。`settings.json` の初期値と同じ。 */
+export const ALL_REFS: VisibleRefs = { mode: "all", excluded: [] };
+
 /**
  * 描画用のレーンを確定する。
  *
  * コミットは Rust 側のキャッシュから取るので、`loadRepositorySnapshot` の直後に
- * 呼んでも `git log` は走らない。並び順の切替も再実行にはならない。
+ * 呼んでも `git log` は走らない。並び順の切替も可視 ref の変更も再実行にはならない。
+ *
+ * `visibleRefs` を絞ると**到達可能集合を計算し直して行と線が実際に減る**
+ * （淡色化ではない — CLAUDE.md §3-7）。タグは起点 ref にしないので、
+ * タグを外してもグラフは変わらない。
  */
 export function computeLaneLayout(
   repositoryId: string,
+  visibleRefs: VisibleRefs = ALL_REFS,
   order: GraphOrder = "topo",
 ): Promise<LaneLayout> {
-  return invoke<LaneLayout>("compute_lane_layout", { repositoryId, order });
+  return invoke<LaneLayout>("compute_lane_layout", { repositoryId, visibleRefs, order });
+}
+
+/** `src-tauri/src/graph/reach.rs` の `BranchStatus` に対応。 */
+export type BranchStatus = {
+  /** 完全な ref 名（`refs/heads/main`）。 */
+  refName: string;
+  /** 比べた相手（上流）の完全な ref 名。 */
+  upstream: string;
+  ahead: number;
+  behind: number;
+};
+
+/**
+ * 上流を持つローカルブランチの ahead/behind。
+ *
+ * **`git rev-list --count` は走らない**（CLAUDE.md §2）。手元のコミットの親子関係から
+ * 数えるので、ブランチが何本あってもプロセスは増えない。
+ */
+export function computeBranchStatus(repositoryId: string): Promise<BranchStatus[]> {
+  return invoke<BranchStatus[]>("compute_branch_status", { repositoryId });
 }
 
 /* ---------- settings.json（`src-tauri/src/store/settings.rs`）---------- */

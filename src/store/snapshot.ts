@@ -8,6 +8,7 @@
 import { useSyncExternalStore } from "react";
 
 import {
+  ALL_REFS,
   computeLaneLayout,
   loadRepositorySnapshot,
   onSnapshotProgress,
@@ -15,6 +16,7 @@ import {
   type LaneLayout,
   type RepositorySnapshot,
   type SnapshotProgress,
+  type VisibleRefs,
 } from "../lib/ipc";
 import { currentUiState, updateRepositoryUiState } from "./uiState";
 
@@ -40,6 +42,11 @@ export type SnapshotState = {
   layout: LaneLayout | null;
   /** 表示中の並び順（docs/DESIGN.md §4.3）。切替は `git log` を再実行しない。 */
   order: GraphOrder;
+  /**
+   * グラフに出す ref（docs/DESIGN.md §4.4）。絞ると行と線が実際に減る。
+   * 正は `settings.json` の側で、ここに持つのは表示中の写し。
+   */
+  visibleRefs: VisibleRefs;
   loading: boolean;
   error: string | null;
   /**
@@ -61,6 +68,7 @@ let snapshot: SnapshotState = {
   data: null,
   layout: null,
   order: "topo",
+  visibleRefs: ALL_REFS,
   loading: false,
   error: null,
   elapsedMs: null,
@@ -111,9 +119,15 @@ export async function load(
   id: string | null,
   force = false,
   confirmed = false,
+  visibleRefs?: VisibleRefs,
 ): Promise<void> {
   // StrictMode の二重実行や、同じ行の連打で 2 度読みに行かない。
   if (!force && id !== null && id === snapshot.repositoryId && snapshot.loading) return;
+
+  // 可視 ref はリポジトリごとの設定。渡されなければ、同じリポジトリの読み直しなら
+  // 今の絞り込みを保ち、切り替えなら全表示に戻す。
+  const visible =
+    visibleRefs ?? (id === snapshot.repositoryId ? snapshot.visibleRefs : ALL_REFS);
 
   const request = (latestRequest += 1);
 
@@ -153,6 +167,7 @@ export async function load(
     repositoryId: id,
     data: null,
     layout: null,
+    visibleRefs: visible,
     loading: true,
     error: null,
     elapsedMs: null,
@@ -167,7 +182,7 @@ export async function load(
 
     // レーンは Rust 側のキャッシュから作られるので `git log` は走らない。
     // ここで失敗しても履歴の要約は出せるよう、グラフだけ諦める。
-    const layout = await layoutOrNull(id, snapshot.order);
+    const layout = await layoutOrNull(id, visible, snapshot.order);
     if (request !== latestRequest) return;
 
     setSnapshot({
@@ -211,15 +226,36 @@ export async function setOrder(order: GraphOrder): Promise<void> {
   if (id === null || snapshot.data === null) return;
 
   const request = (latestRequest += 1);
-  const layout = await layoutOrNull(id, order);
+  const layout = await layoutOrNull(id, snapshot.visibleRefs, order);
+  if (request !== latestRequest) return;
+  setSnapshot({ layout });
+}
+
+/**
+ * グラフに出す ref を絞り直す（docs/DESIGN.md §4.4）。
+ *
+ * `git log` は走らない。Rust 側が到達可能集合を計算し直してレーンを振り直すだけ。
+ * **永続化は呼び出し側の責務**（`settings.json` の `repositories[].visibleRefs`）。
+ */
+export async function setVisibleRefs(visibleRefs: VisibleRefs): Promise<void> {
+  const id = snapshot.repositoryId;
+  setSnapshot({ visibleRefs });
+  if (id === null || snapshot.data === null) return;
+
+  const request = (latestRequest += 1);
+  const layout = await layoutOrNull(id, visibleRefs, snapshot.order);
   if (request !== latestRequest) return;
   setSnapshot({ layout });
 }
 
 /** レーンを引く。失敗はグラフを出さないだけに留める。 */
-async function layoutOrNull(id: string, order: GraphOrder): Promise<LaneLayout | null> {
+async function layoutOrNull(
+  id: string,
+  visibleRefs: VisibleRefs,
+  order: GraphOrder,
+): Promise<LaneLayout | null> {
   try {
-    return await computeLaneLayout(id, order);
+    return await computeLaneLayout(id, visibleRefs, order);
   } catch {
     return null;
   }

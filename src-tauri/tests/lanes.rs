@@ -10,6 +10,7 @@ use std::collections::{HashMap, HashSet};
 use givsoner_lib::graph::{self, GraphOrder, LaneLayout};
 use givsoner_lib::git::snapshot;
 use givsoner_lib::model::RepositorySnapshot;
+use givsoner_lib::store::settings::VisibleRefs;
 
 use common::{fixtures, log};
 
@@ -115,7 +116,7 @@ fn every_generated_repository_lays_out_without_panicking() {
         let snapshot = snapshot_of(name);
 
         for order in [GraphOrder::Topo, GraphOrder::Date] {
-            let layout = graph::layout(&snapshot, order);
+            let layout = graph::layout(&snapshot, &VisibleRefs::default(), order);
             assert_invariants(name, &snapshot, &layout);
             assert_parents_come_last(name, &layout);
         }
@@ -125,7 +126,7 @@ fn every_generated_repository_lays_out_without_panicking() {
 #[test]
 fn an_empty_repository_has_no_rows() {
     let snapshot = snapshot_of("empty");
-    let layout = graph::layout(&snapshot, GraphOrder::Topo);
+    let layout = graph::layout(&snapshot, &VisibleRefs::default(), GraphOrder::Topo);
 
     assert!(layout.rows.is_empty());
     assert_eq!(layout.max_lane, 0);
@@ -134,7 +135,7 @@ fn an_empty_repository_has_no_rows() {
 #[test]
 fn the_branch_merge_fixture_keeps_the_trunk_straight() {
     let snapshot = snapshot_of("branch-merge");
-    let layout = graph::layout(&snapshot, GraphOrder::Topo);
+    let layout = graph::layout(&snapshot, &VisibleRefs::default(), GraphOrder::Topo);
 
     // 既定ブランチ（main）の第一親チェーンが lane 0 を一直線に通る。
     let trunk = trunk_of(&snapshot);
@@ -155,7 +156,7 @@ fn the_branch_merge_fixture_keeps_the_trunk_straight() {
 fn a_detached_head_still_gets_a_trunk() {
     // detached ＋ main/master 無しでも lane 0 を空けない（先頭コミットを幹にする）。
     let snapshot = snapshot_of("detached");
-    let layout = graph::layout(&snapshot, GraphOrder::Topo);
+    let layout = graph::layout(&snapshot, &VisibleRefs::default(), GraphOrder::Topo);
 
     assert!(!layout.rows.is_empty());
     assert!(
@@ -168,8 +169,8 @@ fn a_detached_head_still_gets_a_trunk() {
 fn date_order_keeps_the_same_rows() {
     let snapshot = snapshot_of("merges");
 
-    let topo = graph::layout(&snapshot, GraphOrder::Topo);
-    let date = graph::layout(&snapshot, GraphOrder::Date);
+    let topo = graph::layout(&snapshot, &VisibleRefs::default(), GraphOrder::Topo);
+    let date = graph::layout(&snapshot, &VisibleRefs::default(), GraphOrder::Date);
 
     let of = |layout: &LaneLayout| -> HashSet<String> {
         layout.rows.iter().map(|row| row.sha.clone()).collect()

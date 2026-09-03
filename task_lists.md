@@ -45,8 +45,8 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 
 | 項目 | 内容 |
 |---|---|
-| 直前に完了 | **T-08 判定ゲート（合格）** ＋ T-27 orphan ブランチと履歴の終端の印 |
-| 次にやる | **T-09 到達可能集合と ahead/behind の計算** |
+| 直前に完了 | T-09 到達可能集合と ahead/behind の計算 |
+| 次にやる | **T-10 ブランチ / タグツリー UI** |
 | 未解決の判断事項 | なし |
 
 **Phase 2 の判定ゲートは合格した（2026-09-03）。** 判定は vite / drogon / onyx の 3 つで行い、
@@ -123,85 +123,6 @@ graph LR
 
 # Phase 3 — ref ツリーと到達可能性
 
-## - [ ] T-09 [Phase 3] 到達可能集合と ahead/behind の計算
-
-**目的**: 可視 ref を絞ったときのレーン再計算と、全ブランチの ahead/behind を
-**git を追加で呼ばずに**メモリ上のグラフから求める。
-
-**参照**: DESIGN.md §4.4, §4.5 / CLAUDE.md §2, §3-7
-
-**依存**: T-05
-
-**作成・変更するファイル**
-
-| 種別 | パス | 内容 |
-|---|---|---|
-| 新規 | `src-tauri/src/graph/reach.rs` | 到達可能集合と ahead/behind |
-| 変更 | `src-tauri/src/graph/mod.rs`, `lane.rs` | 可視 ref による絞り込み |
-| 変更 | `src-tauri/src/lib.rs` | コマンド登録 |
-| 変更 | `src/lib/ipc.ts` | 型と invoke ラッパ |
-
-**実装内容**
-
-```rust
-/// tips から第一親・第二親を問わず辿れるコミットの集合。
-pub fn reachable_from(commits: &[CommitMeta], tips: &[String]) -> HashSet<String>;
-
-/// (ahead, behind) = (a から到達可能で b から不能な数, その逆)
-pub fn ahead_behind(index: &CommitIndex, a: &str, b: &str) -> (u32, u32);
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BranchStatus { pub ref_name: String, pub ahead: u32, pub behind: u32 }
-
-/// 全ブランチ分をまとめて計算する。1 本ずつ呼ぶと O(n × refs) になるため。
-pub fn all_branch_status(snapshot: &RepositorySnapshot) -> Vec<BranchStatus>;
-```
-
-- `CommitIndex` は SHA → 添字の `HashMap` と、topo 順の添字配列を持つ補助構造。
-- ahead/behind は、対象ペアから双方向 BFS で共通祖先へ到達するまで辿る実装でよい。
-  全 ref 分のビットセットを持つ実装はメモリが厳しいので採らない。
-- `compute_lane_layout` に `visibleRefs` 引数を追加し、可視 ref から
-  `reachable_from` で集合を作ってコミットを絞ってから `assign_lanes` を呼ぶ。
-
-**T-05 からの申し送り（着手時に確認すること）**
-
-- `assign_lanes(commits, trunk)` は**スライスを受けるだけ**なので、絞った `Vec<CommitMeta>` を
-  作って渡せば再計算になる。`lane.rs` 側に絞り込みの知識を入れないこと。
-- **幹の ref を非表示にされた場合の扱いを決めること。** `trunk_start` は ref 名から SHA を
-  引くだけで可視性を見ない。現状は「起点がグラフ外なら先頭コミットを幹にする」に落ちるので、
-  絞った集合に幹が残っていなければ自動的に別の幹になる。これで良いかを判断する。
-
-**Tauri コマンド**
-
-```
-compute_lane_layout(repositoryId: String, visibleRefs: VisibleRefs, order: "topo"|"date")
-    -> Result<LaneLayout, String>
-compute_branch_status(repositoryId: String) -> Result<Vec<BranchStatus>, String>
-```
-
-**制約**
-
-- **ahead/behind は `git rev-list --count` を呼ばず、メモリ上のグラフから計算する**（CLAUDE.md §2）。
-  ただし**テストコードでは検証のために `git rev-list --count` を呼んでよい**
-- ブランチ表示 ON/OFF は淡色化ではなく**到達可能集合を再計算してレーンを振り直す**（CLAUDE.md §3-7）
-- 可視 ref を絞っても **lane 0 の幹予約は維持**する
-
-**受け入れ条件**
-
-- ▸コマンド: `cargo test` — ahead/behind（同一 / 片側だけ進む / 両方進む / 共通祖先なし / 自分自身）
-- ▸コマンド: `cargo test` — 到達可能集合（ブランチを 1 本外すと該当コミットだけが消える）
-- ▸コマンド: テスト用リポジトリで、算出した ahead/behind が
-  `git rev-list --count a..b` / `b..a` と一致する
-- ▸コマンド: 数万コミット規模の入力で `compute_lane_layout` が 100ms 未満（ベンチではなく雑な計測でよい）
-- ▸コマンド: `cargo clippy --all-targets -- -D warnings`
-
-**非スコープ**
-
-ツリー UI（T-10）／fetch 後の再計算トリガ（T-17）
-
----
-
 ## - [ ] T-10 [Phase 3] ブランチ / タグツリー UI
 
 **目的**: サイドバー下段に ref ツリーを作り、表示 ON/OFF でグラフを実際に絞れるようにする。
@@ -250,6 +171,25 @@ compute_branch_status(repositoryId: String) -> Result<Vec<BranchStatus>, String>
 - ▸目視: ahead/behind が `git rev-list --count` の値と一致する（1 本を手で確認）
 - ▸目視: 可視 ref を絞っても幹が lane 0 を一直線に通っている
 - ▸目視: 開閉状態と可視 ref がリポジトリごとに復元される
+
+**T-09 からの申し送り（着手時に確認すること）**
+
+- **計算側はすべて出来ている。** `compute_lane_layout(repositoryId, visibleRefs, order)` と
+  `compute_branch_status(repositoryId)` が生えている。フロントのラッパは
+  `src/lib/ipc.ts` の `computeLaneLayout` / `computeBranchStatus`。
+- **可視 ref の状態は `src/store/snapshot.ts` が持つ**（`visibleRefs` と `setVisibleRefs`）。
+  `setVisibleRefs` を呼べばレーンが引き直される。**永続化は呼び出し側の責務**で、
+  T-09 では誰も保存していない。`settings.json` の `repositories[].visibleRefs` へ
+  書くのは T-10 の仕事（`src/store/repositories.ts` の `updateSettings` 経由）。
+  リポジトリ切替時の読み出しは `src/App.tsx` で済んでいる。
+- **`excluded` は完全な ref 名**（`refs/heads/main`）。短縮名だとローカルの `main` と
+  リモートの `origin/main` を区別できない。
+- **タグを外してもグラフは変わらない**（起点 ref にしないため）。ツリーには出すが、
+  チェックの意味がブランチと違うことを UI 側で分かるようにするか、T-10 で決めること。
+- **`BranchStatus` は上流を持つローカルブランチしか返さない。** 上流の無いブランチには
+  ahead/behind を出さない（比べる相手が決まらない）。行に何も出さないか、
+  「上流なし」と出すかは T-10 で決める。
+- `RefEntry.orphan`（T-27）がそのまま使える。ツリーでも印を付けるとよい。
 
 **非スコープ**
 
@@ -852,3 +792,4 @@ JSON パース失敗時に Markdown が表示され「構造化に失敗しま�
 | T-07 | 2 | コミットリストの仮想スクロールと列表示 | `a419547` `f1da933` |
 | T-08 | 2 | 判定ゲート — 美しさの検証と調整（**合格**） | `d861dba` `1a5f36a` `1662e52` |
 | T-27 | 2 | orphan ブランチと履歴の終端に印を付ける | `3339a0c` |
+| T-09 | 3 | 到達可能集合と ahead/behind の計算 | `77b13b1` |

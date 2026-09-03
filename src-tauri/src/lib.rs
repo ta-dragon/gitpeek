@@ -16,6 +16,7 @@ use git::detect::GitStatus;
 use git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
 use git::repo::{RepositoryEntry, RepositoryProbe};
 use git::snapshot::SnapshotCache;
+use graph::reach::BranchStatus;
 use graph::{GraphOrder, LaneLayout};
 use model::RepositorySnapshot;
 
@@ -54,7 +55,7 @@ impl<R: Runtime> ProgressSink for EmittingProgress<'_, R> {
         );
     }
 }
-use store::settings::{RepositorySettings, Settings};
+use store::settings::{RepositorySettings, Settings, VisibleRefs};
 use store::state::UiState;
 use store::{SettingsPayload, Store};
 
@@ -256,6 +257,7 @@ async fn compute_lane_layout(
     app: AppHandle,
     state: State<'_, AppState>,
     repository_id: String,
+    visible_refs: VisibleRefs,
     order: GraphOrder,
 ) -> Result<LaneLayout, String> {
     let repository = state.store.repository(&repository_id)?;
@@ -278,7 +280,44 @@ async fn compute_lane_layout(
             false,
             &Reporting::silent(),
         )?;
-        Ok(graph::layout(&snapshot, order))
+        Ok(graph::layout(&snapshot, &visible_refs, order))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// 上流を持つローカルブランチの ahead/behind（docs/DESIGN.md §4.5）。
+///
+/// **`git rev-list --count` は呼ばない。** ブランチ数だけプロセスを起動することになるので、
+/// 既に手元にあるコミットの親子関係から数える（CLAUDE.md §2）。
+/// 可視 ref には依らない（隠したブランチの ahead/behind も出す）。
+#[tauri::command]
+async fn compute_branch_status(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+) -> Result<Vec<BranchStatus>, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let cache = state.snapshots.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        let snapshot = git::snapshot::load_cached(
+            &EmittingLog::new(&handle, &log),
+            &program,
+            &path,
+            &cache,
+            &repository.id,
+            false,
+            &Reporting::silent(),
+        )?;
+        Ok(graph::reach::all_branch_status(&snapshot))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -367,6 +406,7 @@ pub fn run() {
             list_repositories,
             load_repository_snapshot,
             compute_lane_layout,
+            compute_branch_status,
             load_settings,
             save_settings,
             load_ui_state,
