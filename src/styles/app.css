@@ -1791,6 +1791,110 @@ body {
 /* ---------- コミット詳細 ---------- */
 
 /* 詰まったら縮んでよい（中でスクロールする）。一覧の下限を守るのが先。 */
+/* ---------- 作業ツリー（T-16） ---------- */
+
+/*
+ * 擬似行。**コミットの行と同じ高さ・同じ列**にする（グラフの座標が揃っているので、
+ * ここだけ高さを変えると以降が全部ずれる）。
+ */
+.crow--worktree {
+  border-bottom: 1px dashed var(--border);
+}
+
+.crow__worktreeTag {
+  flex: none;
+  margin-right: 6px;
+  padding: 0 6px;
+  border: 1px dashed var(--border-strong, var(--border));
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+/*
+ * **SVG をブロックにする。** 既定の inline だとベースラインの下に余白が付き、
+ * ノードが行の中心から 4px ほど上へずれる（実測）。
+ */
+.crow__graph svg {
+  display: block;
+}
+
+/* HEAD への接続。**まだコミットではない**ことを点線で示す。 */
+.graph__dotted {
+  fill: none;
+  stroke-dasharray: 3 3;
+  stroke-width: 2;
+}
+
+.wtree {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wtree__head {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+/* `.git/index.lock` の告知。**消す手段は出さない**（CLAUDE.md §2）。 */
+.wtree__lock {
+  flex: none;
+  margin: 0;
+  padding: 4px 12px;
+  background: var(--diff-del-bg);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.wtree__body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.wtree__section + .wtree__section {
+  border-top: 1px solid var(--border);
+}
+
+/* セクションの見出しは**貼り付ける**。長い一覧でどこにいるか分からなくなるため。 */
+.wtree__title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0;
+  padding: 4px 12px;
+  background: var(--bg-inset);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 衝突は直さないと先へ進めない。ここだけ色を付ける。 */
+.wtree__section--unmerged .wtree__title {
+  color: var(--danger);
+}
+
+/* 未追跡ファイルの全文。差分ではないので行の色分けをしない。 */
+.dtable--plain {
+  position: static;
+}
+
+.drow--plain {
+  position: static;
+  grid-template-columns: var(--dgutter) minmax(0, 1fr);
+  width: auto;
+}
+
 /* ---------- 2 点比較（T-15） ---------- */
 
 /*

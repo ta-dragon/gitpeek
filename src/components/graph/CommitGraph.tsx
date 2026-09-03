@@ -35,6 +35,11 @@ type Props = {
   selectedSha: string | null;
   /** グラフ列の幅。これより右のレーンは見えない（列を広げれば出る）。 */
   columnWidth: number;
+  /**
+   * 上に積まれている**レーン計算の対象外の行**の数（作業ツリーの擬似行。
+   * CLAUDE.md §3-6）。行番号の座標系は動かさず、**窓の置き場所だけ**ずらす。
+   */
+  rowOffset?: number;
 };
 
 export function CommitGraph({
@@ -46,6 +51,7 @@ export function CommitGraph({
   headSha,
   selectedSha,
   columnWidth,
+  rowOffset = 0,
 }: Props) {
   const width = graphWidth(maxLane);
 
@@ -88,7 +94,14 @@ export function CommitGraph({
     return map;
   }, [commits]);
 
-  const top = start * ROW_HEIGHT;
+  /**
+   * **窓の置き場所と viewBox は別。**
+   *
+   * 描く座標は行番号そのままなので、viewBox は擬似行を数えない。窓（`div`）だけを
+   * 擬似行のぶん下げる。両方に足すと打ち消し合って、グラフが 1 行ぶん上にずれる。
+   */
+  const viewTop = start * ROW_HEIGHT;
+  const top = (start + rowOffset) * ROW_HEIGHT;
   const height = (end - start) * ROW_HEIGHT;
 
   return (
@@ -99,7 +112,7 @@ export function CommitGraph({
       width={width}
       height={height}
       // 行番号そのままの座標で描けるよう、窓の位置を viewBox でずらす。
-      viewBox={`0 ${top} ${width} ${height}`}
+      viewBox={`0 ${viewTop} ${width} ${height}`}
       role="presentation"
       aria-hidden="true"
     >

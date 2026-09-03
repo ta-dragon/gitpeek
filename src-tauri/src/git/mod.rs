@@ -6,3 +6,4 @@ pub mod progress;
 pub mod refs;
 pub mod repo;
 pub mod snapshot;
+pub mod status;

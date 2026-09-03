@@ -13,6 +13,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { ContextMenu } from "../common/ContextMenu";
 import { CommitGraph } from "../graph/CommitGraph";
+import type { WorkingSummary } from "../../lib/workingTree";
+import { WorkingTreeRow } from "./WorkingTreeRow";
 import { useCommitNavigation } from "../../hooks/useCommitNavigation";
 import { ja } from "../../i18n/ja";
 import { graphWidth, ROW_HEIGHT } from "../../lib/graphPath";
@@ -55,6 +57,15 @@ type Props = {
   /** 2 点比較の比較元。`null` なら比較していない（T-15）。 */
   compareSha: string | null;
   /**
+   * 作業ツリーの擬似行（T-16。docs/DESIGN.md §7.5）。
+   * **クリーンなときは `null`** を渡して行ごと出さない。
+   */
+  worktree: {
+    summary: WorkingSummary;
+    selected: boolean;
+    onSelect: () => void;
+  } | null;
+  /**
    * 外から「この SHA を見せてほしい」と言われたとき（ブランチツリーのジャンプ）。
    * 連番が変わったときだけ動く。選択そのものは `selectedSha` が正。
    */
@@ -74,6 +85,7 @@ export function CommitList({
   dateFormat,
   selectedSha,
   compareSha,
+  worktree,
   jumpTo,
   order,
   onSelect,
@@ -101,8 +113,14 @@ export function CommitList({
     return list;
   }, [commits, layout]);
 
+  /**
+   * 擬似行のぶん。**レーン計算の対象外**なので `layout.rows` には無い（CLAUDE.md §3-6）。
+   * 行番号はこのぶんだけずれるので、グラフ側は `rowOffset` で下げて描く。
+   */
+  const extra = worktree === null ? 0 : 1;
+
   const virtualizer = useVirtualizer({
-    count: shown.length,
+    count: shown.length + extra,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: OVERSCAN,
@@ -129,21 +147,34 @@ export function CommitList({
   const refsBySha = useMemo(() => groupRefsBySha(refs), [refs]);
 
   /**
+   * 擬似行のノードを置くレーンと、HEAD へ点線を引いてよいか。
+   *
+   * **点線を引くのは HEAD が真下にあるときだけ。** 途中に別のコミットが挟まると、
+   * 線がどこへ向かっているのか分からなくなる（DESIGN.md §7.5）。
+   */
+  const headLane = head.sha === null ? 0 : (laneBySha.get(head.sha) ?? 0);
+  const connectedToHead = head.sha !== null && shown[0]?.sha === head.sha;
+
+  /**
    * その行が見えるところまでスクロールする。
    *
    * `scrollToIndex` を使わないのは、上端に寄せたときに **貼り付いた見出しの下に
    * 潜ってしまう**ため。見出しの高さを引いた範囲を可視域として自分で数える。
    */
-  const reveal = useCallback((row: number) => {
+  const reveal = useCallback(
+    (row: number) => {
     const element = scrollRef.current;
     if (element === null) return;
-    const top = HEAD_HEIGHT + row * ROW_HEIGHT;
+    // 行番号はコミットの並びのもの。擬似行のぶん下へずれている。
+    const top = HEAD_HEIGHT + (row + extra) * ROW_HEIGHT;
     if (top - HEAD_HEIGHT < element.scrollTop) {
       element.scrollTop = top - HEAD_HEIGHT;
     } else if (top + ROW_HEIGHT > element.scrollTop + element.clientHeight) {
       element.scrollTop = top + ROW_HEIGHT - element.clientHeight;
     }
-  }, []);
+    },
+    [extra],
+  );
 
   const anchorFor = useCallback(
     (row: number) => {
@@ -152,10 +183,11 @@ export function CommitList({
       const box = element.getBoundingClientRect();
       return {
         x: box.left + 120,
-        y: box.top + HEAD_HEIGHT + row * ROW_HEIGHT - element.scrollTop + ROW_HEIGHT,
+        y:
+          box.top + HEAD_HEIGHT + (row + extra) * ROW_HEIGHT - element.scrollTop + ROW_HEIGHT,
       };
     },
-    [],
+    [extra],
   );
 
   /** ジャンプとキーボード操作は**常に 1 点選択**（比較は Ctrl+クリックだけ）。 */
@@ -283,15 +315,37 @@ export function CommitList({
               rows={layout.rows}
               maxLane={layout.maxLane}
               commits={shown}
-              start={start}
-              end={end}
+              start={Math.max(0, start - extra)}
+              end={Math.max(0, end - extra)}
+              rowOffset={extra}
               headSha={head.sha}
               selectedSha={selectedSha}
               columnWidth={width}
             />
 
             {items.map((item) => {
-              const commit = shown[item.index];
+              // 擬似行は最上部の 1 行だけ。**コミットではない**ので別に描く。
+              if (worktree !== null && item.index === 0) {
+                return (
+                  <div
+                    key="worktree"
+                    className="commits__row"
+                    style={{ transform: `translateY(${item.start - HEAD_HEIGHT}px)` }}
+                  >
+                    <WorkingTreeRow
+                      summary={worktree.summary}
+                      selected={worktree.selected}
+                      columns={columns}
+                      graphWidth={width}
+                      headLane={headLane}
+                      connected={connectedToHead}
+                      onSelect={worktree.onSelect}
+                    />
+                  </div>
+                );
+              }
+
+              const commit = shown[item.index - extra];
               return (
                 <div
                   key={commit.sha}

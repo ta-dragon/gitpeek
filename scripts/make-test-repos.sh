@@ -29,6 +29,8 @@
 #   cloned         bare.git のクローン（リモート追跡ブランチと upstream）
 #   upstream.git   diverged の上流（bare）
 #   diverged       上流と分岐したクローン（ahead 2 / behind 3）
+#   dirty          作業ツリーが汚れたリポジトリ（ステージ済み / 未ステージ / 未追跡）
+#   conflict       マージ衝突で止まったリポジトリ（unmerged なパス）
 
 set -eu
 
@@ -248,6 +250,47 @@ repo=$root/diverged
 commit local1.txt "手元 1"
 commit local2.txt "手元 2"
 git_ -C "$repo" fetch --quiet origin
+
+# --- 作業ツリーが汚れたリポジトリ（T-16）------------------------------------
+# ステージ済み（変更とリネーム）／未ステージ／未追跡が同時にある状態にする。
+new_repo dirty
+printf 'a\n' >"$repo/staged.txt"
+printf 'b\n' >"$repo/unstaged.txt"
+printf 'c\n' >"$repo/古い名前.txt"
+mkdir -p "$repo/sub"
+printf 'd\n' >"$repo/sub/both.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "最初のコミット"
+
+# ステージ済み。
+printf 'a\nA\n' >"$repo/staged.txt"
+git_ -C "$repo" add staged.txt
+git_ -C "$repo" mv "古い名前.txt" "新しい名前.txt"
+# **1 つのファイルがステージ済みと未ステージの両方に出る**こともある。
+printf 'd\nD\n' >"$repo/sub/both.txt"
+git_ -C "$repo" add sub/both.txt
+printf 'd\nD\nDD\n' >"$repo/sub/both.txt"
+# 未ステージ。
+printf 'b\nB\n' >"$repo/unstaged.txt"
+# 未追跡（日本語名）。
+printf '未追跡の中身\n' >"$repo/未追跡.txt"
+
+# --- マージ衝突で止まったリポジトリ（T-16）----------------------------------
+# `--porcelain=v2` の `u` 記録を出すため。**アプリはマージしない**（CLAUDE.md §1）。
+new_repo conflict
+printf 'base\n' >"$repo/f.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "base"
+git_ -C "$repo" checkout --quiet -b other
+printf 'other\n' >"$repo/f.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "other 側"
+git_ -C "$repo" checkout --quiet main
+printf 'main\n' >"$repo/f.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "main 側"
+# 衝突して止まる。止まった状態がほしいので失敗を無視する。
+git_ -C "$repo" merge --quiet --no-edit other || true
 
 echo "生成しました: $root"
 ls "$root"

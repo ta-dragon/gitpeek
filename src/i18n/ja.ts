@@ -227,6 +227,33 @@ export const ja = {
     copyFailed: "クリップボードへコピーできませんでした。",
   },
 
+  // 作業ツリー（T-16。docs/DESIGN.md §7.5）。**read-only なので操作の文言は無い。**
+  workingTree: {
+    row: "作業ツリー",
+    title: "作業ツリーの変更",
+    reload: "取り直す",
+    sections: {
+      unmerged: "衝突",
+      staged: "ステージ済み",
+      unstaged: "未ステージ",
+      untracked: "未追跡",
+    },
+    count: {
+      unmerged: (n: number) => `衝突 ${n}`,
+      staged: (n: number) => `ステージ済み ${n}`,
+      unstaged: (n: number) => `未ステージ ${n}`,
+      untracked: (n: number) => `未追跡 ${n}`,
+    },
+    // 未追跡は差分にしない（全行追加の差分はノイズが大きすぎる）。
+    untrackedBody: "まだ git が知らないファイルです。差分ではなく全文を出しています。",
+    conflictBody: "衝突しています。解決は git のコマンドで行ってください。",
+    readFailed: "ファイルを読めませんでした",
+    tooLarge: (size: string) => `大きすぎるので表示しません（${size}）。`,
+    indexLock: "`.git/index.lock` が残っています。別の git が動いているかもしれません。",
+    empty: "作業ツリーに変更はありません。",
+    failed: "作業ツリーの状態を取得できませんでした",
+  },
+
   // 2 点比較（T-15。docs/DESIGN.md §10.3）。
   compare: {
     title: "2 点比較",

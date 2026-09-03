@@ -123,13 +123,6 @@ pub fn commit_detail(
         .ok_or_else(|| format!("コミットの本文を読み取れませんでした: {sha}"))
 }
 
-/// 変更ファイル一覧を取る。
-///
-/// `parent` が `None` のときは**ルートコミット**として扱い、空ツリーとの差分を出す。
-/// マージコミットでは呼び出し側がどの親と比べるかを決める（docs/DESIGN.md §7.4）。
-///
-/// **`--raw` と `--numstat` を 1 回の実行で両方出す。** raw から状態とファイルモード、
-/// numstat から増減行数とバイナリ判定が取れるので、2 回呼ぶ必要はない。
 /// 失敗を人間向けの文にする（CLAUDE.md §6）。
 ///
 /// **共通の祖先が無い 2 点だけは言い換える。** git は `no merge base` としか言わないので、
@@ -141,52 +134,101 @@ fn explain(output: &exec::GitOutput, context: &str) -> String {
     output.failure(context)
 }
 
-/// 比べる 2 点をコマンド引数にする。
+/// 何と何を比べるか。
 ///
-/// **`A...B` は 1 つの引数として渡す。** `A` と `B` に分けて渡すと
-/// ただの 2 点間差分（`A B`）になり、マージベース起点にならない。
-fn revisions(parent: &str, sha: &str, symmetric: bool) -> Vec<String> {
-    if symmetric {
-        vec![format!("{parent}...{sha}")]
-    } else {
-        vec![parent.to_string(), sha.to_string()]
+/// **コミット同士も作業ツリーもコマンドの組み立てが違うだけ**なので、ここで 1 つにまとめる。
+/// 呼び出し側は「何を見たいか」を選ぶだけでよい。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Revisions<'a> {
+    /// リビジョン 2 点。**`from` が `None` はルートコミット**（空ツリーとの差分）。
+    /// `symmetric` なら `A...B`（マージベース起点。docs/DESIGN.md §10.3）。
+    Range {
+        from: Option<&'a str>,
+        to: &'a str,
+        symmetric: bool,
+    },
+    /// 作業ツリー（docs/DESIGN.md §7.5）。
+    /// `staged` なら HEAD と index、そうでなければ index と作業ツリー。
+    WorkingTree { staged: bool },
+}
+
+impl Revisions<'_> {
+    /// ルートコミットは `git diff` では出せない（片側を指定できない）。
+    fn is_root_commit(&self) -> bool {
+        matches!(
+            self,
+            Self::Range {
+                from: None,
+                symmetric: _,
+                to: _
+            }
+        )
+    }
+
+    /// リビジョンを指す引数。
+    ///
+    /// **`A...B` は 1 つの引数として渡す。** `A` と `B` に分けて渡すと、git は
+    /// ただの 2 点間差分（`A B`）として扱い、マージベース起点にならない。
+    fn args(&self) -> Vec<String> {
+        match *self {
+            Self::Range {
+                from: Some(from),
+                to,
+                symmetric: true,
+            } => vec![format!("{from}...{to}")],
+            Self::Range {
+                from: Some(from),
+                to,
+                symmetric: false,
+            } => vec![from.to_string(), to.to_string()],
+            Self::Range { from: None, to, .. } => vec![to.to_string()],
+            // 作業ツリーはリビジョンを指さない（`--cached` の有無で決まる）。
+            Self::WorkingTree { .. } => Vec::new(),
+        }
+    }
+
+    /// `--cached`（HEAD と index を比べる）を付けるか。
+    fn cached(&self) -> bool {
+        matches!(self, Self::WorkingTree { staged: true })
     }
 }
 
+/// 変更ファイル一覧を取る。
+///
+/// **`--raw` と `--numstat` を 1 回の実行で両方出す。** raw から状態とファイルモード、
+/// numstat から増減行数とバイナリ判定が取れるので、2 回呼ぶ必要はない。
 pub fn changed_files(
     log: &dyn LogSink,
     program: &str,
     path: &Path,
-    parent: Option<&str>,
-    sha: &str,
-    symmetric: bool,
+    revisions: Revisions<'_>,
 ) -> Result<Vec<FileChange>, String> {
-    let output = match parent {
-        Some(parent) => {
-            let revisions = revisions(parent, sha, symmetric);
-            let mut args = vec!["diff", "--raw", "--numstat", "-z", "-M"];
-            args.extend(revisions.iter().map(String::as_str));
-            exec::run(log, program, Some(path), &args)?
-        }
+    let mut args: Vec<&str> = if revisions.is_root_commit() {
         // `git diff` はルートコミットを片側に取れない。`diff-tree --root` なら
         // 空ツリーとの差分として出せる（`-r` が無いとサブディレクトリを潜らない）。
-        None => exec::run(
-            log,
-            program,
-            Some(path),
-            &[
-                "diff-tree",
-                "--raw",
-                "--numstat",
-                "-z",
-                "-M",
-                "--root",
-                "--no-commit-id",
-                "-r",
-                sha,
-            ],
-        )?,
+        vec![
+            "diff-tree",
+            "--raw",
+            "--numstat",
+            "-z",
+            "-M",
+            "--root",
+            "--no-commit-id",
+            "-r",
+        ]
+    } else {
+        let mut base = vec!["diff"];
+        if revisions.cached() {
+            base.push("--cached");
+        }
+        base.extend(["--raw", "--numstat", "-z", "-M"]);
+        base
     };
+
+    let revision_args = revisions.args();
+    args.extend(revision_args.iter().map(String::as_str));
+
+    let output = exec::run(log, program, Some(path), &args)?;
     if !output.ok() {
         return Err(explain(&output, "変更ファイルの一覧を取得できませんでした"));
     }
@@ -253,7 +295,7 @@ fn parse_detail(stdout: &str) -> Option<CommitDetail> {
 /// **リネーム / コピーのレコードだけパスを 2 つ食う。** 数え間違えると以降が全部ずれるので、
 /// 状態欄を見てから読み進めること。raw 区間が先に来て、`:` で始まらないレコードから
 /// numstat 区間に変わる。
-fn parse_changes(stdout: &str) -> Vec<FileChange> {
+pub(super) fn parse_changes(stdout: &str) -> Vec<FileChange> {
     // 末尾の NUL で必ず空要素が出る。パス名が空になることは無いので落としてよい
     // （リネームの「空のパス欄」はレコードの内側なので、ここでは消えない）。
     let fields: Vec<&str> = stdout.split('\0').filter(|field| !field.is_empty()).collect();
@@ -412,19 +454,14 @@ pub struct FileDiff {
     pub hunks: Vec<Hunk>,
 }
 
-/// どのコミットのどのファイルを、どちらの親と比べるか。
+/// どのファイルを、何と何の間で見るか。
 #[derive(Debug, Clone, Copy)]
 pub struct DiffTarget<'a> {
-    /// `None` はルートコミット（空ツリーとの差分）。
-    pub parent: Option<&'a str>,
-    pub sha: &'a str,
+    pub revisions: Revisions<'a>,
     /// 変更後のパス。
     pub path: &'a str,
     /// **リネームのときは必ず入れる**（下記 [`file_diff`] の注意）。
     pub old_path: Option<&'a str>,
-    /// `A...B`（マージベース起点）で比べる。2 点比較のときだけ意味を持つ
-    /// （docs/DESIGN.md §10.3）。
-    pub symmetric: bool,
 }
 
 /// 差分の取り方。画面のトグルがそのまま入る。
@@ -450,8 +487,6 @@ impl Default for DiffOptions {
 
 /// ファイル 1 つの差分を取る。
 ///
-/// `parent` が `None` ならルートコミット（空ツリーとの差分）。
-///
 /// **リネームでは `old_path` も渡すこと。** pathspec に新しいパスだけを渡すと、
 /// git は対になる側が見えずリネームを検出できず、**全行が追加された新規ファイル**として
 /// 出る（実測）。
@@ -464,10 +499,9 @@ pub fn file_diff(
 ) -> Result<FileDiff, String> {
     let context = format!("-U{}", options.context_lines);
 
-    let mut args: Vec<&str> = match target.parent {
-        Some(_) => vec!["diff", "-M", &context],
+    let mut args: Vec<&str> = if target.revisions.is_root_commit() {
         // `git diff` はルートコミットを片側に取れない。`-p` が無いと patch が出ない。
-        None => vec![
+        vec![
             "diff-tree",
             "-p",
             "-M",
@@ -475,15 +509,19 @@ pub fn file_diff(
             "--root",
             "--no-commit-id",
             "-r",
-        ],
+        ]
+    } else {
+        let mut base = vec!["diff"];
+        if target.revisions.cached() {
+            base.push("--cached");
+        }
+        base.extend(["-M", &context]);
+        base
     };
     if options.ignore_whitespace {
         args.push("-w");
     }
-    let revisions = target
-        .parent
-        .map(|parent| revisions(parent, target.sha, target.symmetric))
-        .unwrap_or_else(|| vec![target.sha.to_string()]);
+    let revisions = target.revisions.args();
     args.extend(revisions.iter().map(String::as_str));
     args.push("--");
     // リネーム元を先に置く。`--` の後ろは pathspec なので順序は問われない。
@@ -555,11 +593,15 @@ fn binary_sizes(
     repo: &Path,
     target: &DiffTarget<'_>,
 ) -> (Option<u64>, Option<u64>) {
+    // **作業ツリーではサイズを出さない。** index と作業ツリーのバイト数は
+    // `ls-tree` では引けず、片側だけ正しい数を出すと嘘になる。
+    let Revisions::Range { from, to, .. } = target.revisions else {
+        return (None, None);
+    };
+
     let old_path = target.old_path.unwrap_or(target.path);
-    let old_size = target
-        .parent
-        .and_then(|parent| blob_size(log, program, repo, parent, old_path));
-    let new_size = blob_size(log, program, repo, target.sha, target.path);
+    let old_size = from.and_then(|from| blob_size(log, program, repo, from, old_path));
+    let new_size = blob_size(log, program, repo, to, target.path);
     (old_size, new_size)
 }
 

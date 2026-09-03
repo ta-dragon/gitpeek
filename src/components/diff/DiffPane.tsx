@@ -13,6 +13,7 @@ import { ja } from "../../i18n/ja";
 import { formatBytes, measureDiff, shouldCollapse } from "../../lib/diffRows";
 import {
   loadFileDiff,
+  type DiffSource,
   type FileChange,
   type FileDiff,
   type TextEncoding,
@@ -21,20 +22,34 @@ import {
 import { CollapsedNotice } from "./CollapsedNotice";
 import { DiffBody } from "./DiffBody";
 import { DiffToolbar } from "./DiffToolbar";
-import type { CommitFiles, DiffRange } from "./useCommitFiles";
+import { UntrackedFile } from "./UntrackedFile";
 
 type Props = {
   repositoryId: string;
-  selectedFile: string | null;
-  files: CommitFiles;
+  /**
+   * 何と何の差分か。**呼び出し側が決める**（コミット / 2 点比較 / 作業ツリー）。
+   * `null` なら何も選ばれていない。
+   */
+  source: DiffSource | null;
+  /** 選択中のファイル。差分を持たないもの（未追跡・衝突）は `null`。 */
+  change: FileChange | null;
+  /** 未追跡ファイルを選んでいるときのパス。**差分ではなく全文**を出す。 */
+  untrackedPath: string | null;
+  /** 衝突しているファイルを選んでいるときのパス。 */
+  conflictPath: string | null;
+  /** `Enter` でフォーカスを移す先。 */
+  bodyRef: React.RefObject<HTMLDivElement | null>;
   ui: UiSettings;
   onUiChange: (change: Partial<UiSettings>) => void;
 };
 
 export function DiffPane({
   repositoryId,
-  selectedFile,
-  files,
+  source,
+  change,
+  untrackedPath,
+  conflictPath,
+  bodyRef,
   ui,
   onUiChange,
 }: Props) {
@@ -54,26 +69,20 @@ export function DiffPane({
   const [expanded, setExpanded] = useState(false);
 
   const latest = useRef(0);
-  const bodyRef = useRef<HTMLDivElement>(null);
 
-  const change: FileChange | null =
-    files.changes.find((entry) => entry.path === selectedFile) ?? null;
-  /**
-   * **一覧を作ったときの 2 点をそのまま使う。** 詳細から組み直すと、
-   * 読み込み中に一覧と差分が別の組を見ることがある。
-   */
-  const range: DiffRange | null = files.range;
+  const sourceKey = JSON.stringify(source);
+  const selectedPath = change?.path ?? untrackedPath ?? conflictPath;
 
   // ファイルやコミットが変われば上書きは意味を失う。自動判別へ戻し、折りたたみ直す。
   useEffect(() => {
     setForcedEncoding(null);
     setExpanded(false);
-  }, [repositoryId, range?.from, range?.to, selectedFile]);
+  }, [repositoryId, sourceKey, selectedPath]);
 
   useEffect(() => {
     const request = (latest.current += 1);
 
-    if (range === null || change === null) {
+    if (source === null || change === null) {
       setDiff(null);
       setLoading(false);
       setError(null);
@@ -87,9 +96,7 @@ export function DiffPane({
       try {
         const loaded = await loadFileDiff({
           repositoryId,
-          sha: range.to,
-          parent: range.from,
-          symmetric: range.symmetric,
+          source,
           path: change.path,
           // **リネームでは古いパスも渡す。** 渡さないと git がリネームを検出できず、
           // 全行が追加された新規ファイルとして返る。
@@ -109,11 +116,10 @@ export function DiffPane({
       }
     })();
     // `change` そのものではなくパスを見る（一覧を取り直すたびに再取得しない）。
+    // `source` は呼び出しのたびに作り直されるので、素の値（JSON）で比べる。
   }, [
     repositoryId,
-    range?.from,
-    range?.to,
-    range?.symmetric,
+    sourceKey,
     change?.path,
     change?.oldPath,
     ui.contextLines,
@@ -124,7 +130,7 @@ export function DiffPane({
 
   return (
     // `tabIndex` は `Enter` でここへフォーカスを移すため（キーボードだけで差分へ入れる）。
-    <div className="dpane" ref={files.bodyRef} tabIndex={-1}>
+    <div className="dpane" ref={bodyRef} tabIndex={-1}>
       {change !== null && (
         <header className="dpane__head">
           <span className="dpane__path">{change.path}</span>
@@ -142,7 +148,7 @@ export function DiffPane({
         </header>
       )}
 
-      {range !== null && change !== null && (
+      {source !== null && change !== null && (
         <DiffToolbar
           diff={diff}
           layout={ui.diffLayout}
@@ -160,8 +166,11 @@ export function DiffPane({
 
       <div className="dpane__body" ref={bodyRef}>
         <Body
-          range={range}
+          repositoryId={repositoryId}
+          source={source}
           change={change}
+          untrackedPath={untrackedPath}
+          conflictPath={conflictPath}
           diff={diff}
           loading={loading}
           error={error}
@@ -180,8 +189,11 @@ export function DiffPane({
 }
 
 function Body({
-  range,
+  repositoryId,
+  source,
   change,
+  untrackedPath,
+  conflictPath,
   diff,
   loading,
   error,
@@ -191,8 +203,11 @@ function Body({
   onExpand,
   onRetry,
 }: {
-  range: DiffRange | null;
+  repositoryId: string;
+  source: DiffSource | null;
   change: FileChange | null;
+  untrackedPath: string | null;
+  conflictPath: string | null;
   diff: FileDiff | null;
   loading: boolean;
   error: string | null;
@@ -202,7 +217,22 @@ function Body({
   onExpand: () => void;
   onRetry: () => void;
 }) {
-  if (range === null) return <p className="dpane__pending">{ja.diff.empty}</p>;
+  // **未追跡は差分にしない**（docs/DESIGN.md §7.5）。全文をそのまま出す。
+  if (untrackedPath !== null) {
+    return (
+      <>
+        <p className="dpane__pending">{ja.workingTree.untrackedBody}</p>
+        <UntrackedFile repositoryId={repositoryId} path={untrackedPath} />
+      </>
+    );
+  }
+
+  // 衝突は差分にしない。**直す手段を持たない**ので、状態を告げるだけ（CLAUDE.md §1）。
+  if (conflictPath !== null) {
+    return <p className="dpane__pending">{ja.workingTree.conflictBody}</p>;
+  }
+
+  if (source === null) return <p className="dpane__pending">{ja.diff.empty}</p>;
   if (change === null) return <p className="dpane__pending">{ja.diff.selectFile}</p>;
 
   if (error !== null) {

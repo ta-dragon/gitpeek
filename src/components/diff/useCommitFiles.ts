@@ -10,11 +10,14 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useFileNavigation } from "../../hooks/useFileNavigation";
+
 import {
   loadChangedFiles,
   loadCommitDetail,
   type CommitDetail,
   type CommitMeta,
+  type DiffSource,
   type FileChange,
 } from "../../lib/ipc";
 
@@ -33,6 +36,11 @@ export type DiffScope =
 
 /** 実際に git へ渡した 2 点。`from` が null ならルートコミット（空ツリーとの差分）。 */
 export type DiffRange = { from: string | null; to: string; symmetric: boolean };
+
+/** そのまま差分の取得に渡せる形にする。 */
+export function rangeSource(range: DiffRange): DiffSource {
+  return { kind: "range", parent: range.from, sha: range.to, symmetric: range.symmetric };
+}
 
 export type CommitFiles = {
   /** **2 点比較では null**（`show -s` は 1 点のためのもの）。 */
@@ -163,46 +171,9 @@ export function useCommitFiles({
     // 選択を書き戻すたびにこの効果が回って往復する。
   }, [changes]);
 
-  const step = useCallback(
-    (delta: number) => {
-      if (changes.length === 0) return;
-      const current = changes.findIndex((change) => change.path === selectedFile);
-      const next = Math.min(changes.length - 1, Math.max(0, (current < 0 ? 0 : current) + delta));
-      onSelectFile(changes[next].path);
-    },
-    [changes, selectedFile, onSelectFile],
-  );
-
-  // `Alt+↑` / `Alt+↓` で前 / 次のファイル、`Enter` で差分ペインへフォーカス
-  // （docs/DESIGN.md §6.5。T-07 で保留していた 3 つ）。
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      // 入力欄では横取りしない（SHA ジャンプ欄で Enter が効かなくなる）。
-      if (target !== null && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
-
-      if (event.altKey && !event.ctrlKey && !event.metaKey) {
-        if (event.key === "ArrowUp") {
-          event.preventDefault();
-          step(-1);
-        } else if (event.key === "ArrowDown") {
-          event.preventDefault();
-          step(1);
-        }
-        return;
-      }
-
-      if (event.key === "Enter" && !event.altKey && !event.ctrlKey && !event.metaKey) {
-        const element = bodyRef.current;
-        if (element === null) return;
-        event.preventDefault();
-        element.focus();
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [step]);
+  // `Alt+↑` / `Alt+↓` と `Enter`（作業ツリーの一覧と同じものを使う）。
+  const paths = useMemo(() => changes.map((change) => change.path), [changes]);
+  useFileNavigation({ keys: paths, selected: selectedFile, onSelect: onSelectFile, bodyRef });
 
   const parentsInGraph = useMemo(
     () => (detail?.parents ?? []).map((parent) => commitBySha.get(parent) ?? null),

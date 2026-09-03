@@ -99,7 +99,7 @@ export function FileList({
           <ul className="flist__rows">
             {changes.map((change) => (
               <li key={change.path}>
-                <Row
+                <FileRow
                   change={change}
                   depth={0}
                   flat
@@ -145,7 +145,7 @@ function TreeNode({
   if (node.kind === "file") {
     return (
       <li>
-        <Row
+        <FileRow
           change={node.change}
           depth={depth}
           flat={false}
@@ -181,7 +181,8 @@ function TreeNode({
   );
 }
 
-function Row({
+/** 1 行。**作業ツリーの一覧（`WorkingTreeFiles`）でも使う**ので export してある。 */
+export function FileRow({
   change,
   depth,
   flat,

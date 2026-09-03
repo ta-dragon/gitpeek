@@ -11,7 +11,7 @@ mod common;
 
 use givsoner_lib::encoding::{LineEnding, TextEncoding};
 use givsoner_lib::git::diff::{
-    self, ChangeStatus, DiffLineKind, DiffOptions, DiffTarget, FileChange, FileDiff,
+    self, ChangeStatus, DiffLineKind, DiffOptions, DiffTarget, FileChange, FileDiff, Revisions,
 };
 use givsoner_lib::git::snapshot;
 use givsoner_lib::model::{CommitMeta, RepositorySnapshot};
@@ -33,8 +33,17 @@ fn commit_by_subject<'a>(snapshot: &'a RepositorySnapshot, subject: &str) -> &'a
 }
 
 fn changes_of(repo: &str, parent: Option<&str>, sha: &str) -> Vec<FileChange> {
-    diff::changed_files(&log(), "git", &fixtures().join(repo), parent, sha, false)
-        .unwrap_or_else(|error| panic!("{repo} の変更ファイルを取れません: {error}"))
+    diff::changed_files(
+        &log(),
+        "git",
+        &fixtures().join(repo),
+        Revisions::Range {
+            from: parent,
+            to: sha,
+            symmetric: false,
+        },
+    )
+    .unwrap_or_else(|error| panic!("{repo} の変更ファイルを取れません: {error}"))
 }
 
 /// 2 点比較（T-15）。`symmetric` なら `A...B`（マージベース起点）。
@@ -48,9 +57,11 @@ fn compare(
         &log(),
         "git",
         &fixtures().join(repo),
-        Some(from),
-        to,
-        symmetric,
+        Revisions::Range {
+            from: Some(from),
+            to,
+            symmetric,
+        },
     )
 }
 
@@ -251,7 +262,17 @@ fn an_unknown_sha_is_an_error() {
     let missing = "0000000000000000000000000000000000000000";
     assert!(diff::commit_detail(&log(), "git", &fixtures().join("linear"), missing).is_err());
     assert!(
-        diff::changed_files(&log(), "git", &fixtures().join("linear"), None, missing, false).is_err()
+        diff::changed_files(
+            &log(),
+            "git",
+            &fixtures().join("linear"),
+            Revisions::Range {
+                from: None,
+                to: missing,
+                symmetric: false,
+            },
+        )
+        .is_err()
     );
 }
 
@@ -270,11 +291,13 @@ fn diff_of(
         "git",
         &fixtures().join(repo),
         &DiffTarget {
-            parent,
-            sha,
+            revisions: Revisions::Range {
+                from: parent,
+                to: sha,
+                symmetric: false,
+            },
             path,
             old_path,
-            symmetric: false,
         },
         options,
     )
@@ -619,11 +642,13 @@ fn a_file_diff_can_compare_two_commits() {
         "git",
         &fixtures().join("branch-merge"),
         &DiffTarget {
-            parent: Some(feature),
-            sha: main,
+            revisions: Revisions::Range {
+                from: Some(feature),
+                to: main,
+                symmetric: true,
+            },
             path: "main.txt",
             old_path: None,
-            symmetric: true,
         },
         &DiffOptions::default(),
     )

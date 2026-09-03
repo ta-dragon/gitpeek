@@ -5,7 +5,23 @@ import { CommandLogPanel } from "./components/commandlog/CommandLogPanel";
 import { CommitList } from "./components/commits/CommitList";
 import { CommitInfo } from "./components/diff/CommitInfo";
 import { DiffPane } from "./components/diff/DiffPane";
-import { useCommitFiles, type DiffScope } from "./components/diff/useCommitFiles";
+import {
+  rangeSource,
+  useCommitFiles,
+  type DiffScope,
+} from "./components/diff/useCommitFiles";
+import { useWorkingTree } from "./components/diff/useWorkingTree";
+import { WorkingTreeFiles } from "./components/diff/WorkingTreeFiles";
+import { useFileNavigation } from "./hooks/useFileNavigation";
+import {
+  entryKey,
+  isClean,
+  parseKey,
+  stillListed,
+  summarize,
+  workingEntries,
+  type WorkingSelection,
+} from "./lib/workingTree";
 import { CommandPalette } from "./components/common/CommandPalette";
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
@@ -25,6 +41,7 @@ import {
   MIN_VERSION_FALLBACK,
   type ColumnWidths,
   type CommitMeta,
+  type DiffSource,
   type GitStatus,
   type LoadPhase,
   type RepositoryEntry,
@@ -442,6 +459,7 @@ function CommitWorkspace({
 
   // 遷移そのものは純関数（`lib/compareSelection.ts`）。ここは保存するだけ。
   const select = (sha: string, compare: boolean) => {
+    setViewingWorking(false);
     updateRepositoryUiState(entry.id, (current) => ({
       ...current,
       ...selectCommit(current, sha, compare),
@@ -489,13 +507,69 @@ function CommitWorkspace({
         ? { kind: "commit", sha: to }
         : { kind: "compare", from: compareFrom, to, symmetric };
 
+  /**
+   * 作業ツリー（docs/DESIGN.md §7.5）。**選択中のコミットに関わらず常に取る** —
+   * 擬似行を出すかどうかの判断に要るため。
+   */
+  const working = useWorkingTree(entry.id);
+  const workingList = useMemo(() => workingEntries(working.tree), [working.tree]);
+
+  /**
+   * 作業ツリーを見ているか。**永続化しない** — 次に開いたときにはクリーンかもしれない。
+   */
+  const [viewingWorking, setViewingWorking] = useState(false);
+  const [workingSelection, setWorkingSelection] = useState<WorkingSelection | null>(null);
+
+  // クリーンになったら擬似行ごと消えるので、見ていたなら戻す。
+  useEffect(() => {
+    if (isClean(working.tree)) setViewingWorking(false);
+  }, [working.tree]);
+
+  // 外部で `git add` されると、選んでいた行がセクションごと消えることがある。
+  useEffect(() => {
+    if (workingList.length === 0) {
+      setWorkingSelection(null);
+      return;
+    }
+    setWorkingSelection((current) =>
+      stillListed(workingList, current) ? current : workingList[0],
+    );
+  }, [workingList]);
+
   const files = useCommitFiles({
     repositoryId: entry.id,
-    scope,
+    // 作業ツリーを見ているあいだはコミットの一覧を取りに行かない。
+    scope: viewingWorking ? null : scope,
     commits: data.commits,
     selectedFile: perRepository.selectedFile,
     onSelectFile: selectFile,
   });
+
+  // 一覧のキーボード操作は作業ツリーでも同じ（`Alt+↑` / `Alt+↓` / `Enter`）。
+  useFileNavigation({
+    keys: viewingWorking ? workingList.map(entryKey) : [],
+    selected: workingSelection === null ? null : entryKey(workingSelection),
+    onSelect: (key) => setWorkingSelection(parseKey(key)),
+    bodyRef: files.bodyRef,
+  });
+
+  const workingEntry =
+    workingSelection === null
+      ? null
+      : (workingList.find((item) => entryKey(item) === entryKey(workingSelection)) ?? null);
+
+  /** 差分の出どころ。**呼び出し側で決めて `DiffPane` へ渡す。** */
+  const diffSource: DiffSource | null = viewingWorking
+    ? workingEntry === null || workingEntry.change === null
+      ? null
+      : { kind: "workingTree", staged: workingEntry.section === "staged" }
+    : files.range === null
+      ? null
+      : rangeSource(files.range);
+
+  const diffChange = viewingWorking
+    ? (workingEntry?.change ?? null)
+    : (files.changes.find((change) => change.path === perRepository.selectedFile) ?? null);
 
   return (
     <SplitPane
@@ -532,8 +606,17 @@ function CommitWorkspace({
               head={data.head}
               columns={perRepository.columnWidths}
               dateFormat={ui.dateFormat}
-              selectedSha={perRepository.selectedCommit}
+              selectedSha={viewingWorking ? null : perRepository.selectedCommit}
               compareSha={compareFrom}
+              worktree={
+                isClean(working.tree)
+                  ? null
+                  : {
+                      summary: summarize(working.tree),
+                      selected: viewingWorking,
+                      onSelect: () => setViewingWorking(true),
+                    }
+              }
               jumpTo={jumpTo}
               order={order}
               onSelect={select}
@@ -544,8 +627,19 @@ function CommitWorkspace({
           second={
             <DiffPane
               repositoryId={entry.id}
-              selectedFile={perRepository.selectedFile}
-              files={files}
+              source={diffSource}
+              change={diffChange}
+              untrackedPath={
+                workingEntry?.section === "untracked" && viewingWorking
+                  ? workingEntry.path
+                  : null
+              }
+              conflictPath={
+                workingEntry?.section === "unmerged" && viewingWorking
+                  ? workingEntry.path
+                  : null
+              }
+              bodyRef={files.bodyRef}
               ui={ui}
               onUiChange={(change) =>
                 void updateSettings((current) => ({
@@ -558,6 +652,22 @@ function CommitWorkspace({
         />
       }
       second={
+        viewingWorking ? (
+          working.tree === null ? (
+            <div className="cinfo cinfo--empty">
+              <p>{working.error ?? ja.diff.loading}</p>
+            </div>
+          ) : (
+            <div className="cinfo">
+              <WorkingTreeFiles
+                tree={working.tree}
+                selected={workingSelection}
+                onSelect={setWorkingSelection}
+                onReload={working.reload}
+              />
+            </div>
+          )
+        ) : (
         <CommitInfo
           sha={to}
           compare={
@@ -578,6 +688,7 @@ function CommitWorkspace({
           onSelectFile={selectFile}
           onNotice={onNotice}
         />
+        )
       }
     />
   );

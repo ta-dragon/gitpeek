@@ -16,6 +16,7 @@ use commandlog::{CommandLog, CommandLogEntry, EmittingLog};
 use git::detect::GitStatus;
 use encoding::TextEncoding;
 use git::diff::{CommitDetail, DiffOptions, DiffTarget, FileChange, FileDiff};
+use git::status::{WorkingFile, WorkingTree};
 use git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
 use git::repo::{RepositoryEntry, RepositoryProbe};
 use git::snapshot::SnapshotCache;
@@ -382,13 +383,92 @@ async fn load_changed_files(
             &EmittingLog::new(&handle, &log),
             &program,
             &path,
-            parent.as_deref(),
-            &sha,
-            symmetric,
+            git::diff::Revisions::Range {
+                from: parent.as_deref(),
+                to: &sha,
+                symmetric,
+            },
         )
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+/// 作業ツリーの状態（docs/DESIGN.md §7.5）。
+///
+/// **read-only。** stage / unstage / discard / stash を提供する経路は無い（CLAUDE.md §1）。
+#[tauri::command]
+async fn load_working_tree(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+) -> Result<WorkingTree, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        git::status::working_tree(&EmittingLog::new(&handle, &log), &program, &path)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// 未追跡ファイルの全文（docs/DESIGN.md §7.5）。
+///
+/// **差分にはしない。** 全行追加の差分は視覚的ノイズが大きすぎる。
+#[tauri::command]
+async fn load_working_file(
+    state: State<'_, AppState>,
+    repository_id: String,
+    path: String,
+) -> Result<WorkingFile, String> {
+    let repository = state.store.repository(&repository_id)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        git::status::read_working_file(&PathBuf::from(&repository.path), &path)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// 差分の出どころ。フロントの `DiffScope` と同じ形（`kind` で分かれる）。
+///
+/// **真偽値を並べるのではなく種類で分ける。** `parent` / `sha` / `symmetric` /
+/// 「作業ツリーか」を平らに並べると、成り立たない組み合わせが表現できてしまう。
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum DiffSource {
+    /// リビジョン 2 点。`parent` が `None` はルートコミット。
+    Range {
+        parent: Option<String>,
+        sha: String,
+        symmetric: bool,
+    },
+    /// 作業ツリー。`staged` なら HEAD と index、そうでなければ index と作業ツリー。
+    WorkingTree { staged: bool },
+}
+
+impl DiffSource {
+    fn revisions(&self) -> git::diff::Revisions<'_> {
+        match self {
+            Self::Range {
+                parent,
+                sha,
+                symmetric,
+            } => git::diff::Revisions::Range {
+                from: parent.as_deref(),
+                to: sha,
+                symmetric: *symmetric,
+            },
+            Self::WorkingTree { staged } => git::diff::Revisions::WorkingTree { staged: *staged },
+        }
+    }
 }
 
 /// ファイル 1 つ分の差分（docs/DESIGN.md §7.2, §9）。
@@ -403,9 +483,7 @@ async fn load_file_diff(
     app: AppHandle,
     state: State<'_, AppState>,
     repository_id: String,
-    sha: String,
-    parent: Option<String>,
-    symmetric: bool,
+    source: DiffSource,
     path: String,
     old_path: Option<String>,
     context_lines: u32,
@@ -427,11 +505,9 @@ async fn load_file_diff(
             &program,
             &repo_path,
             &DiffTarget {
-                parent: parent.as_deref(),
-                sha: &sha,
+                revisions: source.revisions(),
                 path: &path,
                 old_path: old_path.as_deref(),
-                symmetric,
             },
             &DiffOptions {
                 context_lines,
@@ -531,6 +607,8 @@ pub fn run() {
             load_commit_detail,
             load_changed_files,
             load_file_diff,
+            load_working_tree,
+            load_working_file,
             load_settings,
             save_settings,
             load_ui_state,

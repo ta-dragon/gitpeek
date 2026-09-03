@@ -396,6 +396,46 @@ export type FileDiff = {
   hunks: Hunk[];
 };
 
+/* ---------- 作業ツリー（`src-tauri/src/git/status.rs`）---------- */
+
+/**
+ * 作業ツリーの状態（docs/DESIGN.md §7.5）。**read-only。**
+ * stage / unstage / discard / stash を頼む経路はここに無い（CLAUDE.md §1）。
+ */
+export type WorkingTree = {
+  /** HEAD と index の差。 */
+  staged: FileChange[];
+  /** index と作業ツリーの差。 */
+  unstaged: FileChange[];
+  /** 未追跡ファイルのパス。**差分にはしない**（全文で見せる）。 */
+  untracked: string[];
+  /** 衝突しているパス。ステージ済みでも未ステージでもない。 */
+  unmerged: string[];
+  /** `.git/index.lock` が残っている。**消さない。表示するだけ。** */
+  indexLockPresent: boolean;
+};
+
+/** どのセクションのファイルか。差分の取り方がこれで決まる。 */
+export type WorkingSection = "staged" | "unstaged" | "untracked" | "unmerged";
+
+/** 未追跡ファイルの中身。 */
+export type WorkingFile = {
+  path: string;
+  size: number;
+  /** バイナリでも大きすぎるときでも null。 */
+  text: DecodedText | null;
+  binary: boolean;
+  tooLarge: boolean;
+};
+
+export function loadWorkingTree(repositoryId: string): Promise<WorkingTree> {
+  return invoke<WorkingTree>("load_working_tree", { repositoryId });
+}
+
+export function loadWorkingFile(repositoryId: string, path: string): Promise<WorkingFile> {
+  return invoke<WorkingFile>("load_working_file", { repositoryId, path });
+}
+
 /** コンテキスト行の選択肢。「すべて」は十分大きな `-U` で代用する。 */
 export const ALL_CONTEXT_LINES = 1_000_000;
 
@@ -406,12 +446,17 @@ export const ALL_CONTEXT_LINES = 1_000_000;
  * リネームを検出できず、**全行が追加された新規ファイル**として返す。
  * `parent` は `loadChangedFiles` と同じく **null がルートコミット**。
  */
+/**
+ * 差分の出どころ。**真偽値を並べず種類で分ける** — 平らに並べると
+ * 成り立たない組み合わせ（作業ツリーなのに SHA がある等）が表現できてしまう。
+ */
+export type DiffSource =
+  | { kind: "range"; parent: string | null; sha: string; symmetric: boolean }
+  | { kind: "workingTree"; staged: boolean };
+
 export function loadFileDiff(options: {
   repositoryId: string;
-  sha: string;
-  parent: string | null;
-  /** `A...B`（マージベース起点）で比べる。2 点比較のときだけ意味を持つ。 */
-  symmetric: boolean;
+  source: DiffSource;
   path: string;
   oldPath: string | null;
   contextLines: number;
