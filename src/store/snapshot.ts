@@ -9,9 +9,11 @@ import { useSyncExternalStore } from "react";
 
 import {
   ALL_REFS,
+  computeBranchStatus,
   computeLaneLayout,
   loadRepositorySnapshot,
   onSnapshotProgress,
+  type BranchStatus,
   type GraphOrder,
   type LaneLayout,
   type RepositorySnapshot,
@@ -47,6 +49,11 @@ export type SnapshotState = {
    * 正は `settings.json` の側で、ここに持つのは表示中の写し。
    */
   visibleRefs: VisibleRefs;
+  /**
+   * 上流を持つローカルブランチの ahead/behind（docs/DESIGN.md §4.5）。
+   * 可視 ref とは無関係なので、絞り込みでは引き直さない。
+   */
+  branchStatus: BranchStatus[];
   loading: boolean;
   error: string | null;
   /**
@@ -63,12 +70,16 @@ export type SnapshotState = {
   oversized: number | null;
 };
 
+/** 参照が毎回変わるとツリーが毎回組み直しになる。空のときは同じ配列を使う。 */
+const NO_BRANCH_STATUS: BranchStatus[] = [];
+
 let snapshot: SnapshotState = {
   repositoryId: null,
   data: null,
   layout: null,
   order: "topo",
   visibleRefs: ALL_REFS,
+  branchStatus: NO_BRANCH_STATUS,
   loading: false,
   error: null,
   elapsedMs: null,
@@ -136,6 +147,7 @@ export async function load(
       repositoryId: null,
       data: null,
       layout: null,
+      branchStatus: NO_BRANCH_STATUS,
       loading: false,
       error: null,
       elapsedMs: null,
@@ -154,6 +166,7 @@ export async function load(
       repositoryId: id,
       data: null,
       layout: null,
+      branchStatus: NO_BRANCH_STATUS,
       loading: false,
       error: null,
       elapsedMs: null,
@@ -168,6 +181,7 @@ export async function load(
     data: null,
     layout: null,
     visibleRefs: visible,
+    branchStatus: NO_BRANCH_STATUS,
     loading: true,
     error: null,
     elapsedMs: null,
@@ -189,6 +203,7 @@ export async function load(
       repositoryId: id,
       data,
       layout,
+      branchStatus: NO_BRANCH_STATUS,
       loading: false,
       error: null,
       elapsedMs: Math.round(performance.now() - started),
@@ -200,6 +215,11 @@ export async function load(
       ...current,
       lastCommitCount: data.commits.length,
     }));
+
+    // ahead/behind はグラフを出すのに要らない。待たせずに後から埋める。
+    const status = await branchStatusOrEmpty(id);
+    if (request !== latestRequest) return;
+    setSnapshot({ branchStatus: status });
   } catch (error) {
     if (request !== latestRequest) return;
     // 読めなくても一覧と切替は使えるままにする。空状態には落とさない。
@@ -207,6 +227,7 @@ export async function load(
       repositoryId: id,
       data: null,
       layout: null,
+      branchStatus: NO_BRANCH_STATUS,
       loading: false,
       error: messageOf(error),
       progress: null,
@@ -246,6 +267,21 @@ export async function setVisibleRefs(visibleRefs: VisibleRefs): Promise<void> {
   const layout = await layoutOrNull(id, visibleRefs, snapshot.order);
   if (request !== latestRequest) return;
   setSnapshot({ layout });
+}
+
+/**
+ * ahead/behind を数える。失敗しても数値を出さないだけに留める。
+ *
+ * `git rev-list` は走らない（メモリ上のグラフから数える — CLAUDE.md §2）ので、
+ * 読み込みの直後に呼んでもプロセスは増えない。
+ */
+async function branchStatusOrEmpty(id: string): Promise<BranchStatus[]> {
+  try {
+    const status = await computeBranchStatus(id);
+    return status.length === 0 ? NO_BRANCH_STATUS : status;
+  } catch {
+    return NO_BRANCH_STATUS;
+  }
 }
 
 /** レーンを引く。失敗はグラフを出さないだけに留める。 */

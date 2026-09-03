@@ -13,6 +13,7 @@ import {
   removeRepository,
   scanRepositories,
   type RepositoryEntry,
+  type VisibleRefs,
 } from "../lib/ipc";
 import { refreshSettings, updateSettings } from "./settings";
 // 名前が衝突するので別名で入れる（このファイルの `snapshot` はリポジトリ一覧の状態）。
@@ -176,6 +177,31 @@ export async function relocate(id: string, path: string): Promise<void> {
     // 選択中なら読み直す（Rust 側のキャッシュも force で飛ばす）。
     if (history.currentRepositoryId() === id) await history.load(id, true);
   });
+}
+
+/**
+ * グラフに出す ref を絞り直し、リポジトリごとの設定として保存する。
+ *
+ * 画面（レーンの引き直し）は `store/snapshot` が、保存は `settings.json` の
+ * `repositories[].visibleRefs` が受け持つ。**両方をここで揃える**のは、
+ * 片方だけ更新すると次の起動で絞り込みが消えるため。
+ */
+export async function setVisibleRefs(id: string, visibleRefs: VisibleRefs): Promise<void> {
+  // 先に画面へ反映する。保存は数十 ms 遅れても構わないが、線が減るのは即時がよい。
+  void history.setVisibleRefs(visibleRefs);
+
+  setSnapshot({
+    entries: snapshot.entries.map((entry) =>
+      entry.id === id ? { ...entry, visibleRefs } : entry,
+    ),
+  });
+
+  await updateSettings((current) => ({
+    ...current,
+    repositories: current.repositories.map((repository) =>
+      repository.id === id ? { ...repository, visibleRefs } : repository,
+    ),
+  }));
 }
 
 /** 手動並べ替えの結果を `settings.json` の `order` に書く。 */

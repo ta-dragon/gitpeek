@@ -175,6 +175,54 @@ export const ja = {
     empty: "コミットがありません。",
   },
 
+  refTree: {
+    title: "ブランチ / タグ",
+    filterPlaceholder: "ブランチ・タグを絞り込み",
+    filterClear: "絞り込みを消す",
+    empty: "ref がありません。",
+    filterEmpty: "一致する ref がありません。",
+
+    // 最上段のグループ。リモートは `リモート > origin` のように名前を添える。
+    groupLocal: "ローカル",
+    groupRemote: (remote: string) => `リモート > ${remote}`,
+    groupTag: "タグ",
+    groupCount: (n: number) => `${n}`,
+
+    // 表示 ON/OFF のプリセット（docs/DESIGN.md §4.4）。
+    presetAll: "全選択",
+    presetNone: "全解除",
+    presetLocal: "ローカルのみ",
+    presetRemote: "リモートのみ",
+    // タグにチェックが無い理由。プリセット行のホバーで出す。
+    presetHint:
+      "チェックはグラフの起点になるブランチだけに効きます。タグは起点にしないため、" +
+      "チェックボックスを置いていません（docs/DESIGN.md §4.2）。",
+    checkHint: (shortName: string) => `${shortName} をグラフに出す`,
+
+    // ahead/behind（docs/DESIGN.md §4.5）。上流の無いブランチには何も出さない。
+    ahead: (n: number) => `↑${n}`,
+    behind: (n: number) => `↓${n}`,
+    upstreamSynced: (upstream: string) => `上流 ${upstream} と同じ`,
+    upstreamDiff: (upstream: string, ahead: number, behind: number) =>
+      `上流 ${upstream} より ${ahead} 件進み / ${behind} 件遅れ`,
+
+    // ref に付く印。
+    outOfGraph: "外",
+    outOfGraphHint: "読み込んだコミットの外を指しています。ジャンプできません。",
+    headHint: "HEAD が乗っています",
+
+    // 右クリックメニュー。
+    checkout: "checkout",
+    merge: "現在のブランチに FF マージ",
+    notYet: "T-18 で実装します。",
+    onlyThis: "このブランチだけ表示",
+    jump: "先頭コミットへジャンプ",
+    copyName: "名前をコピー",
+    copySha: "SHA をコピー",
+    copied: (text: string) => `コピーしました: ${text}`,
+    copyFailed: "クリップボードへコピーできませんでした。",
+  },
+
   graph: {
     title: "コミットグラフ",
     // 仮想スクロールが入るまでの仮の蓋（T-07 で外す）。

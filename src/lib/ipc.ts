@@ -392,7 +392,11 @@ export type RepositoryUiState = {
   selectedCommit: string | null;
   scrollOffset: number;
   selectedFile: string | null;
-  expandedTreeNodes: string[];
+  /**
+   * ブランチ / タグツリーで**畳んでいる**ノードの ID（T-10）。
+   * 展開ではなく畳んだ側を持つので、空配列は「すべて既定（＝展開）」を意味する。
+   */
+  collapsedTreeNodes: string[];
   columnWidths: ColumnWidths;
 };
 

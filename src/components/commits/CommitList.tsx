@@ -8,7 +8,7 @@
  * 仮想スクロールは `@tanstack/react-virtual`。行高は `graphPath.ts` の `ROW_HEIGHT`
  * 固定で、計測はしない（数万行を計測すると開くたびにレイアウトが走る）。
  */
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { ContextMenu } from "../common/ContextMenu";
@@ -44,6 +44,7 @@ const OVERSCAN = 12;
 const HEAD_HEIGHT = 26;
 
 type Props = {
+  /** 読み込んだ全コミット。**並べる順と件数を決めるのは `layout.rows`。** */
   commits: CommitMeta[];
   layout: LaneLayout;
   refs: RefEntry[];
@@ -51,6 +52,11 @@ type Props = {
   columns: ColumnWidths;
   dateFormat: UiSettings["dateFormat"];
   selectedSha: string | null;
+  /**
+   * 外から「この SHA を見せてほしい」と言われたとき（ブランチツリーのジャンプ）。
+   * 連番が変わったときだけ動く。選択そのものは `selectedSha` が正。
+   */
+  jumpTo: { sha: string; nonce: number } | null;
   order: GraphOrder;
   onSelect: (sha: string) => void;
   onColumnsChange: (next: ColumnWidths) => void;
@@ -65,6 +71,7 @@ export function CommitList({
   columns,
   dateFormat,
   selectedSha,
+  jumpTo,
   order,
   onSelect,
   onColumnsChange,
@@ -74,8 +81,25 @@ export function CommitList({
   const [jump, setJump] = useState("");
   const [jumpMissed, setJumpMissed] = useState(false);
 
+  /**
+   * 実際に並べるコミット。**`layout.rows` が正**で、`commits` はその材料。
+   *
+   * レーンは可視 ref で絞られ、並び順（topo / date）でも組み替わる。行の文字を
+   * `commits` の添字で引くと、**絞り込みや date 表示でグラフと 1 行ずつずれる**。
+   * どちらの経路でも `rows` に合わせる。
+   */
+  const shown = useMemo(() => {
+    const bySha = new Map(commits.map((commit) => [commit.sha, commit]));
+    const list: CommitMeta[] = [];
+    for (const row of layout.rows) {
+      const commit = bySha.get(row.sha);
+      if (commit !== undefined) list.push(commit);
+    }
+    return list;
+  }, [commits, layout]);
+
   const virtualizer = useVirtualizer({
-    count: commits.length,
+    count: shown.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: OVERSCAN,
@@ -89,9 +113,9 @@ export function CommitList({
 
   const indexBySha = useMemo(() => {
     const map = new Map<string, number>();
-    commits.forEach((commit, i) => map.set(commit.sha, i));
+    shown.forEach((commit, i) => map.set(commit.sha, i));
     return map;
-  }, [commits]);
+  }, [shown]);
 
   const laneBySha = useMemo(() => {
     const map = new Map<string, number>();
@@ -131,27 +155,38 @@ export function CommitList({
     [],
   );
 
+  // ブランチツリーからのジャンプ。処理済みの連番を覚えておき、再描画では動かない。
+  const handledJump = useRef(0);
+  useEffect(() => {
+    if (jumpTo === null || jumpTo.nonce === handledJump.current) return;
+    handledJump.current = jumpTo.nonce;
+    const row = indexBySha.get(jumpTo.sha);
+    if (row === undefined) return;
+    onSelect(jumpTo.sha);
+    reveal(row);
+  }, [jumpTo, indexBySha, onSelect, reveal]);
+
   const { choice, closeChoice } = useCommitNavigation({
-    commits,
+    commits: shown,
     indexBySha,
     selectedSha,
     headSha: head.sha,
     onSelect,
     onReveal: reveal,
     anchorFor,
-    enabled: commits.length > 0,
+    enabled: shown.length > 0,
   });
 
   /** SHA ジャンプ。前方一致で最初に当たった行へ飛ぶ。 */
   const runJump = () => {
     const needle = jump.trim().toLowerCase();
     if (needle === "") return;
-    const row = commits.findIndex(
+    const row = shown.findIndex(
       (commit) => commit.sha.startsWith(needle) || commit.shortSha.startsWith(needle),
     );
     setJumpMissed(row < 0);
     if (row < 0) return;
-    onSelect(commits[row].sha);
+    onSelect(shown[row].sha);
     reveal(row);
   };
 
@@ -215,7 +250,7 @@ export function CommitList({
             <option value="date">{ja.graph.orderDate}</option>
           </select>
         </label>
-        <span className="commits__count">{ja.commits.total(commits.length)}</span>
+        <span className="commits__count">{ja.commits.total(shown.length)}</span>
       </div>
 
       <div className="commits__body">
@@ -238,7 +273,7 @@ export function CommitList({
             <CommitGraph
               rows={layout.rows}
               maxLane={layout.maxLane}
-              commits={commits}
+              commits={shown}
               start={start}
               end={end}
               headSha={head.sha}
@@ -247,7 +282,7 @@ export function CommitList({
             />
 
             {items.map((item) => {
-              const commit = commits[item.index];
+              const commit = shown[item.index];
               return (
                 <div
                   key={commit.sha}
@@ -276,7 +311,7 @@ export function CommitList({
           refs={refs}
           rowIndexBySha={indexBySha}
           laneBySha={laneBySha}
-          total={commits.length}
+          total={shown.length}
           onJump={reveal}
         />
       </div>

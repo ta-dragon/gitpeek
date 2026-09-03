@@ -7,6 +7,7 @@ import { CommandPalette } from "./components/common/CommandPalette";
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
 import { SplitPane } from "./components/common/SplitPane";
+import { RefTree } from "./components/sidebar/RefTree";
 import { RepositoryList, type SortMode } from "./components/sidebar/RepositoryList";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { EmptyState } from "./components/setup/EmptyState";
@@ -55,6 +56,13 @@ export default function App() {
   const [logOpen, setLogOpen] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  /**
+   * ブランチツリーから「先頭コミットへジャンプ」したときの要求。
+   *
+   * 選択そのものは `state.json` の `selectedCommit` が正なので、ここで持つのは
+   * **スクロールさせる合図**だけ。同じブランチを続けて選んでも効くよう連番を添える。
+   */
+  const [jumpTo, setJumpTo] = useState<{ sha: string; nonce: number } | null>(null);
 
   const entries = useCommandLog();
   const settings = useSettings();
@@ -228,6 +236,17 @@ export default function App() {
                     onReorder={(ids) => void repositories.reorder(ids)}
                   />
                 }
+                refs={
+                  selected === null ? null : (
+                    <RefTreePanel
+                      entry={selected}
+                      onJump={(sha) =>
+                        setJumpTo((current) => ({ sha, nonce: (current?.nonce ?? 0) + 1 }))
+                      }
+                      onNotice={setMessage}
+                    />
+                  )
+                }
               />
             }
             second={
@@ -238,7 +257,7 @@ export default function App() {
                   onScan={() => void handleScan()}
                 />
               ) : (
-                <RepositoryPanel entry={selected} />
+                <RepositoryPanel entry={selected} jumpTo={jumpTo} />
               )
             }
           />
@@ -268,12 +287,62 @@ export default function App() {
 }
 
 /**
+ * サイドバー下段のブランチ / タグツリー。
+ *
+ * チェックの結果は `settings.json` の `repositories[].visibleRefs`、
+ * 開閉は `state.json` の `collapsedTreeNodes` に、どちらもリポジトリごとに残る。
+ * 履歴を読み終えるまでは ref 一覧が無いので何も出さない。
+ */
+function RefTreePanel({
+  entry,
+  onJump,
+  onNotice,
+}: {
+  entry: RepositoryEntry;
+  onJump: (sha: string) => void;
+  onNotice: (message: string) => void;
+}) {
+  const snapshot = useSnapshot();
+  const { state: uiState } = useUiState();
+
+  const data = snapshot.data;
+  if (snapshot.repositoryId !== entry.id || data === null) return null;
+
+  const perRepository = uiState.perRepository[entry.id] ?? DEFAULT_REPOSITORY_UI_STATE;
+
+  return (
+    <RefTree
+      refs={data.refs}
+      head={data.head}
+      branchStatus={snapshot.branchStatus}
+      visibleRefs={snapshot.visibleRefs}
+      collapsed={perRepository.collapsedTreeNodes}
+      onVisibleRefsChange={(next) => void repositories.setVisibleRefs(entry.id, next)}
+      onCollapsedChange={(next) =>
+        updateRepositoryUiState(entry.id, (current) => ({
+          ...current,
+          collapsedTreeNodes: next,
+        }))
+      }
+      onJump={onJump}
+      onNotice={onNotice}
+    />
+  );
+}
+
+/**
  * 選択中リポジトリの中身。
  *
  * 履歴を読み終えていればコミットリストを、そうでなければ素性と読み込み状態の
  * カードを出す。**下半分は T-11（コミット詳細と差分）まで空**。
  */
-function RepositoryPanel({ entry }: { entry: RepositoryEntry | null }) {
+function RepositoryPanel({
+  entry,
+  jumpTo,
+}: {
+  entry: RepositoryEntry | null;
+  jumpTo: { sha: string; nonce: number } | null;
+}) {
   const snapshot = useSnapshot();
   const settings = useSettings();
   const { state: uiState } = useUiState();
@@ -343,6 +412,7 @@ function RepositoryPanel({ entry }: { entry: RepositoryEntry | null }) {
           columns={perRepository.columnWidths}
           dateFormat={settings.settings.ui.dateFormat}
           selectedSha={perRepository.selectedCommit}
+          jumpTo={jumpTo}
           order={snapshot.order}
           onSelect={select}
           onColumnsChange={setColumns}

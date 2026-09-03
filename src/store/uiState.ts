@@ -8,6 +8,7 @@
 import { useSyncExternalStore } from "react";
 
 import { loadUiState, saveUiState, type RepositoryUiState, type UiState } from "../lib/ipc";
+import { TAG_GROUP_ID } from "../lib/refTree";
 
 /** バックエンドから読めるまでの表示用。Rust 側の `Default` 実装と一致させること。 */
 export const DEFAULT_UI_STATE: UiState = {
@@ -29,7 +30,8 @@ export const DEFAULT_REPOSITORY_UI_STATE: RepositoryUiState = {
   selectedCommit: null,
   scrollOffset: 0,
   selectedFile: null,
-  expandedTreeNodes: [],
+  // タググループだけ畳んでおく。Rust 側 `RepositoryUiState::default` と一致させること。
+  collapsedTreeNodes: [TAG_GROUP_ID],
   columnWidths: { graph: 200, subject: 600, author: 140, date: 120, sha: 80 },
 };
 

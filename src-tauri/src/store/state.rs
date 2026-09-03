@@ -74,7 +74,7 @@ impl Default for PaneRatios {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RepositoryUiState {
     /// 最後に開いた時刻（RFC 3339）。「最終アクセス順」の並べ替えに使う。
@@ -86,8 +86,28 @@ pub struct RepositoryUiState {
     pub selected_commit: Option<String>,
     pub scroll_offset: f64,
     pub selected_file: Option<String>,
-    pub expanded_tree_nodes: Vec<String>,
+    /// ブランチ / タグツリーで**畳んでいる**ノードの ID（T-10）。
+    ///
+    /// 展開ではなく畳んだ側を持つ。既定が「開いている」なので、この向きなら
+    /// 空配列が「すべて既定」を意味し、利用者が全部畳んでも復元できる。
+    /// 初期値はタググループだけ（`refTree.ts` の `TAG_GROUP_ID`）。
+    pub collapsed_tree_nodes: Vec<String>,
     pub column_widths: ColumnWidths,
+}
+
+impl Default for RepositoryUiState {
+    fn default() -> Self {
+        Self {
+            last_opened_at: None,
+            last_commit_count: None,
+            selected_commit: None,
+            scroll_offset: 0.0,
+            selected_file: None,
+            // タグは数千本になることがあるので、最初は畳んでおく（docs/DESIGN.md §6.4）。
+            collapsed_tree_nodes: vec!["tag".to_string()],
+            column_widths: ColumnWidths::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

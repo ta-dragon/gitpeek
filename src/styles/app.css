@@ -200,15 +200,217 @@ body {
   background: var(--bg-panel);
 }
 
+/*
+ * 上段はリポジトリ一覧。中身なりの高さにするが、サイドバーの半分までに抑える。
+ * 余った縦は下段のツリーへ渡す（ブランチとタグは数千件になる）。
+ */
 .sidebar__top {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  max-height: 50%;
   min-height: 0;
   overflow: auto;
 }
 
 .sidebar__bottom {
-  /* ブランチ / タグツリーの場所（T-10）。 */
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------- ブランチ / タグツリー（docs/DESIGN.md §6.4） ---------- */
+
+.reftree {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.reftree__header {
+  display: flex;
   flex: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+}
+
+.reftree__title {
+  font-weight: 600;
+}
+
+.reftree__filter {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  padding: 0 8px 6px;
+}
+
+/* 入力欄は幅を譲る。サイドバーを狭めてもボタンが押し出されないように。 */
+.reftree__filter .input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--font-sans);
+}
+
+.reftree__presets {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 8px 6px;
+}
+
+.reftree__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* ref 名は長い。縦横どちらもここでスクロールさせる。 */
+  overflow: auto;
+}
+
+.reftree__empty {
+  margin: 0;
+  padding: 8px;
+  color: var(--text-dim);
+}
+
+.reftree__groups,
+.reftree__children {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reftree__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: max-content;
+  min-width: 100%;
+  height: 22px;
+  padding-right: 8px;
+  box-sizing: border-box;
+}
+
+.reftree__row:hover {
+  background: var(--bg-hover);
+}
+
+.reftree__row--group {
+  background: var(--bg-inset);
+  font-weight: 600;
+}
+
+/* HEAD が乗っているブランチ。左に印を出して、選択中の行と混同させない。 */
+.reftree__row--head {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.reftree__row--head .reftree__name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.reftree__caret {
+  flex: none;
+  width: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* 葉の桁をフォルダと揃えるための空き。 */
+.reftree__caret--leaf {
+  visibility: hidden;
+}
+
+.reftree__check {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0 2px 0 0;
+  cursor: pointer;
+}
+
+/* タグにはチェックを置かないが、桁は揃える（docs/DESIGN.md §4.2）。 */
+.reftree__check--none {
+  cursor: default;
+}
+
+.reftree__folder,
+.reftree__groupName {
+  flex: none;
+  white-space: nowrap;
+}
+
+.reftree__name {
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.reftree__name:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.reftree__name:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+/* 幹と繋がっていない履歴。コミットリストの ref チップと同じ印を使う。 */
+.reftree__name--orphan {
+  font-style: italic;
+}
+
+/* グラフから外している ref。チェックの有無だけでは遠目に読み取れない。 */
+.reftree__name--hidden {
+  color: var(--text-faint);
+}
+
+.reftree__count {
+  flex: none;
+  margin-left: 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.reftree__badge {
+  flex: none;
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+/* ahead / behind（docs/DESIGN.md §4.5）。0 のときは出さない。 */
+.reftree__ahead,
+.reftree__behind {
+  flex: none;
+  margin-left: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.reftree__ahead {
+  color: var(--ok);
+}
+
+.reftree__behind {
+  color: var(--danger);
 }
 
 .repos__header {
