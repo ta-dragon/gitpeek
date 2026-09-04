@@ -645,10 +645,11 @@ VS Code 風を基本に、リスト移動のみ vim 風の `j` / `k` も受け�
 
 **`Ctrl+R` は WebView のページ再読込に取られる。** 必ず `preventDefault` すること。
 
-実装は 2 箇所に分かれている。**コミットの移動は `src/hooks/useCommitNavigation.ts`、
-ファイルの移動とフォーカス移動は `src/components/diff/useCommitFiles.ts`**。
-ファイル一覧を持っているのがそのフックなので、そこで処理するほうが状態を渡さずに済む。
-どちらも入力欄にフォーカスがあるときは横取りしない。
+実装は `src/hooks/` に置く。**コミットの移動は `useCommitNavigation.ts`、
+ファイルの移動とフォーカス移動は `useFileNavigation.ts`**。後者は
+コミットのファイル一覧（`components/diff/useCommitFiles.ts`）と作業ツリーの一覧（`App.tsx`）の
+両方から呼ぶ。**見ているものが違うだけで操作は同じ**なので、2 つ書かない（T-16 で切り出した）。
+どれも入力欄にフォーカスがあるときは横取りしない。
 
 ---
 
@@ -1483,10 +1484,9 @@ LLM プロファイルが未設定のまま AI レビューを押した場合は
 手元の実リポジトリには依存しない（CI で再現可能にする）。
 
 実体は `scripts/make-test-repos.sh`（T-02 で作成）。テストは `src-tauri/tests/` に置く。
-**生成する形はスクリプト先頭のコメントが一覧**（直線 / 分岐と合流 / 連続マージ /
-オクトパス / ルート 2 つ / 合流しない orphan / 日本語名 / 空 subject / コミット 0 件 /
-detached / 複数行メッセージ / タグ / bare / クローン / 上流と分岐したクローン）。
-形を足すときはスクリプトとコメントの両方に足し、`tests/lanes.rs` の一覧にも入れる。
+**生成する形の一覧はスクリプト先頭のコメントが正**（ここには写さない。写すと必ずずれる）。
+形を足すときはスクリプトとそのコメントの両方に足し、レーンに関わるものは
+`tests/lanes.rs` の一覧にも入れる。
 
 - 生成先は **`%TEMP%\givsoner-test-repos`**。この gitviewer リポジトリの中に置くと、
   「リポジトリでないパス」の判定テストが親リポジトリを拾って落ちる。
@@ -1504,13 +1504,14 @@ detached / 複数行メッセージ / タグ / bare / クローン / 上流と�
 ### 14.4 フロントエンド
 
 **純関数のみ**テストする。コンポーネントテストはしない。
-現在の対象は「レーン配列 → SVG パス文字列」（`src/lib/graphPath.ts`）、
-相対日時（`src/lib/relativeTime.ts`）、
-「ref 一覧 → 階層構造」と可視 ref の操作（`src/lib/refTree.ts`）、
-「パス一覧 → ディレクトリツリー」（`src/lib/fileTree.ts`）。
+**対象は `src/lib/*.test.ts` が正**（`*.ts` と対で置く）。T-17 完了時点では
+レーン配列 → SVG パス / 相対日時 / ref 一覧 → 階層構造と可視 ref の操作 /
+パス一覧 → ディレクトリツリー / 行の対応付けと語単位差分 / hunk → 表示行 /
+シンタックスハイライトの言語判定 / 2 点比較の選択状態 / 作業ツリーの一覧整形 /
+一括 fetch の進行と要約。**フックとコンポーネントからは純関数を切り出してここへ置く。**
 
-テストランナーは **Vitest**（Vite プロジェクトなので `vite.config.ts` に `test` を足すだけで済む）。
-導入は T-06 で行う。
+テストランナーは **Vitest**（Vite プロジェクトなので `vite.config.ts` に `test` を足すだけ）。
+T-06 で導入済み。
 
 ### 14.5 LLM
 
@@ -1599,7 +1600,7 @@ Phase 9 完了 ＋ **実リポジトリを 5 個以上登録して 1 週間実�
 ## 16. ディレクトリ構成
 
 `(済)` は実在するファイル。それ以外は未作成で、括弧内は作られるタスク。
-**最終更新は T-13 完了時点。**
+**最終更新は T-17 完了時点。**
 
 ```
 gitviewer/
@@ -1618,24 +1619,34 @@ gitviewer/
 │   ├── components/
 │   │   ├── graph/CommitGraph.tsx (済) 窓の範囲だけを描く SVG
 │   │   ├── commits/              (済) CommitList / CommitRow / RefChips /
-│   │   │                              ScrollbarRefMarkers
+│   │   │                              ScrollbarRefMarkers / WorkingTreeRow
 │   │   ├── sidebar/              (済) RepositoryList / Sidebar / RefTree / RefTreeNode
 │   │   ├── diff/                 (済) DiffPane（中央下）/ CommitInfo（右）/
 │   │   │                              CommitDetail / FileList / useCommitFiles /
-│   │   │                              DiffToolbar / SideBySide / Unified / WordDiff
+│   │   │                              DiffToolbar / DiffBody / SideBySide / Unified /
+│   │   │                              WordDiff / CollapsedNotice / CompareBar (T-15) /
+│   │   │                              WorkingTreeFiles / UntrackedFile /
+│   │   │                              useWorkingTree (T-16)
 │   │   ├── review/               AI レビュードロワー (T-23)
-│   │   ├── commandlog/           (済) git コマンドログパネル
+│   │   ├── commandlog/           (済) git コマンドログパネル ＋ capacity（純関数）
 │   │   ├── setup/                (済) 空状態と git 未検出画面
 │   │   └── common/               (済) SplitPane / ContextMenu / CommandPalette /
-│   │                                  NoticeBar / LoadProgress / ErrorBoundary
-│   ├── hooks/                    (済) useTheme / useCommandLog / useCommitNavigation
-│   │                                  （ファイル移動と Enter は useCommitFiles 側 — §6.5）
+│   │                                  NoticeBar / LoadProgress / ErrorBoundary /
+│   │                                  ProgressDialog（fetch の確認と結果 — T-17）
+│   ├── hooks/                    (済) useTheme / useCommandLog /
+│   │                                  useCommitNavigation / useFileNavigation（§6.5）/
+│   │                                  useFetch (T-17)
 │   ├── lib/
 │   │   ├── graphPath.ts          (済) レーン配列 -> SVG パス（純関数・テスト対象）
 │   │   ├── relativeTime.ts       (済) 相対日時（純関数・テスト対象）
 │   │   ├── refTree.ts            (済) ref 一覧 -> 階層構造（純関数・テスト対象）
 │   │   ├── fileTree.ts           (済) パス一覧 -> ディレクトリツリー（純関数・テスト対象）
 │   │   ├── diffView.ts           (済) 行の対応付けと語単位差分（純関数・テスト対象）
+│   │   ├── diffRows.ts           (済) hunk -> 表示行（純関数・テスト対象）
+│   │   ├── highlight.ts          (済) Shiki の遅延読み込みと言語判定 (T-14)
+│   │   ├── compareSelection.ts   (済) 2 点比較の選択状態（純関数・テスト対象 — T-15）
+│   │   ├── workingTree.ts        (済) 作業ツリーの一覧整形（純関数・テスト対象 — T-16）
+│   │   ├── fetchState.ts         (済) 一括 fetch の進行と要約（純関数・テスト対象 — T-17）
 │   │   └── ipc.ts                (済) Tauri invoke ラッパ
 │   ├── store/                    (済) settings / uiState / repositories / snapshot
 │   └── styles/                   (済) theme.css（トークン）/ app.css / graph.css
@@ -1648,7 +1659,9 @@ gitviewer/
     │   ├── snapshot.rs           (済) 全件取得と ref の印 (T-04, T-27)
     │   ├── lanes.rs              (済) 生成リポジトリでのレーン不変条件 (T-05)
     │   ├── reach.rs              (済) 到達可能集合と ahead/behind (T-09)
-    │   └── diff.rs               (済) コミット本文と変更ファイル一覧 (T-11)
+    │   ├── diff.rs               (済) コミット本文と変更ファイル一覧 (T-11)
+    │   ├── status.rs             (済) 作業ツリーの状態 (T-16)
+    │   └── fetch.rs              (済) 生成した bare からの fetch (T-17)
     └── src/
         ├── main.rs               (済)
         ├── lib.rs                (済) Tauri コマンドの登録と AppState
@@ -1661,10 +1674,12 @@ gitviewer/
         │   ├── refs.rs           (済) for-each-ref パースと ref の指紋
         │   ├── snapshot.rs       (済) 全件取得の組み立てと LRU キャッシュ
         │   ├── progress.rs       (済) 途中経過の型と受け口（§4.6）
-        │   ├── status.rs         (T-16)
+        │   ├── status.rs         (済) 作業ツリーの状態と読み出し (T-16)
         │   ├── diff.rs           (済) コミット本文 / 変更ファイル一覧 (T-11)
         │   │                          ＋ unified diff の取得とパース (T-13)
-        │   └── ops.rs            checkout / fetch / merge --ff-only / clone (T-17〜T-19)
+        │   ├── fetchprogress.rs  (済) 進捗行のパース（純関数・テスト必須 — T-17）
+        │   └── ops.rs            (済) fetch (T-17)。checkout / merge --ff-only (T-18)
+        │                              と clone (T-19) もここへ足す
         ├── graph/
         │   ├── mod.rs            (済) レーン確定の入口。可視 ref の絞り込みもここ
         │   ├── lane.rs           (済) レーン割り当て（最重要・テスト必須）
@@ -1676,6 +1691,7 @@ gitviewer/
         │   ├── skill.rs          (T-21)
         │   └── review.rs         (T-22)
         ├── store/
+        │   ├── mod.rs            (済) 設定と状態のストアの入口
         │   ├── paths.rs          (済) %APPDATA% レイアウトの解決
         │   ├── settings.rs       (済)
         │   ├── state.rs          (済)
@@ -1699,23 +1715,27 @@ gitviewer/
 | バージョン検出 | `git --version` |
 | リポジトリ判定 | `git -C <path> rev-parse --absolute-git-dir --is-bare-repository --is-shallow-repository` |
 | 作業ツリーの場所 | `git -C <path> rev-parse --show-toplevel`（bare では呼ばない） |
+| リモートの有無 | `git -C <path> remote`（放置警告を出してよいかの判断 — §8.3） |
 | **コミットメタ一括取得** | `git -C <path> log --branches --remotes [HEAD] --topo-order -z --format=<fmt>` |
 | ref 一覧 | `git -C <path> for-each-ref --format=<fmt> refs/heads refs/remotes refs/tags` |
 | HEAD 判定 | `git -C <path> symbolic-ref -q --short HEAD` / `git -C <path> rev-parse -q --verify HEAD` |
 | 作業ツリー状態 | `git -C <path> status --porcelain=v2 -z` |
 | コミット本文 | `git -C <path> show -s --format=<fmt> <sha>` |
-| 変更ファイル一覧 | `git -C <path> diff --numstat -z -M <A> <B>` |
+| 変更ファイル一覧 | `git -C <path> diff --raw --numstat -z -M [--cached] <A> <B>` |
+| 〃（ルートコミット）| `git -C <path> diff-tree --raw --numstat -z -M --root --no-commit-id -r <sha>` |
 | ファイル差分 | `git -C <path> diff -M -U<N> [-w] <A> <B> -- <path>` |
 | ステージ済み差分 | `git -C <path> diff -M -U<N> --cached` |
 | 未ステージ差分 | `git -C <path> diff -M -U<N>` |
-| ファイルツリー | `git -C <path> ls-tree -z -r <rev>` |
-| ファイル内容 | `git -C <path> show <rev>:<path>` |
+| バイナリのサイズ | `git -C <path> ls-tree -l -z <rev> -- <path>`（増減を出せないので大きさだけ） |
 | fetch | `git -C <path> fetch --all --prune --tags --progress` |
-| checkout | `git -C <path> checkout <ref>` / `git -C <path> checkout --detach <sha>` |
+| checkout（ローカルブランチ）| `git -C <path> checkout <短い名前>` |
+| checkout（それ以外）| `git -C <path> checkout --detach <完全な ref 名 または SHA>` |
 | FF マージ | `git -C <path> merge --ff-only <ref>` |
 | clone | `git clone --progress <url> <dir>` |
 
 ahead/behind は git を呼ばずメモリ上のグラフから計算する（§4.5）。
+**追跡ファイルの内容は `git show <rev>:<path>` では読まない。** 差分は `git diff` の出力から
+組み立て、作業ツリーのファイルはディスクから直接読む（§7.5）。
 
 **`<fmt>` の書式言語はコマンドごとに違う。** `git log` は `%x1f`（`%x` ＋ 16 進 2 桁）で
 区切り文字を出すが、`for-each-ref` は `%x1f` を展開せず、16 進 2 桁だけの `%1f` を使う
@@ -1733,9 +1753,6 @@ ahead/behind は git を呼ばずメモリ上のグラフから計算する（§
 インタビューで扱わなかった、実装時に判断してよい事項。
 
 - AI レビュー出力の Markdown レンダラ
-- `LC_ALL=C` を git 実行時に設定するか（stderr が英語になり検索性は上がるが、ユーザーに見せる
-  メッセージは日本語のままの方が読みやすい。パースは機械可読形式のみに依存しているので、
-  どちらでも動作は変わらない）
 
 **決着した項目**
 
@@ -1744,3 +1761,8 @@ ahead/behind は git を呼ばずメモリ上のグラフから計算する（§
 - CSS → 素の CSS ＋ テーマトークン（`src/styles/theme.css`）
 - レーン再利用の保留行数 → **2 行**（`RESERVE_ROWS`）。T-08 で 1〜4 を実測したが
   レーン数は変わらなかったので、既定のまま据え置いた（§15.1）
+- `LC_ALL=C` を git 実行時に設定するか → **設定しない**（T-17）。stderr が英語になれば
+  検索性は上がるが、**利用者に見せるメッセージは日本語のままの方が読みやすい**。
+  代わりに、翻訳されうる文字列を読まない作りにした — fetch の進捗はラベルを見ずに
+  `(済/全)` と `%` だけを構造で取る（§8.3.1）。パースは機械可読形式にしか依存していないので、
+  どちらでも動作は変わらない
