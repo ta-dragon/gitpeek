@@ -31,6 +31,8 @@ type Props = {
   onSelect: (sha: string, compare: boolean) => void;
   /** 行の右クリック（T-18）。checkout とコピーを出す。 */
   onContextMenu: (sha: string, x: number, y: number) => void;
+  /** ref チップの右クリック（T-18）。**行とは別のメニュー**。 */
+  onRefContextMenu: (entry: RefEntry, x: number, y: number) => void;
 };
 
 export const CommitRow = memo(function CommitRow({
@@ -45,6 +47,7 @@ export const CommitRow = memo(function CommitRow({
   graphWidth,
   onSelect,
   onContextMenu,
+  onRefContextMenu,
 }: Props) {
   const absolute = absoluteTimeDetailed(commit.commitTime);
 
@@ -67,7 +70,12 @@ export const CommitRow = memo(function CommitRow({
       <div className="crow__graph" style={{ width: graphWidth }} />
 
       <div className="crow__subject" style={{ width: columns.subject }}>
-        <RefChips refs={refs} headBranch={headBranch} detachedHead={detachedHead} />
+        <RefChips
+          refs={refs}
+          headBranch={headBranch}
+          detachedHead={detachedHead}
+          onContextMenu={onRefContextMenu}
+        />
         <span className="crow__text" title={commit.subject}>
           {commit.subject === "" ? ja.commits.emptySubject : commit.subject}
         </span>

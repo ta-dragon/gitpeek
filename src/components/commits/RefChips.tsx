@@ -15,12 +15,20 @@ export function RefChips({
   refs,
   headBranch,
   detachedHead,
+  onContextMenu,
 }: {
   refs: RefEntry[];
   /** HEAD が乗っているローカルブランチの**短い名前**。detached なら null。 */
   headBranch: string | null;
   /** この行が detached HEAD の位置か。 */
   detachedHead: boolean;
+  /**
+   * チップの右クリック（T-18）。**行の右クリックとは別のメニュー**を出す。
+   *
+   * 行はコミットに対する操作、チップはその ref に対する操作。
+   * `+N` に畳まれたぶんは対象にしない（どれを指しているか決まらない）。
+   */
+  onContextMenu: (entry: RefEntry, x: number, y: number) => void;
 }) {
   if (refs.length === 0 && !detachedHead) return null;
 
@@ -40,6 +48,12 @@ export function RefChips({
           }
           title={entry.orphan ? `${entry.name}
 ${ja.commits.orphanHint}` : entry.name}
+          // **行のメニューへ流さない。** 流すとコミット用のメニューが上書きしてしまう。
+          onContextMenu={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onContextMenu(entry, event.clientX, event.clientY);
+          }}
         >
           {/* 幹と繋がっていない履歴。グラフではその島のルートで線が止まる。 */}
           {entry.orphan && <span className="chip__mark">{ja.commits.orphanMark}</span>}

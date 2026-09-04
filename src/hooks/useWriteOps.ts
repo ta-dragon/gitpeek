@@ -61,7 +61,17 @@ export type WriteState = {
   busy: boolean;
 };
 
-export function useWriteOps(repositoryId: string | null) {
+export function useWriteOps(
+  repositoryId: string | null,
+  /**
+   * 書き込みが成功して**読み直しまで終わった**あとに呼ぶ。
+   *
+   * checkout は HEAD を動かすので、**グラフがそのままだと利用者は自分の居場所を見失う**
+   * （古いブランチへ切り替えると、選択行は数百行下のまま）。ここで HEAD へ寄せる。
+   * 読み直しより前に呼ぶと、まだ古い HEAD を指している。
+   */
+  onApplied: () => void,
+) {
   const [state, setState] = useState<WriteState>({
     request: null,
     outcome: null,
@@ -113,6 +123,7 @@ export function useWriteOps(repositoryId: string | null) {
       if (outcome.ok) {
         await snapshots.reload();
         await repositories.refresh();
+        onApplied();
       }
     } catch (error) {
       setState({
@@ -121,7 +132,7 @@ export function useWriteOps(repositoryId: string | null) {
         busy: false,
       });
     }
-  }, []);
+  }, [onApplied]);
 
   const doCheckout = useCallback(
     (target: CheckoutTarget) => {

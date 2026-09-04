@@ -81,6 +81,10 @@ type Props = {
    * 全文は git に聞く必要があるので、リポジトリを知っている側でやる。
    */
   onCopyMessage: (sha: string) => void;
+  /** ref チップの右クリックから checkout の確認を出す（T-18）。 */
+  onCheckoutRef: (entry: RefEntry) => void;
+  /** 同じく、現在のブランチへ取り込む確認を出す。 */
+  onMergeRef: (entry: RefEntry) => void;
   /** 短い通知（コピーの結果）。 */
   onNotice: (message: string) => void;
   onColumnsChange: (next: ColumnWidths) => void;
@@ -102,6 +106,8 @@ export function CommitList({
   onSelect,
   onCheckoutCommit,
   onCopyMessage,
+  onCheckoutRef,
+  onMergeRef,
   onNotice,
   onColumnsChange,
   onOrderChange,
@@ -111,6 +117,13 @@ export function CommitList({
   const [jumpMissed, setJumpMissed] = useState(false);
   /** 行の右クリックメニュー（T-18）。親・子の選択メニューとは別に持つ。 */
   const [rowMenu, setRowMenu] = useState<{ sha: string; x: number; y: number } | null>(null);
+  /** ref チップの右クリックメニュー（T-18）。**行とは対象が違う**ので別に持つ。 */
+  const [chipMenu, setChipMenu] = useState<{
+    entry: RefEntry;
+    sha: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   /**
    * 実際に並べるコミット。**`layout.rows` が正**で、`commits` はその材料。
@@ -231,6 +244,9 @@ export function CommitList({
     enabled: shown.length > 0,
   });
 
+  /** HEAD の行。読み込んだ範囲に無ければ `undefined`（unborn / 可視 ref で外れた）。 */
+  const headRow = head.sha === null ? undefined : indexBySha.get(head.sha);
+
   /** SHA ジャンプ。前方一致で最初に当たった行へ飛ぶ。 */
   const runJump = () => {
     const needle = jump.trim().toLowerCase();
@@ -288,6 +304,23 @@ export function CommitList({
           />
         </label>
         {jumpMissed && <span className="commits__missed">{ja.commits.jumpNotFound}</span>}
+
+        {/* **HEAD へ戻る道を見えるところに置く**（T-18）。checkout で HEAD が動くと
+            選択行が遠くに取り残されるので、`Ctrl+H` を知らなくても戻れるようにする。
+            HEAD が読み込んだ範囲に無いとき（unborn / 絞り込みで外れた）は押せない。 */}
+        <button
+          type="button"
+          className="button button--small"
+          disabled={headRow === undefined}
+          title={ja.commits.toHeadHint}
+          onClick={() => {
+            if (headRow === undefined) return;
+            selectOnly(shown[headRow].sha);
+            reveal(headRow);
+          }}
+        >
+          {ja.commits.toHead}
+        </button>
 
         <div className="app__spacer" />
 
@@ -381,6 +414,10 @@ export function CommitList({
                     graphWidth={width}
                     onSelect={onSelect}
                     onContextMenu={(sha, x, y) => setRowMenu({ sha, x, y })}
+                    onRefContextMenu={(entry, x, y) => {
+                      onSelect(commit.sha, false);
+                      setChipMenu({ entry, sha: commit.sha, x, y });
+                    }}
                   />
                 </div>
               );
@@ -414,8 +451,68 @@ export function CommitList({
           onClose={() => setRowMenu(null)}
         />
       )}
+
+      {chipMenu !== null && (
+        <ContextMenu
+          x={chipMenu.x}
+          y={chipMenu.y}
+          items={chipMenuItems(chipMenu.entry, chipMenu.sha, head.branch, {
+            onCheckoutRef,
+            onMergeRef,
+            onCheckoutCommit,
+          })}
+          onClose={() => setChipMenu(null)}
+        />
+      )}
     </div>
   );
+}
+
+/**
+ * ref チップの右クリックメニュー（T-18。docs/DESIGN.md §8.1）。
+ *
+ * **行のメニューとは対象が違う。** 行はコミットに対する操作、チップはその ref に対する操作。
+ * 同じ場所から**両方**辿れるようにしてある — ブランチ名の上で右クリックしたとき、
+ * 「そのブランチへ切り替える」のか「そのコミットを detached で見る」のかは
+ * 利用者にしか決められない。
+ *
+ * **ここで可否を判定しない。** 判定は Rust 側の 1 箇所で、押せない理由は確認画面に出す。
+ */
+function chipMenuItems(
+  entry: RefEntry,
+  sha: string,
+  headBranch: string | null,
+  actions: {
+    onCheckoutRef: (entry: RefEntry) => void;
+    onMergeRef: (entry: RefEntry) => void;
+    onCheckoutCommit: (sha: string) => void;
+  },
+): ContextMenuItem[] {
+  const items: ContextMenuItem[] = [
+    {
+      // リモート追跡ブランチなら、確認画面で「ローカルブランチを作る」も選べる。
+      label: ja.commits.checkoutRef(entry.shortName),
+      onSelect: () => actions.onCheckoutRef(entry),
+    },
+  ];
+
+  if (entry.kind !== "tag") {
+    items.push({
+      label:
+        headBranch === null
+          ? ja.refTree.merge
+          : ja.refTree.mergeInto(headBranch, entry.shortName),
+      title: ja.refTree.mergeHint,
+      onSelect: () => actions.onMergeRef(entry),
+    });
+  }
+
+  items.push({
+    label: ja.commits.checkoutHere,
+    onSelect: () => actions.onCheckoutCommit(sha),
+  });
+
+  return items;
 }
 
 /**

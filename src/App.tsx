@@ -159,8 +159,28 @@ export default function App() {
 
   // `fetch` は window の同名関数と紛れるので別の名前にする。
   const fetching = useFetch();
+  /**
+   * 選んだコミットを画面内へ寄せる。**連番を上げて「新しい依頼」だと分からせる。**
+   * 同じ SHA をもう一度指しても動くようにするため。
+   */
+  const revealCommit = useCallback((sha: string) => {
+    setJumpTo((current) => ({ sha, nonce: (current?.nonce ?? 0) + 1 }));
+  }, []);
+
+  /**
+   * 書き込みのあとは **HEAD へ寄せる**（T-18）。
+   *
+   * checkout は HEAD を動かすので、そのままだと選択行が古い場所に取り残される。
+   * 少し古いブランチへ切り替えたときは数百行離れることもあり、**自分がどこにいるか
+   * 見失う**（利用者の指摘）。読み直しが終わってから呼ぶこと。
+   */
+  const goToHead = useCallback(() => {
+    const head = snapshots.currentHeadSha();
+    if (head !== null) revealCommit(head);
+  }, [revealCommit]);
+
   // checkout と FF マージ（T-18）。**判定 → 確認 → 実行 → 読み直しの 1 本だけ。**
-  const writing = useWriteOps(repos.selectedId);
+  const writing = useWriteOps(repos.selectedId, goToHead);
   // **個別のコールバックを取り出して使う。** `fetching` は毎回新しい object なので、
   // それを依存に置くと `keydown` の登録・解除が毎レンダリング走る。
   const { fetchOne: startFetch, askAll } = fetching;
@@ -318,9 +338,7 @@ export default function App() {
                   selected === null ? null : (
                     <RefTreePanel
                       entry={selected}
-                      onJump={(sha) =>
-                        setJumpTo((current) => ({ sha, nonce: (current?.nonce ?? 0) + 1 }))
-                      }
+                      onJump={revealCommit}
                       onCheckout={writing.askCheckout}
                       onMerge={writing.askMerge}
                       onNotice={setMessage}
@@ -353,6 +371,8 @@ export default function App() {
                       ],
                     )
                   }
+                  onCheckoutRef={writing.askCheckout}
+                  onMergeRef={writing.askMerge}
                   onNotice={setMessage}
                 />
               )
@@ -474,18 +494,33 @@ function RefTreePanel({
         }))
       }
       onJump={onJump}
-      onCheckout={(target) =>
-        onCheckout(
-          { kind: SUBJECT_KIND[target.kind], name: target.shortName },
-          checkoutChoices(target, data.refs),
-        )
-      }
-      onMerge={(target) =>
-        onMerge(target.name, target.shortName, target.target, data.head.branch)
-      }
+      onCheckout={(target) => askCheckoutRef(target, data.refs, onCheckout)}
+      onMerge={(target) => askMergeRef(target, data.head.branch, onMerge)}
       onNotice={onNotice}
     />
   );
+}
+
+/**
+ * ref を checkout の確認へ渡す。**ref ツリーとグラフのチップで同じものを使う。**
+ *
+ * 起動点ごとに書くと、片方だけ「ローカルブランチを作る」を出し忘れる。
+ */
+export function askCheckoutRef(
+  entry: RefEntry,
+  refs: RefEntry[],
+  ask: (subject: CheckoutSubject, choices: CheckoutChoice[]) => void,
+): void {
+  ask({ kind: SUBJECT_KIND[entry.kind], name: entry.shortName }, checkoutChoices(entry, refs));
+}
+
+/** ref を FF マージの確認へ渡す。**git へ渡すのは完全な ref 名。** */
+export function askMergeRef(
+  entry: RefEntry,
+  headBranch: string | null,
+  ask: (rev: string, revLabel: string, revSha: string, branch: string | null) => void,
+): void {
+  ask(entry.name, entry.shortName, entry.target, headBranch);
 }
 
 /** ref の種別を確認画面の文面の種別へ。**タグとコミットで言うことが違う。** */
@@ -508,12 +543,16 @@ function RepositoryPanel({
   entry,
   jumpTo,
   onCheckoutCommit,
+  onCheckoutRef,
+  onMergeRef,
   onNotice,
 }: {
   entry: RepositoryEntry | null;
   jumpTo: { sha: string; nonce: number } | null;
   /** グラフ行の右クリックから checkout の確認を出す（T-18）。 */
   onCheckoutCommit: (sha: string) => void;
+  onCheckoutRef: (subject: CheckoutSubject, choices: CheckoutChoice[]) => void;
+  onMergeRef: (rev: string, revLabel: string, revSha: string, branch: string | null) => void;
   onNotice: (message: string) => void;
 }) {
   const snapshot = useSnapshot();
@@ -562,6 +601,8 @@ function RepositoryPanel({
       ui={settings.settings.ui}
       jumpTo={jumpTo}
       onCheckoutCommit={onCheckoutCommit}
+      onCheckoutRef={onCheckoutRef}
+      onMergeRef={onMergeRef}
       onNotice={onNotice}
     />
   );
@@ -584,6 +625,8 @@ function CommitWorkspace({
   ui,
   jumpTo,
   onCheckoutCommit,
+  onCheckoutRef,
+  onMergeRef,
   onNotice,
 }: {
   entry: RepositoryEntry;
@@ -594,6 +637,9 @@ function CommitWorkspace({
   ui: UiSettings;
   jumpTo: { sha: string; nonce: number } | null;
   onCheckoutCommit: (sha: string) => void;
+  /** ref チップの右クリックから（T-18）。**ref ツリーと同じ翻訳を通す。** */
+  onCheckoutRef: (subject: CheckoutSubject, choices: CheckoutChoice[]) => void;
+  onMergeRef: (rev: string, revLabel: string, revSha: string, branch: string | null) => void;
   onNotice: (message: string) => void;
 }) {
   const { state: uiState } = useUiState();
@@ -780,6 +826,8 @@ function CommitWorkspace({
               onSelect={select}
               onCheckoutCommit={onCheckoutCommit}
               onCopyMessage={(sha) => void copyMessage(sha)}
+              onCheckoutRef={(entry) => askCheckoutRef(entry, data.refs, onCheckoutRef)}
+              onMergeRef={(entry) => askMergeRef(entry, data.head.branch, onMergeRef)}
               onNotice={onNotice}
               onColumnsChange={setColumns}
               onOrderChange={(next) => void snapshots.setOrder(next)}

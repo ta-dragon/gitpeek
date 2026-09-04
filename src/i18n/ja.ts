@@ -184,6 +184,9 @@ export const ja = {
     jumpLabel: "SHA へ移動",
     jumpPlaceholder: "SHA を貼り付け（前方一致）",
     jumpNotFound: "見つかりません",
+    // checkout で HEAD が動くと選択行が遠くに残るので、戻る道を見えるところに置く。
+    toHead: "HEAD へ",
+    toHeadHint: "いまチェックアウトしているコミットへ移動します（Ctrl+H）。",
     // Alt+← / Alt+→ で親・子が複数あるときの選択メニュー。
     parent: "親",
     child: "子",
@@ -192,6 +195,8 @@ export const ja = {
     // 行の右クリック（T-18。docs/DESIGN.md §8.1）。
     // **コミットへの checkout は必ず detached。** ブランチを作る経路はここに置かない。
     checkoutHere: "このコミットを checkout（detached）",
+    // ref チップの右クリック。名前を入れて、行のメニューと取り違えないようにする。
+    checkoutRef: (name: string) => `${name} を checkout`,
     copySha: "SHA をコピー",
     // **全文。** 一覧が持っているのは要約 1 行なので、git に聞き直している。
     copyMessage: "コミットメッセージをコピー",

@@ -161,6 +161,10 @@ GIT_SSH_COMMAND=ssh -o BatchMode=yes     # 無いとパスフレーズ待ちで�
   ＋ さらに右の AI レビュードロワー。
   **コミット詳細と変更ファイル一覧を差分本体の上に積まない**（DESIGN.md §6.1）。
   積むと詳細と一覧が高さを食って差分に数行しか残らない。
+- **ダイアログの中のボタンは折り返す。** 共通の `.button` は `white-space: nowrap`
+  （狭いペインでラベルを割らないため）。ラベルに**ブランチ名が入る**場所でそのままにすると、
+  長い名前でボタンが箱の外へ出る（実測: ボタン 507px / 箱 480px、左へ 52px はみ出す）。
+  `.modal__actions .button` で `white-space: normal` ＋ `overflow-wrap: anywhere` に戻す。
 - **`.button--primary` に共通の `.button:hover` を効かせない。** 中立の `--bg-hover` が
   accent を上書きし、**文字が地に溶けて「押せない」ように見える**（輝度比 1.20 / 1.30 を実測）。
   primary 系のボタンを足すときは `--accent-hover` を使う。

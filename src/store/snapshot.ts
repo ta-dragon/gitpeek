@@ -302,6 +302,16 @@ export function currentRepositoryId(): string | null {
   return snapshot.repositoryId;
 }
 
+/**
+ * いま HEAD が指しているコミット。**購読していない場所から読む用。**
+ *
+ * checkout の直後に「どこへ移動すればいいか」を知るのに使う（T-18）。
+ * unborn なら null。
+ */
+export function currentHeadSha(): string | null {
+  return snapshot.data?.head.sha ?? null;
+}
+
 /** 表示中のリポジトリを読み直す。fetch / checkout の後に使う（T-17 / T-18）。 */
 export function reload(): Promise<void> {
   return load(snapshot.repositoryId, true, true);

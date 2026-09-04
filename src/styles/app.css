@@ -766,6 +766,19 @@ body {
   flex-wrap: wrap;
 }
 
+/* **ダイアログのボタンだけは折り返す。** ラベルにブランチ名が入るので、
+   共通の `.button` の `white-space: nowrap` のままだと、長い名前で
+   ボタンが箱の外へ飛び出す（実測。利用者の指摘）。
+   `anywhere` にするのは、区切りの無い長い名前（`feature/aaaa…`）でも
+   確実に折るため — `break-word` はスラッシュの無い塊を折らない。 */
+.modal__actions .button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+  /* 箱の幅を超えない。3 つ並ぶときは折り返して縦に積む。 */
+  max-width: 100%;
+}
+
 /* 結果の一覧。**1 件の失敗で全体を止めない**ので、成功と失敗が混ざる。
    `flex: 1 1 0` にしないこと — 箱の高さは中身で決まるので、基準 0 では
    配る余白が無く、一覧が 0px に潰れる（CLAUDE.md §6 の裏返し）。 */
