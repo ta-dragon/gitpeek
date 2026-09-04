@@ -41,30 +41,27 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 
 ## 現在地
 
-**最終更新**: 2026-09-04
+**最終更新**: 2026-09-05
 
 | 項目 | 内容 |
 |---|---|
-| 直前に完了 | T-17 fetch と放置警告（目視 2026-09-04 通過） |
-| 次にやる | **T-18 checkout と FF マージ — 実装は終わり、目視確認待ち** |
+| 直前に完了 | T-18 checkout と FF マージ（**Phase 6 完了**。目視 2026-09-05 通過） |
+| 次にやる | **T-19 clone（Phase 7。これで書き込み系は終わり）** |
 | 未解決の判断事項 | なし |
 
-**T-18 は ▸コマンド の受け入れ条件を満たしたところで止めてある。** ▸目視 が残っているので、
-規約 3 のとおり完了にはしていない。目視が通ったらこの節と「完了済み」表を同じコミットで更新し、
-T-19（clone）へ進む。
+**T-19 は詳細化済み**なので、その節を読めばそのまま着手できる。書き込み系の入口は
+`src-tauri/src/git/ops.rs` に揃っていて、clone もここへ足す。
 
 **リモート追跡ブランチの扱いを変えた**（2026-09-04、利用者の判断）。detached 固定をやめ、
 **確認画面で「ローカル追跡ブランチを作って切り替える」か「detached で開く」を選ばせる**。
 守っているのは「**黙って ref を作らない**」のほうで、ブランチの削除・リネームとタグの操作は
-引き続き提供しない（CLAUDE.md §1 / DESIGN.md §8.1 を書き換え済み）。
+引き続き提供しない（CLAUDE.md §1 / DESIGN.md §8.1）。
 
-**checkout の対象は形で渡し分ける。** ローカルブランチは短い名前、それ以外は完全な ref 名 ＋
-`--detach`。短い名前だけを渡すと git の DWIM が**ローカル追跡ブランチを勝手に作る**（実測）。
-`tests/writeops.rs` の `detaching_onto_a_remote_branch_creates_no_local_branch` が固定している。
-
-**HEAD の印が一度も出ていなかった**（T-18 で発覚）。`HeadInfo.branch` は短い名前なのに、
-ref チップとブランチツリーが**完全な ref 名と比べていた**。判定を `lib/refTree.ts` の
-`isHeadRef` 1 つに寄せた。checkout の結果はこの印で見るので、直さないと目視が通らない。
+**T-18 の目視は 3 巡かかった。9 件直している。** 内訳は
+①受け渡しの形（serde）②文言 ③グラフの追従 ④はみ出し ⑤起動点の不足 ⑥コピーの範囲、
+そして着手中に見つけた既存不具合 3 件（HEAD の印 / `index.lock` の場所 / `%s` の潰れ）。
+**画面まで一度も通していない経路は、テストが緑でも動かないと思ったほうがよい**
+（`rename_all_fields` はその典型で、引数の組み立てだけ固定していても受け取りの形は守れない）。
 
 ### 抱えている割り切り（承知の上で残してあるもの）
 
@@ -93,6 +90,7 @@ ref チップとブランチツリーが**完全な ref 名と比べていた**�
 | 4 | 3 ペイン配置 ／ 差分の色と語単位強調（強調の中では構文色をやめた）／ 文字コードの判別順 | DESIGN.md §6.1, §7.2, §9.1 |
 | 5 | 任意 2 点比較（**`A...B` は 1 つの引数**）／ 作業ツリーの擬似行 | CLAUDE.md §6 / DESIGN.md §7.5, §10.3 |
 | 6 | fetch の進捗・中止・放置警告・上流のタグ付け替え | CLAUDE.md §2, §8 / DESIGN.md §8.3, §8.3.1 |
+| 6 | checkout の渡し分け ／ 確認画面 ／ FF マージ ／ 書き込み後は HEAD へ寄せる | CLAUDE.md §1, §2, §6 / DESIGN.md §8.1, §8.2, §8.5 |
 
 **EUC-JP の判別が当たらない件は「当面このまま」で決着した**（2026-09-03、利用者の判断）。
 EUC-JP を使う予定が無く、**UTF-8 と Shift_JIS が判定できれば足りる**ため。挙動は
@@ -126,7 +124,7 @@ v1 では非対象のままだが、恒久的な非対象ではなくなった�
 | 3 | 3 | T-09 → T-10 | **済** |
 | 4 | 4 | T-11 → T-12 → T-13 → T-14 | **済** |
 | 5 | 5 | T-15 → T-16 | **済** |
-| 6 | 6-7 | T-17 → T-18 → **T-19** | T-18 は目視待ち |
+| 6 | 6-7 | T-17 → T-18 → **T-19** | T-17 / T-18 済 |
 | 7 | 8 | T-20 → T-21 → T-22 → T-23 | |
 | 8 | 9 | T-24 → T-25 → T-26 | |
 
@@ -163,272 +161,132 @@ graph LR
 
 # Phase 6-7 — 書き込み系操作
 
-## - [ ] T-18 [Phase 6] checkout と FF マージのガード
-
-**目的**: checkout と fast-forward マージを、ユーザーの未保存作業を壊さない形で提供する。
-
-**参照**: DESIGN.md §8.1, §8.2, §8.5, §3.6, §6.4 / CLAUDE.md §1, §2, §6
-
-**依存**: T-17, T-16
-
-**T-17 までの申し送り（着手時に確認すること。規約 4）**
-
-- 書き込み系の入口は `src-tauri/src/git/ops.rs`。**checkout / merge --ff-only もここへ足す**
-- **進捗は要らない。** どちらも一瞬で終わるので `exec::run` で足りる。
-  `exec::run_progress` ＋ `exec::Cancel` は fetch / clone のための入口で、ここでは使わない
-- 実行後の再読込は `snapshots.reload()`（`force: true`）＋ `repositories.refresh()`。
-  **`useFetch` の `drive()` 末尾と同じ手順**にすること
-- 確認ダイアログは `components/common/ProgressDialog.tsx` の `FetchConfirm` がひな形。
-  `Esc` で閉じる `useEscape` も同じファイルにある
-- **`.button--primary` の hover は `--accent-hover`。** 共通の `.button:hover` を効かせると
-  文字が地に溶ける（実測 1.20 / 1.30）
-- bare の判定は `RepositoryProbe.is_bare`。フロントには `RepositoryEntry.probe.isBare` で届く
-- ahead/behind は `compute_branch_status` の `BranchStatus[]`（`refName` / `upstream` /
-  `ahead` / `behind`）。**上流からの FF 可否はこれで判定できる**（`ahead === 0 && behind > 0`）
-- ref ツリーの右クリックメニューに **checkout と「現在のブランチに FF マージ」の項目が既にある**
-  （`RefTree.tsx` の `menuItems`）。`disabled: true` と `title: ja.refTree.notYet` を外して
-  中身を入れる。**`ja.refTree.notYet` は使い切ったら消すこと**
-- **グラフ行の右クリックメニューは無い。** `CommitRow.tsx` は `onClick` だけなので、
-  `RefTree` と同じ形で `common/ContextMenu.tsx` を付ける
-
-**T-16 の申し送りの訂正（規約 4。着手時に実物と突き合わせた結果）**
-
-- 「dirty の判定は `is_clean()` 1 つで足りる」は**足りない。** `is_clean()` は未追跡ファイルも
-  数える。擬似行を出すかどうかにはそれで正しいが、**checkout の可否は別の述語**にする
-  （下の「未追跡だけなら止めない」）
-- `WorkingTree::index_lock_present` は **`<path>/.git/index.lock` を組み立てている**
-  （`status.rs`）。リンクされた作業ツリーでは `.git` がファイルなので**永久に false**、
-  bare でも false になる。`repo.rs` は `git_dir` から正しく引いているので、
-  **T-18 で `status.rs` 側を `git_dir` 起点に直す。** ここを gate にする以上、
-  黙って通ってしまう経路を残せない（CLAUDE.md §2）
-
-**作成・変更するファイル**
-
-| 種別 | パス | 内容 |
-|---|---|---|
-| 変更 | `src-tauri/src/git/ops.rs` | `preflight` / `checkout` / `merge_ff` |
-| 変更 | `src-tauri/src/git/status.rs` | `index.lock` を `git_dir` から引く |
-| 変更 | `src-tauri/src/lib.rs` | 3 コマンドの登録 |
-| 新規 | `src-tauri/tests/writeops.rs` | 生成リポジトリで実際に checkout / merge（結合） |
-| 変更 | `scripts/make-test-repos.sh` | **FF できるクローン**を足す |
-| 新規 | `src/components/common/ConfirmDialog.tsx` | `FetchConfirm` を一般化した確認ダイアログ |
-| 新規 | `src/hooks/useWriteOps.ts` | 確認 → 実行 → 再読込の配線 |
-| 変更 | `src/components/sidebar/RefTree.tsx` | checkout / FF マージを有効化 |
-| 変更 | `src/components/commits/CommitRow.tsx` `CommitList.tsx` | 行の右クリックメニュー |
-| 変更 | `src/App.tsx` `src/lib/ipc.ts` `src/i18n/ja.ts` `src/styles/app.css` | 配線 |
-
-**実装内容**
-
-*実行前の判定（`ops.rs`。**ここが T-18 の本体**）*
-
-- **判定は 1 つの関数に集める**（fetch の `is_stale` と同じ考え方）。起動点が 4 つある
-  （ref ツリーの右クリック / ダブルクリック / グラフ行の右クリック / 上流からの取り込み）ので、
-  **判定をボタンの側に置くと結論が食い違う**
-- 返すのは「止める理由」と「注意」の 2 本立て。**止める理由が 1 つでもあれば実行しない**
-
-  | 止める理由 | 判定 | 出典 |
-  |---|---|---|
-  | bare である | `probe.is_bare` | DESIGN.md §3.6 |
-  | 作業ツリーに変更がある | staged / unstaged / unmerged のどれかが空でない | DESIGN.md §8.1 |
-  | `index.lock` が残っている | `git_dir/index.lock` | CLAUDE.md §2 |
-  | コミットが 0 件 | `head.unborn` | — |
-
-- **未追跡ファイルだけなら止めない。** checkout は未追跡ファイルを消さないし、上書きになる
-  場合は git 自身が拒む。ここで止めると、新しいファイルを書きかけの間はブランチを
-  切り替えられなくなる。**件数はダイアログに出す**（黙って通さない）
-- **ダイアログを開いた時点と実行の瞬間で状態は変わりうる。** 表示用に 1 回、コマンドの中で
-  もう 1 回、**同じ関数を通す**。判定するコードは 1 つのまま
-
-*checkout — 対象の渡し方（**実測。ここを外すと ref が増える**）*
-
-- **ローカルブランチは短い名前（`main`）で渡す。** 完全な ref 名（`refs/heads/main`）を渡すと
-  git はブランチとして扱わず、**detached になる**
-- **それ以外は完全な ref 名 ＋ `--detach`。** リモート追跡ブランチは
-  `refs/remotes/origin/main`、タグは `refs/tags/v1`、コミットは SHA
-- **短い名前だけを渡してはいけない。** ローカルに同名が無いと、git は
-  **リモート追跡ブランチを追跡するローカルブランチを勝手に作る**（`checkout.guess` の既定が
-  true）。実測で `git checkout sideline` が `branch 'sideline' set up to track ...` を出して
-  ローカルブランチを 1 本増やした。**ref の新規作成であり CLAUDE.md §1 違反**
-- **短い名前 ＋ `--detach` で塞ごうとしないこと。** DWIM が内部で `-b` を立てるため
-  `fatal: '--detach' cannot be used with '-b/-B/--orphan'` という**見当違いのエラー**になる
-  （実測）。**完全な ref 名で渡すのが正解**
-
-*checkout — その他*
-
-- 対象は **ローカルブランチ / リモート追跡ブランチ / タグ / 任意コミット**
-- detached になる場合は**ダイアログに明示**する（DESIGN.md §8.1）
-- **detached HEAD から離れるときは注意を出す。** いまの HEAD がどの ref からも到達できないなら、
-  離れると辿る手段が無くなる。到達可能性は T-09 の `reach.rs` で手元のグラフから判定する
-  （`git rev-list` を呼ばない。CLAUDE.md §2）
-- `--force` と自動 stash は**提供しない**（CLAUDE.md §1）
-
-*FF マージ*
-
-- `git merge --ff-only <完全な ref 名>` 固定。**`--no-ff` も `--squash` も無い**
-- 主動線は「**現在のブランチに上流を取り込む**」。ref ツリーの現在ブランチ行と、
-  任意 ref の右クリックの 2 つから起動する
-- **FF できるかは手元のグラフから判定する。**「HEAD が対象の祖先で、かつ HEAD ≠ 対象」。
-  上流からの取り込みなら `BranchStatus` の `ahead === 0 && behind > 0` と同じこと
-  - **祖先判定は可視 ref で絞る前の全コミット集合で行う。** 表示を絞ってもグラフから
-    消えるだけで、履歴は変わらない
-- **FF できないときは項目を出すが無効にし、理由をツールチップに書く**
-  （「3 件進んでいるので fast-forward できません」）。押せない理由が分からないのが一番困る
-- **detached HEAD では FF マージを出さない。** 取り込む先のブランチが無い
-
-*起動点*
-
-- ref ツリーの右クリック（既にある項目を有効化）＋ **ダブルクリックで checkout**
-- グラフ行の右クリックに「このコミットを checkout（detached）」を足す
-- **ショートカットは足さない**（DESIGN.md §6.5 の表に無い）
-
-*実行後*
-
-- **全コミットメタ情報を再取得してレーンを計算し直す**（DESIGN.md §8.5）。部分更新は持ち込まない
-- 一覧も取り直す（HEAD の表示と ahead/behind が変わる）
-- 失敗したら**人間向けメッセージ ＋ 展開で生 stderr**（DESIGN.md §3.6）。
-  fetch の `explain` と同じ形にする
-
-**制約**（すべて CLAUDE.md §1, §2）
-
-- **`--force` 付き checkout と自動 stash を提供しない**
-- **非 fast-forward マージを提供しない**（`merge` は常に `--ff-only`）
-- **ローカル追跡ブランチを黙って作らない。** 作るのは確認画面で選ばれたとき
-  （`checkout -b <名前> --track <ref>`）だけ。それ以外は完全な ref 名 ＋ `--detach`
-- **ブランチの削除・リネームと、タグの作成・削除・リネームをしない**
-- **`.git/index.lock` を削除しない。** 検出して表示するだけ
-- git 実行は `exec.rs` を通す（CLAUDE.md §2）
-- 表示文言は `src/i18n/ja.ts` に集約する（CLAUDE.md §6）
-
-**受け入れ条件**
-
-- ▸コマンド: `npm run test:rust` — 判定（**bare / 汚れている / `index.lock` 残留 / unborn で
-  止まること**、**未追跡だけなら止まらないこと**）と、生成リポジトリで
-  **実際に checkout して HEAD が動くこと**、**リモート追跡ブランチを checkout しても
-  ローカルブランチが増えないこと**、FF できるクローンで `merge --ff-only` が通ること、
-  **分岐したクローン（`diverged`）でマージが実行されないこと**
-- ▸コマンド: `npm run test:rust` — 引数の固定テスト（fetch の
-  `fetch_args_stay_within_what_we_allow` と同じ形）で、checkout と merge の引数に
-  `--force` / `-f` / `--orphan` / `-B` / `--no-ff` / `--squash` が現れないこと。
-  **`-b` は追跡ブランチ作成の 1 経路にだけ現れ、他には現れない**こと
-- ▸コマンド: `npm run test:rust` — 確認を経て作った追跡ブランチに**上流が設定される**こと
-  （`--track` を落としても切り替えは成功するので、ここを見ないと静かに壊れる）
-- ▸コマンド: `npm run test:rust` — **フロントが送る JSON をそのまま食える**こと
-  （引数の形だけ見ていても、受け取りの形が違えばコマンドは 1 度も走らない）
-- ▸コマンド: `npm run test:rust` — コピー用の全文（`%B`）が
-  **`subject` + `body` の組み立てでは作れない**こと（要約が複数行のコミット）
-- ▸コマンド: `grep -rn 'Command::new' src-tauri/src` が `exec.rs` だけであること（CLAUDE.md §2）
-- ▸コマンド: `npm run test` / `npm run typecheck` / `npm run check:rust`
-- ▸目視: 汚れたリポジトリで checkout が止まり、**何が汚れているかが分かる**こと
-- ▸目視: タグとコミットで detached になる旨が事前に出ること
-- ▸目視: **リモート追跡ブランチで 2 択が出て、選ばなければブランチが増えない**こと
-- ▸目視: FF できないときに**理由が読める**こと（項目は押せる。説明はダイアログ）
-- ▸目視: checkout 後にグラフの HEAD 印と ahead/behind が更新されること
-- ▸目視: bare リポジトリで checkout が止まること
-- ▸目視: グラフの行を右クリックして、そのコミットを checkout できること
-- ▸目視: 「コミットメッセージをコピー」で**全文**が入ること（複数行のコミットで）
-- ▸目視: **少し古いブランチへ切り替えても見失わない**こと（HEAD へ寄る）／
-  ツールバーの「HEAD へ」が効くこと
-- ▸目視: **グラフの ref チップを右クリック**して、そのブランチの checkout と
-  そのコミットの detached checkout を選べること
-- ▸目視: ブランチ名が長くてもダイアログのボタンが箱から出ないこと
-
-**テスト**: `npm run test:rust`, `npm run test`, `npm run typecheck`, 目視
-
-**T-18 で決めたこと（DESIGN.md §8.1, §8.2 に転記済み）**
-
-- **リモート追跡ブランチは確認画面で選ばせる**（利用者の判断で当初案から変更）。
-  「ローカル追跡ブランチを作って切り替える」か「detached で開く」。
-  **黙って ref を作らない**ことだけは守る。同名のローカルブランチがあれば「作る」を出さない
-- **対象は形で渡し分ける。** ローカルブランチは短い名前、それ以外は完全な ref 名 ＋ `--detach`
-- **判定は `git::ops::preflight` の 1 箇所。** 表示用に 1 回、実行の直前にもう 1 回通す
-  （その間に状態は変わりうる）。走らなかったときは `WriteOutcome.refused` で返す
-- **未追跡だけなら止めない。** `WorkingTree::is_clean()` は未追跡も数えるので、
-  擬似行の判定とは**別の述語**にした
-- **メニュー項目を無効にしない。** 押せない理由は確認画面に出す。無効な項目 ＋
-  ツールチップより、ダイアログ 1 枚のほうが読まれる
-- **FF 可否は手元のグラフから数える**が、**`--ff-only` は外さない**
-  （判定と実行の間にリポジトリは動く）
-- **`index.lock` の判定を `git_dir` 起点に直した。** `<path>/.git` を組み立てていたので、
-  リンクされた作業ツリーと bare で永久に false だった
-- **HEAD の印を `isHeadRef` に寄せた。** 短い名前と完全な ref 名を比べていて、
-  ref チップもブランチツリーも**一度も印が出ていなかった**
-- **serde の `rename_all` は変種の名前しか変えない。** 中のフィールドまで camelCase に
-  するには `rename_all_fields` が要る。落とすと `kind` だけ合って
-  「missing field `remote_ref`」で落ちる（**目視で発覚**）。
-  `the_wire_format_matches_what_the_front_end_sends` が形を固定している
-- **「FF マージ」と書かない。** 何が起きるのか分からないという指摘を受けて、
-  メニューは「main に origin/x を取り込む」、ダイアログは「取り込む（早送り）」にし、
-  **取り込めないときも何ができないのかを説明する**（`ConfirmDialog` の `help`）
-- **checkout のあとは HEAD へ寄せる。** HEAD が動いても選択行はそのままなので、
-  少し古いブランチへ切り替えると選択が数百行下に取り残される（目視で指摘）。
-  `Ctrl+H` を知らなくても戻れるよう、ツールバーにも「HEAD へ」を置いた
-- **ref チップの右クリックは行とは別のメニュー。** ブランチ名の上で右クリックしたとき、
-  「そのブランチへ切り替える」のか「そのコミットを detached で見る」のかは
-  利用者にしか決められないので、**両方出す**
-- **ダイアログのボタンは折り返す。** 共通の `.button` は `white-space: nowrap` なので、
-  ブランチ名が長いと**ボタンが箱の外へ出る**（実測 507px / 箱 480px。左へ 52px）
-- **コミットメッセージのコピーは `%B` を git に聞き直す。** 一覧が持っているのは
-  `subject`（要約 1 行）だけで、`subject` + `body` から組み立てると
-  **要約が複数行のコミットで改行が潰れる**（`messages` の生成リポジトリで実測）
-
-**T-18 で入れなかったもの（承知の上）**
-
-- **detached HEAD から離れるときの警告。** git 自身が警告し reflog に残るうえ、
-  **Givsoner はコミットを作れない**ので、失われるのは「ターミナルで detached のまま
-  コミットした場合」だけ。判定に ref 全部からの到達可能性が要るので、必要になったら入れる
-
-**非スコープ**: clone（T-19）／ブランチの削除・リネーム（恒久的に非対象）／
-タグの操作（恒久的に非対象）
-
----
-
-> **ここから先は骨子。着手前に詳細化すること**（このファイルの規約 5）。
-
 ## - [ ] T-19 [Phase 7] clone
 
-**目的**: HTTPS / SSH の URL からリポジトリを clone して登録する。
+**目的**: HTTPS / SSH の URL からリポジトリを clone して登録する。**Phase 7 はこれで終わり。**
 
-**参照**: DESIGN.md §8.4, §3.3 / CLAUDE.md §1
+**参照**: DESIGN.md §8.4, §3.3, §3.6, §12.2 / CLAUDE.md §1, §2, §4, §6
 
 **依存**: T-17
 
-**作成・変更するファイル**: `src-tauri/src/git/ops.rs`(変更) / `src/components/setup/CloneDialog.tsx`(新)
-
-**T-17 からの申し送り**
+**T-18 までの申し送り（着手時に確認すること。規約 4）**
 
 - **進捗と中止は `exec::run_progress` ＋ `exec::Cancel` がそのまま使える。**
   `clone --progress` の stderr は fetch と同じ形なので、`fetchprogress.rs` のパーサも
   そのまま通る（**ラベルは翻訳されうる**ので `(済/全)` と `%` だけを構造で取る）
 - **中止で落とせるのは git 本体だけ。** `git-remote-https` のような子は残りうる。
-  親が死ねば追って終わるが即座ではないので、**理屈の上では「中止しています…」のまま
-  返ってこない**経路がある。プロセスツリーごと落とすには Windows の Job Object が要り、
-  依存が増えるので T-17 では入れていない。**clone は fetch より長く走るので、
-  ここで決着を付けること**（入れないなら入れない理由を DESIGN.md に書く）
-- **中止しても取り込み済みのものは戻らない。** clone では**残骸ディレクトリ**がそれに当たる
+  親が死ねば追って終わるが即座ではないので、理屈の上では「中止しています…」のまま
+  返ってこない経路がある。プロセスツリーごと落とすには Windows の Job Object が要り、
+  依存が増えるので T-17 では入れていない。**clone は fetch より長く走るので、ここで
+  決着を付けること**（入れないなら、入れない理由を DESIGN.md §8.4 に書く）
+- 進捗バーは `components/common/LoadProgress.tsx`。**総数 `null` で不定表示**になるので、
+  割合の出ない段階もそのまま流せる。`estimated={false}`（git が数えた実数なので「約」は嘘）
+- ダイアログは `components/common/ConfirmDialog.tsx` の `ConfirmDialog` / `ResultDialog`。
+  **止める理由（`blockers`）は実行ボタンごと消える**ので、入力の検証はそちらに載せない
+- `settings.workspaceRoot` は **T-01 で既にある**（`Option<String>`、既定 `None`）。新設不要
+- 登録は `add_repository(path)`。**同じパスが登録済みならその登録が返る**ので、
+  clone 後にそのまま呼んでよい
+- **`exec::run_progress` の `repo` は `Option<&Path>`。** clone は「まだ無いフォルダ」を
+  作る操作なので、`-C` は**親ディレクトリ**に向けるか `None` にして絶対パスで渡すこと
+- **serde の `rename_all` は変種の名前しか変えない。** フロントから構造体を送るなら
+  `rename_all_fields` を忘れないこと（T-18 でここに嵌まった）
+- **ダイアログのボタンは `.modal__actions .button` で折り返す。** URL やパスを
+  ラベルに入れると箱から出る（CLAUDE.md §6）
 
-**実装内容（骨子）**
+**作成・変更するファイル**
 
-- URL 入力 → 既定ワークスペースルートから `<root>/<name>` を埋めたダイアログを毎回出して確認
-- `git clone --progress <url> <dir>` の stderr をパースして実バー表示
-- 失敗時は確認ダイアログの上で残骸ディレクトリを削除
-- 完了したら自動で登録して開く
+| 種別 | パス | 内容 |
+|---|---|---|
+| 変更 | `src-tauri/src/git/ops.rs` | `clone` の実行と結果、残骸の後始末 |
+| 変更 | `src-tauri/src/lib.rs` | `clone_repository` / 進捗イベントの登録 |
+| 新規 | `src/components/setup/CloneDialog.tsx` | URL と保存先の入力 ＋ 進捗 |
+| 新規 | `src/lib/clonePath.ts` | URL → 既定のフォルダ名（純関数。テストはここ） |
+| 変更 | `src/components/sidebar/RepositoryList.tsx` | 「clone」ボタン |
+| 変更 | `src/components/setup/EmptyState.tsx` | 空状態からも clone できるようにする |
+| 変更 | `src/App.tsx` / `src/lib/ipc.ts` / `src/i18n/ja.ts` / `src/styles/app.css` | 配線 |
 
-**制約**（CLAUDE.md §1）
+**実装内容**
 
-- **shallow clone (`--depth`) と `--recurse-submodules` を提供しない**
-- 認証は git CLI（Git Credential Manager）に完全委譲する。アプリは資格情報を扱わない
-- `GIT_TERMINAL_PROMPT=0` により端末待ちでハングしない
+*実行（Rust）*
 
-**受け入れ条件（骨子）**: 認証が必要なリポジトリで GCM のウィンドウが出て完了すること、
-中断時に残骸が残らないこと、進捗バーが動くこと。
+- コマンドは **`clone --progress <url> <dir>`** で固定（DESIGN.md §8.4）
+  - **`--depth` / `--recurse-submodules` / `--branch` / `--single-branch` を付けない**
+    （CLAUDE.md §1。履歴グラフが目的なので shallow は本末転倒）
+  - **`--progress` は必須**（stderr が端末でないと git は進捗を出さない）
+  - 引数の固定は `fetch_args_stay_within_what_we_allow` と同じ形のテストで縛る
+- **`-C` を clone 先に向けない**（まだ存在しない）。`exec::run_progress` の `repo` は
+  `None` にして、URL と保存先を絶対パスで渡す
+- 認証は git CLI に完全委譲する。**アプリは URL 以外の資格情報を受け取らない**（CLAUDE.md §4）
 
-**テスト**: 目視（実リポジトリの clone）
+*保存先の決定（`clonePath.ts`。ここが単体テストの本体）*
 
-**非スコープ**: submodule 対応（v2.0）
+- URL から既定のフォルダ名を作る。**`.git` を落とし、末尾の `/` を無視する**
+  - `https://github.com/o/repo.git` → `repo`
+  - `git@github.com:o/repo.git` → `repo`（**SCP 形式は `:` が区切り**。URL としてパースできない）
+  - `https://host/o/repo/` → `repo`
+  - `https://host/o/repo` → `repo`
+- **決められないときは空を返す**（利用者に入力させる）。適当な名前を作らない
+- 保存先は `<workspaceRoot>/<名前>`。`workspaceRoot` が未設定なら**保存先を必ず選ばせる**
+- **既にあるフォルダには clone しない。** git も拒むが、先に検出して
+  「そのフォルダは既にあります」と言う（git の英語 stderr より読みやすい）
+
+*進捗と中止*
+
+- fetch と同じ `run_progress` ＋ `Cancel`。イベント名は clone 専用に分ける
+  （fetch の受け口と混ざると、どちらのバーか分からなくなる）
+- **中止したら残骸ディレクトリを消す。** clone は「途中まで取り込まれた」が意味を持たない
+  （中途半端なリポジトリは開けない）ので、fetch とは扱いを変える
+  - **消してよいのは自分が作ったフォルダだけ。** 実行前に存在しなかったことを確認し、
+    確認できなければ**消さずに場所を伝える**。利用者の既存フォルダを消す事故を構造的に潰す
+- 失敗時も同じ後始末をする
+
+*結果*
+
+- 成功したら `add_repository` で登録し、**そのまま開く**
+- 失敗は人間向けの 1 行 ＋ 展開で生 stderr（DESIGN.md §3.6）。認証まわりの言い換えは
+  `ops.rs` の `explain` を使い回す（fetch と同じ文言でよい）
+- **stderr は `redact.rs` を通す**（CLAUDE.md §4）。`https://<user>:<token>@…` を
+  URL 欄に貼られる可能性があるので、**入力した URL も画面とログではマスクする**
+
+*起動点*
+
+- リポジトリ一覧のヘッダに「clone」。**空状態（登録 0 件）からも押せること**
+- ショートカットは足さない（DESIGN.md §6.5 の表に無い）
+
+**制約**
+
+- **shallow clone (`--depth`) と `--recurse-submodules` を提供しない**（CLAUDE.md §1）
+- **ブランチ指定 (`--branch`) と `--single-branch` も提供しない**（グラフが欠ける）
+- アプリは資格情報を扱わない。`GIT_TERMINAL_PROMPT=0` で端末待ちにならない（CLAUDE.md §2）
+- 秘匿情報は `redact.rs` を通す（CLAUDE.md §4）
+- 表示文言は `src/i18n/ja.ts` に集約する（CLAUDE.md §6）
+- git 実行は `exec.rs` を通す（CLAUDE.md §2）
+
+**受け入れ条件**
+
+- ▸コマンド: `npm run test` — URL → フォルダ名（**`.git` 付き / 無し / 末尾スラッシュ /
+  SCP 形式 (`git@host:o/repo.git`) / 決められない入力**）
+- ▸コマンド: `npm run test:rust` — 引数の固定テストで `--depth` / `--recurse-submodules` /
+  `--branch` / `--single-branch` が現れないこと
+- ▸コマンド: `npm run test:rust` — **生成した bare からローカル clone できる**こと、
+  **既にあるフォルダを指定すると実行前に止まる**こと、
+  **失敗しても自分が作らなかったフォルダを消さない**こと
+- ▸コマンド: `npm run test:rust` — 資格情報付き URL が結果とログでマスクされること
+- ▸コマンド: `npm run test` / `npm run typecheck` / `npm run check:rust`
+- ▸目視: 認証が必要なリポジトリで GCM のウィンドウが出て完了すること
+- ▸目視: 進捗バーが動き、完了後にそのリポジトリが開くこと
+- ▸目視: **中断すると残骸フォルダが残らない**こと
+- ▸目視: 既存フォルダを指定したときに、**消さずに**その旨が出ること
+
+**テスト**: `npm run test:rust`, `npm run test`, `npm run typecheck`, 目視
+
+**非スコープ**: submodule 対応（v2.0）／リモートの追加・削除・URL 変更（v1 の範囲外）
 
 **注記**: 3 日基準の例外（2 日程度）。
 
 ---
+
+> **ここから先は骨子。着手前に詳細化すること**（このファイルの規約 5）。
 
 # Phase 8 — AI レビュー
 
@@ -721,3 +579,4 @@ JSON パース失敗時に Markdown が表示され「構造化に失敗しま�
 | T-15 | 5 | 任意 2 コミット間差分 | `50a12fb` |
 | T-16 | 5 | 作業ツリーの read-only 表示 | `fa7f998` |
 | T-17 | 6 | fetch と放置警告 | `b12ec13` `6677914` `4e61936` |
+| T-18 | 6 | checkout と FF マージのガード（**Phase 6 完了**） | `6ee4e1f` `cde5db4` `46ed744` |
