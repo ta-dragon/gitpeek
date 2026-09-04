@@ -74,6 +74,13 @@ type Props = {
   onSelect: (sha: string, compare: boolean) => void;
   /** 行の右クリックから checkout の確認を出す（T-18。docs/DESIGN.md §8.1）。 */
   onCheckoutCommit: (sha: string) => void;
+  /**
+   * コミットメッセージ**全文**をコピーする。
+   *
+   * ここで `commit.subject` を渡してはいけない。**要約 1 行しか入っていない。**
+   * 全文は git に聞く必要があるので、リポジトリを知っている側でやる。
+   */
+  onCopyMessage: (sha: string) => void;
   /** 短い通知（コピーの結果）。 */
   onNotice: (message: string) => void;
   onColumnsChange: (next: ColumnWidths) => void;
@@ -94,6 +101,7 @@ export function CommitList({
   order,
   onSelect,
   onCheckoutCommit,
+  onCopyMessage,
   onNotice,
   onColumnsChange,
   onOrderChange,
@@ -400,6 +408,7 @@ export function CommitList({
           items={rowMenuItems(
             shown.find((commit) => commit.sha === rowMenu.sha) ?? null,
             onCheckoutCommit,
+            onCopyMessage,
             onNotice,
           )}
           onClose={() => setRowMenu(null)}
@@ -418,6 +427,7 @@ export function CommitList({
 function rowMenuItems(
   commit: CommitMeta | null,
   onCheckoutCommit: (sha: string) => void,
+  onCopyMessage: (sha: string) => void,
   onNotice: (message: string) => void,
 ): ContextMenuItem[] {
   if (commit === null) return [];
@@ -431,8 +441,9 @@ function rowMenuItems(
       onSelect: () => void copyText(commit.sha, onNotice),
     },
     {
-      label: ja.commits.copySubject,
-      onSelect: () => void copyText(commit.subject, onNotice),
+      // **全文。** 一覧が持っているのは要約 1 行だけなので、git に聞きに行く。
+      label: ja.commits.copyMessage,
+      onSelect: () => onCopyMessage(commit.sha),
     },
   ];
 }

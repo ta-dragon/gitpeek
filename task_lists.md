@@ -312,6 +312,10 @@ graph LR
   **`-b` は追跡ブランチ作成の 1 経路にだけ現れ、他には現れない**こと
 - ▸コマンド: `npm run test:rust` — 確認を経て作った追跡ブランチに**上流が設定される**こと
   （`--track` を落としても切り替えは成功するので、ここを見ないと静かに壊れる）
+- ▸コマンド: `npm run test:rust` — **フロントが送る JSON をそのまま食える**こと
+  （引数の形だけ見ていても、受け取りの形が違えばコマンドは 1 度も走らない）
+- ▸コマンド: `npm run test:rust` — コピー用の全文（`%B`）が
+  **`subject` + `body` の組み立てでは作れない**こと（要約が複数行のコミット）
 - ▸コマンド: `grep -rn 'Command::new' src-tauri/src` が `exec.rs` だけであること（CLAUDE.md §2）
 - ▸コマンド: `npm run test` / `npm run typecheck` / `npm run check:rust`
 - ▸目視: 汚れたリポジトリで checkout が止まり、**何が汚れているかが分かる**こと
@@ -321,6 +325,7 @@ graph LR
 - ▸目視: checkout 後にグラフの HEAD 印と ahead/behind が更新されること
 - ▸目視: bare リポジトリで checkout が止まること
 - ▸目視: グラフの行を右クリックして、そのコミットを checkout できること
+- ▸目視: 「コミットメッセージをコピー」で**全文**が入ること（複数行のコミットで）
 
 **テスト**: `npm run test:rust`, `npm run test`, `npm run typecheck`, 目視
 
@@ -342,6 +347,16 @@ graph LR
   リンクされた作業ツリーと bare で永久に false だった
 - **HEAD の印を `isHeadRef` に寄せた。** 短い名前と完全な ref 名を比べていて、
   ref チップもブランチツリーも**一度も印が出ていなかった**
+- **serde の `rename_all` は変種の名前しか変えない。** 中のフィールドまで camelCase に
+  するには `rename_all_fields` が要る。落とすと `kind` だけ合って
+  「missing field `remote_ref`」で落ちる（**目視で発覚**）。
+  `the_wire_format_matches_what_the_front_end_sends` が形を固定している
+- **「FF マージ」と書かない。** 何が起きるのか分からないという指摘を受けて、
+  メニューは「main に origin/x を取り込む」、ダイアログは「取り込む（早送り）」にし、
+  **取り込めないときも何ができないのかを説明する**（`ConfirmDialog` の `help`）
+- **コミットメッセージのコピーは `%B` を git に聞き直す。** 一覧が持っているのは
+  `subject`（要約 1 行）だけで、`subject` + `body` から組み立てると
+  **要約が複数行のコミットで改行が潰れる**（`messages` の生成リポジトリで実測）
 
 **T-18 で入れなかったもの（承知の上）**
 

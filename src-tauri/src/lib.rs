@@ -567,6 +567,33 @@ async fn load_commit_detail(
     .map_err(|error| error.to_string())?
 }
 
+/// コミットメッセージをそのまま（`%B`）。**コピー用**。
+///
+/// `load_commit_detail` の `subject` + `body` から組み直さない。`%s` は最初の段落を
+/// 1 行に潰すので、要約が複数行にまたがるコミットで改行が消える。
+#[tauri::command]
+async fn load_commit_message(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    sha: String,
+) -> Result<String, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        git::diff::commit_message(&EmittingLog::new(&handle, &log), &program, &path, &sha)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// 変更ファイル一覧（docs/DESIGN.md §7.3）。
 ///
 /// **`parent` はフロントが決める。** マージコミットは差分が一意に決まらないので
@@ -920,6 +947,7 @@ pub fn run() {
             compute_lane_layout,
             compute_branch_status,
             load_commit_detail,
+            load_commit_message,
             load_changed_files,
             load_file_diff,
             load_working_tree,

@@ -123,6 +123,30 @@ pub fn commit_detail(
         .ok_or_else(|| format!("コミットの本文を読み取れませんでした: {sha}"))
 }
 
+/// コミットメッセージを**そのまま**取る（`%B`）。
+///
+/// [`commit_detail`] の `subject` + `body` から組み直してはいけない。**`%s` は
+/// 最初の段落を 1 行に潰す**ので、要約が複数行にまたがるコミットで改行が消える
+/// （`messages` の生成リポジトリで実測）。
+///
+/// 区切り文字を使わない単一フィールドなので、メッセージに何が入っていても壊れない。
+pub fn commit_message(
+    log: &dyn LogSink,
+    program: &str,
+    path: &Path,
+    sha: &str,
+) -> Result<String, String> {
+    let output = exec::run(log, program, Some(path), &["show", "-s", "--format=%B", sha])?;
+    if !output.ok() {
+        return Err(output.failure("コミットメッセージを取得できませんでした"));
+    }
+    // 文字コードは git が UTF-8 へ寄せる（commit の encoding ヘッダ）。
+    // `%B` は末尾に改行が 1 つ付く。
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .trim_end_matches('\n')
+        .to_string())
+}
+
 /// 失敗を人間向けの文にする（CLAUDE.md §6）。
 ///
 /// **共通の祖先が無い 2 点だけは言い換える。** git は `no merge base` としか言わないので、

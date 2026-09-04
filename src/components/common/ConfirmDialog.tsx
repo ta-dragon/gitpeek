@@ -22,6 +22,12 @@ export type ConfirmAction = {
 export function ConfirmDialog({
   title,
   lead,
+  /**
+   * その操作が何をするのかの説明。**止められていても出す。**
+   *
+   * 「できません」だけ出しても、何ができないのかが分からない。
+   */
+  help,
   /** 止める理由。**1 つでもあれば `actions` は出さない。** */
   blockers = [],
   /** 注意。実行はできる。 */
@@ -31,6 +37,7 @@ export function ConfirmDialog({
 }: {
   title: string;
   lead: string;
+  help?: string;
   blockers?: string[];
   notes?: string[];
   actions: ConfirmAction[];
@@ -44,6 +51,7 @@ export function ConfirmDialog({
       <div className="modal__box">
         <h2 className="modal__title">{title}</h2>
         <p className="modal__lead">{lead}</p>
+        {help !== undefined && <p className="modal__note">{help}</p>}
 
         {blockers.map((text) => (
           <p key={text} className="modal__blocker">

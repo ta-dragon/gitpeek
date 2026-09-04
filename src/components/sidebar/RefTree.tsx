@@ -170,7 +170,7 @@ export function RefTree({
           x={menu.x}
           y={menu.y}
           onClose={() => setMenu(null)}
-          items={menuItems(menu.entry, refs, {
+          items={menuItems(menu.entry, refs, head.branch, {
             onJump,
             onNotice,
             onVisibleRefsChange,
@@ -268,6 +268,8 @@ function groupLabel(group: RefGroup): string {
 function menuItems(
   entry: RefEntry,
   refs: RefEntry[],
+  /** HEAD が乗っているローカルブランチの短い名前。detached なら null。 */
+  headBranch: string | null,
   actions: {
     onJump: (sha: string) => void;
     onNotice: (message: string) => void;
@@ -282,7 +284,13 @@ function menuItems(
 
   if (entry.kind !== "tag") {
     items.push({
-      label: ja.refTree.merge,
+      // **どちらへ取り込むのかを名前で出す。** 「現在のブランチに」だけでは
+      // 何が何に入るのか読めない。detached のときは先が無いので言い切らない。
+      label:
+        headBranch === null
+          ? ja.refTree.merge
+          : ja.refTree.mergeInto(headBranch, entry.shortName),
+      title: ja.refTree.mergeHint,
       onSelect: () => actions.onMerge(entry),
     });
     items.push({

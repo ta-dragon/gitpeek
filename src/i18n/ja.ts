@@ -193,8 +193,11 @@ export const ja = {
     // **コミットへの checkout は必ず detached。** ブランチを作る経路はここに置かない。
     checkoutHere: "このコミットを checkout（detached）",
     copySha: "SHA をコピー",
-    copySubject: "メッセージをコピー",
+    // **全文。** 一覧が持っているのは要約 1 行なので、git に聞き直している。
+    copyMessage: "コミットメッセージをコピー",
     copied: (text: string) => `コピーしました: ${text}`,
+    // 全文は長いので、通知には字数だけ出す。
+    copiedMessage: (lines: number) => `コミットメッセージをコピーしました（${lines} 行）`,
     copyFailed: "クリップボードへコピーできませんでした。",
   },
 
@@ -240,7 +243,13 @@ export const ja = {
 
     // 右クリックメニュー。
     checkout: "checkout",
-    merge: "現在のブランチに FF マージ",
+    // **どちらへ取り込むのかを名前で出す。**「現在のブランチ」だけでは、
+    // 何が何に入るのか読めない（利用者の指摘）。
+    mergeInto: (into: string, from: string) => `${into} に ${from} を取り込む`,
+    // detached では取り込む先が無い。理由はダイアログで説明する。
+    merge: "現在のブランチに取り込む",
+    mergeHint:
+      "早送り（fast-forward）だけを行います。マージコミットは作らず、手元のコミットも書き換えません。",
     onlyThis: "このブランチだけ表示",
     jump: "先頭コミットへジャンプ",
     copyName: "名前をコピー",
@@ -285,14 +294,21 @@ export const ja = {
       `いまの HEAD (${sha}) はどのブランチからも辿れません。離れると戻る手段が無くなるので、必要なら SHA を控えてください。`,
 
     // --- FF マージ ----------------------------------------------------
-    mergeTitle: "現在のブランチに FF マージ",
+    //
+    // **「FF マージ」と書かない。** 何が起きるのか分からないという指摘を受けて、
+    // 「早送り」と、実際に何が変わるかで言い換えた。
+    mergeTitle: "取り込む（早送り）",
     mergeLead: (branch: string, from: string, n: number) =>
-      `${branch} に ${from} を取り込みます（${n} 件）。fast-forward なので新しいコミットは作りません。`,
+      `${branch} に ${from} を取り込みます。${branch} に無い ${n} 件のコミットが足されます。`,
+    // 取り込めないときも出す。**何ができないのかを先に説明する。**
+    mergeHelp:
+      "早送り（fast-forward）は、手元のブランチを相手の位置まで進めるだけの取り込みです。マージコミットは作らず、手元にあるコミットを書き換えたり消したりしません。そのため、手元にだけあるコミットが 1 件でもあると実行できません。",
     mergeRun: "取り込む",
     mergeAhead: (n: number) =>
-      `手元が ${n} 件進んでいるので fast-forward できません。Givsoner は fast-forward 以外のマージを行いません（CLAUDE.md §1）。`,
-    mergeUpToDate: "取り込むものがありません。",
-    mergeDetached: "detached HEAD なので、取り込む先のブランチがありません。",
+      `手元にだけあるコミットが ${n} 件あるので、早送りになりません。Givsoner は早送り以外の取り込み方を持っていないので、この操作はできません（ターミナルで merge / rebase を選んでください）。`,
+    mergeUpToDate: "取り込むものがありません。相手のコミットはすべて手元にあります。",
+    mergeDetached:
+      "いまブランチから外れた状態（detached HEAD）なので、取り込む先のブランチがありません。先にブランチへ切り替えてください。",
     mergeUnknown:
       "読み込んだコミットの外を指しているので判定できません。fetch してからもう一度実行してください。",
 

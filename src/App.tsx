@@ -43,6 +43,7 @@ import { clearCompare, selectCommit, swapEnds } from "./lib/compareSelection";
 import {
   detectGit,
   isGitUsable,
+  loadCommitMessage,
   MIN_VERSION_FALLBACK,
   type ColumnWidths,
   type CommitMeta,
@@ -596,6 +597,22 @@ function CommitWorkspace({
   onNotice: (message: string) => void;
 }) {
   const { state: uiState } = useUiState();
+
+  /**
+   * コミットメッセージ**全文**をコピーする。
+   *
+   * 一覧が持っているのは `subject`（要約 1 行）だけなので、git に聞き直す。
+   * `subject` + `body` から組み立てると、**要約が複数行のコミットで改行が潰れる**。
+   */
+  const copyMessage = async (sha: string) => {
+    try {
+      const message = await loadCommitMessage(entry.id, sha);
+      await navigator.clipboard.writeText(message);
+      onNotice(ja.commits.copiedMessage(message.split("\n").length));
+    } catch {
+      onNotice(ja.commits.copyFailed);
+    }
+  };
   const perRepository = uiState.perRepository[entry.id] ?? DEFAULT_REPOSITORY_UI_STATE;
 
   // 遷移そのものは純関数（`lib/compareSelection.ts`）。ここは保存するだけ。
@@ -762,6 +779,7 @@ function CommitWorkspace({
               order={order}
               onSelect={select}
               onCheckoutCommit={onCheckoutCommit}
+              onCopyMessage={(sha) => void copyMessage(sha)}
               onNotice={onNotice}
               onColumnsChange={setColumns}
               onOrderChange={(next) => void snapshots.setOrder(next)}

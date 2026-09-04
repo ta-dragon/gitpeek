@@ -478,6 +478,16 @@ export function loadCommitDetail(
  * 既定は第 1 親（docs/DESIGN.md §7.4）。**ルートコミットでは null** を渡すこと
  * （空ツリーとの差分になる）。
  */
+/**
+ * コミットメッセージをそのまま（`%B`）。**コピー用。**
+ *
+ * `loadCommitDetail` の `subject` + `body` から組み立て直さないこと。
+ * **`%s` は最初の段落を 1 行に潰す**ので、要約が複数行にまたがるコミットで改行が消える。
+ */
+export function loadCommitMessage(repositoryId: string, sha: string): Promise<string> {
+  return invoke<string>("load_commit_message", { repositoryId, sha });
+}
+
 export function loadChangedFiles(
   repositoryId: string,
   sha: string,

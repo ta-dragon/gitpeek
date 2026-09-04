@@ -364,8 +364,12 @@ pub fn preflight(
 }
 
 /// checkout の対象。**渡し方が形で変わる**（docs/DESIGN.md §8.1。実測）。
+///
+/// **`rename_all` は変種の名前しか変えない。** 中のフィールドまで camelCase にするには
+/// `rename_all_fields` が要る。付け忘れると `kind` だけ合って
+/// 「missing field `remote_ref`」で落ちる（実際に落ちた）。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "kind")]
 pub enum CheckoutTarget {
     /// 既にあるローカルブランチ。**短い名前で渡す** — 完全な ref 名
     /// （`refs/heads/main`）を渡すと git はブランチとして扱わず detached になる。
@@ -753,6 +757,44 @@ mod tests {
         assert!(!targets[0].args().contains(&"-b"));
         assert!(!targets[1].args().contains(&"-b"));
         assert!(targets[2].args().contains(&"-b"));
+    }
+
+    /// **フロントが送る JSON をそのまま食えること。**
+    ///
+    /// 引数の組み立てだけを見ていても、受け取りの形が違えばコマンドは 1 度も走らない。
+    /// `rename_all` は変種の名前しか変えないので、`rename_all_fields` を落とすと
+    /// ここで落ちる（実際に「missing field `remote_ref`」で落ちた）。
+    #[test]
+    fn the_wire_format_matches_what_the_front_end_sends() {
+        let branch: CheckoutTarget =
+            serde_json::from_str(r#"{"kind":"branch","name":"main"}"#).expect("branch");
+        assert_eq!(
+            branch,
+            CheckoutTarget::Branch {
+                name: "main".to_string()
+            }
+        );
+
+        let detach: CheckoutTarget =
+            serde_json::from_str(r#"{"kind":"detach","rev":"refs/tags/v1"}"#).expect("detach");
+        assert_eq!(
+            detach,
+            CheckoutTarget::Detach {
+                rev: "refs/tags/v1".to_string()
+            }
+        );
+
+        let track: CheckoutTarget = serde_json::from_str(
+            r#"{"kind":"track","remoteRef":"refs/remotes/origin/x","branch":"x"}"#,
+        )
+        .expect("track");
+        assert_eq!(
+            track,
+            CheckoutTarget::Track {
+                remote_ref: "refs/remotes/origin/x".to_string(),
+                branch: "x".to_string()
+            }
+        );
     }
 
     /// マージは `--ff-only` 固定（CLAUDE.md §1）。

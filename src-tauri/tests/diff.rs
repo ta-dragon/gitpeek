@@ -256,6 +256,38 @@ fn splits_the_subject_from_the_body() {
     assert_eq!(detail.body, "本文の段落。");
 }
 
+/// **コピー用の全文は `%s` + `%b` の組み立てでは作れない。**
+///
+/// `%s` が最初の段落を 1 行に潰すので、要約が複数行にまたがるコミットで改行が消える。
+/// `commit_message`（`%B`）はそのまま返す。
+#[test]
+fn the_raw_message_keeps_line_breaks_that_the_subject_loses() {
+    let snapshot = snapshot_of("messages");
+    let commit = commit_by_subject(&snapshot, "1 行目の要約 2 行目も同じ段落");
+    let repo = fixtures().join("messages");
+
+    let detail = diff::commit_detail(&log(), "git", &repo, &commit.sha).expect("本文");
+    let raw = diff::commit_message(&log(), "git", &repo, &commit.sha).expect("全文");
+
+    // 組み立て直すと改行が空白に潰れている。
+    let rebuilt = format!("{}\n\n{}", detail.subject, detail.body);
+    assert_ne!(raw, rebuilt, "潰れていないなら前提が変わっている");
+
+    assert_eq!(raw, "1 行目の要約\n2 行目も同じ段落\n\n本文の段落。");
+}
+
+/// 本文の無いコミットは要約だけ。**末尾に空行を付けない。**
+#[test]
+fn the_raw_message_of_a_subject_only_commit_has_no_trailing_blank() {
+    let snapshot = snapshot_of("linear");
+    let commit = &snapshot.commits[0];
+    let raw = diff::commit_message(&log(), "git", &fixtures().join("linear"), &commit.sha)
+        .expect("全文");
+
+    assert!(!raw.ends_with('\n'), "末尾に改行が残っている: {raw:?}");
+    assert_eq!(raw, commit.subject);
+}
+
 /// 存在しない SHA は握り潰さずエラーにする。
 #[test]
 fn an_unknown_sha_is_an_error() {

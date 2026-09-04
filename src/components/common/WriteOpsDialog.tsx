@@ -77,6 +77,8 @@ export function WriteOpsDialog({
           ? ja.writeOps.mergeLead(request.branch ?? "", request.revLabel, verdict.behind)
           : request.revLabel
       }
+      // **取り込めないときも説明を出す。** 「できません」だけでは何ができないのか読めない。
+      help={ja.writeOps.mergeHelp}
       blockers={reasons}
       actions={[
         {
