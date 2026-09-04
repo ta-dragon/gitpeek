@@ -36,7 +36,11 @@ pub struct WorkingTree {
     pub untracked: Vec<String>,
     /// 衝突しているパス。ステージ済みでも未ステージでもないので別に持つ。
     pub unmerged: Vec<String>,
-    /// `.git/index.lock` が残っている。**消さない。表示するだけ**（CLAUDE.md §2）。
+    /// `index.lock` が残っている。**消さない。表示するだけ**（CLAUDE.md §2）。
+    ///
+    /// 場所は `rev-parse --absolute-git-dir` に聞く。**`<path>/.git` を組み立てない** —
+    /// リンクされた作業ツリーでは `.git` がファイル、bare では無いので、
+    /// どちらでも「残っていない」と静かに嘘をつく。
     pub index_lock_present: bool,
 }
 
@@ -68,7 +72,8 @@ pub fn working_tree(log: &dyn LogSink, program: &str, repo: &Path) -> Result<Wor
         unstaged,
         untracked: status.untracked,
         unmerged: status.unmerged,
-        index_lock_present: repo.join(".git").join("index.lock").exists(),
+        index_lock_present: super::repo::git_dir(log, program, repo)
+            .is_some_and(|dir| dir.join("index.lock").is_file()),
     })
 }
 

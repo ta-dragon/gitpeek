@@ -188,6 +188,14 @@ export const ja = {
     parent: "親",
     child: "子",
     empty: "コミットがありません。",
+
+    // 行の右クリック（T-18。docs/DESIGN.md §8.1）。
+    // **コミットへの checkout は必ず detached。** ブランチを作る経路はここに置かない。
+    checkoutHere: "このコミットを checkout（detached）",
+    copySha: "SHA をコピー",
+    copySubject: "メッセージをコピー",
+    copied: (text: string) => `コピーしました: ${text}`,
+    copyFailed: "クリップボードへコピーできませんでした。",
   },
 
   refTree: {
@@ -233,13 +241,75 @@ export const ja = {
     // 右クリックメニュー。
     checkout: "checkout",
     merge: "現在のブランチに FF マージ",
-    notYet: "T-18 で実装します。",
     onlyThis: "このブランチだけ表示",
     jump: "先頭コミットへジャンプ",
     copyName: "名前をコピー",
     copySha: "SHA をコピー",
     copied: (text: string) => `コピーしました: ${text}`,
     copyFailed: "クリップボードへコピーできませんでした。",
+  },
+
+
+  // checkout と FF マージ（T-18。docs/DESIGN.md §8.1, §8.2）。
+  //
+  // **止める理由と注意を混ぜない。** 止める理由が出ているときは実行ボタンを出さない。
+  writeOps: {
+    close: "閉じる",
+    cancel: "やめる",
+    details: "詳細",
+
+    // --- checkout -----------------------------------------------------
+    checkoutTitle: "checkout",
+    // 対象の説明。リモート追跡ブランチだけは切り替え方を選ばせる。
+    leadBranch: (name: string) => `ブランチ ${name} に切り替えます。`,
+    leadTag: (name: string) => `タグ ${name} に切り替えます。`,
+    leadCommit: (sha: string) => `コミット ${sha} に切り替えます。`,
+    leadRemote: (name: string) =>
+      `リモート追跡ブランチ ${name} です。切り替え方を選んでください。`,
+
+    // 選択肢のボタン。
+    actionSwitch: (name: string) => `${name} に切り替える`,
+    actionTrack: (name: string) => `ローカルブランチ ${name} を作って切り替える`,
+    actionDetach: "detached で開く",
+
+    // 注意（止める理由ではない）。
+    noteDetach:
+      "detached HEAD になります。ブランチから外れた状態で履歴を見るだけなら、これで足ります。",
+    noteTrack: (branch: string, remote: string) =>
+      `ローカルブランチ ${branch} を作り、${remote} を追跡します。ref を新しく作る唯一の操作です。`,
+    // 未追跡は止めない（docs/DESIGN.md §8.1）。ただし黙って通さない。
+    noteUntracked: (n: number) =>
+      `未追跡ファイルが ${n} 件あります。checkout で消えることはありませんが、切り替え先に同じ名前のファイルがあると git が拒みます。`,
+    // detached から離れると辿れなくなる場合。
+    noteLeavingDetached: (sha: string) =>
+      `いまの HEAD (${sha}) はどのブランチからも辿れません。離れると戻る手段が無くなるので、必要なら SHA を控えてください。`,
+
+    // --- FF マージ ----------------------------------------------------
+    mergeTitle: "現在のブランチに FF マージ",
+    mergeLead: (branch: string, from: string, n: number) =>
+      `${branch} に ${from} を取り込みます（${n} 件）。fast-forward なので新しいコミットは作りません。`,
+    mergeRun: "取り込む",
+    mergeAhead: (n: number) =>
+      `手元が ${n} 件進んでいるので fast-forward できません。Givsoner は fast-forward 以外のマージを行いません（CLAUDE.md §1）。`,
+    mergeUpToDate: "取り込むものがありません。",
+    mergeDetached: "detached HEAD なので、取り込む先のブランチがありません。",
+    mergeUnknown:
+      "読み込んだコミットの外を指しているので判定できません。fetch してからもう一度実行してください。",
+
+    // --- 止める理由（docs/DESIGN.md §8.1）-----------------------------
+    blockerBare: "bare リポジトリには作業ツリーがないので切り替えられません。",
+    blockerDirty: (n: number) =>
+      `作業ツリーに ${n} 件の変更があります。Givsoner は stash も --force も行わないので、片付けてからもう一度実行してください。`,
+    blockerIndexLock:
+      "index.lock が残っています。別の git が動いているかもしれません（Givsoner は消しません）。",
+    blockerUnborn: "コミットが 1 件もありません。",
+
+    // --- 結果 ---------------------------------------------------------
+    resultOk: "完了しました",
+    resultFailed: "実行できませんでした",
+    // 判定してから実行するまでの間に状態が変わった場合。**走っていない。**
+    refused: "確認してから実行するまでの間に状態が変わったので、実行しませんでした。",
+    running: "実行しています…",
   },
 
   // fetch（T-17。docs/DESIGN.md §8.3）。

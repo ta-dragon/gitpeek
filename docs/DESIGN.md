@@ -897,15 +897,26 @@ ref ツリー（§6.4）の「3 件以上で畳む」とは規則が違う — �
 ### 8.1 checkout
 
 - **起動点**: ブランチツリーの右クリックメニュー＋ダブルクリック、グラフ上コミットの右クリック
-- **対象**: ローカルブランチ / タグ / 任意コミット。タグとコミットは detached HEAD になる旨を
-  ダイアログで明示する
-- **リモート追跡ブランチは detached HEAD にする。** ローカルブランチの自動作成は v1 では提供しない
+- **対象**: ローカルブランチ / リモート追跡ブランチ / タグ / 任意コミット。
+  detached HEAD になる場合はダイアログで明示する
+- **確認は必ず出す。** 押せない理由（bare / 汚れている / `index.lock` / コミット 0 件）も、
+  detached になることも、そこへまとめて出す。**メニュー項目を無効にして説明を隠さない** —
+  起動点が 4 つあるので、判定をメニューの側に置くと経路ごとに結論が食い違う
+- **リモート追跡ブランチは、確認画面で選ばせる**（2026-09-04 に変更）。
+  「ローカル追跡ブランチを作って切り替える」と「detached で開く」の 2 択を出し、
+  **選ばれたときだけ `checkout -b <名前> --track <ref>` を実行する**
 
-  これは「git コマンドで実行するのは checkout / fetch / FF マージのみ」という宣言された制約の
-  厳格解釈である。ローカルブランチ作成は ref の新規作成であり範囲外。実際のワークフロー
-  （fetch → 上流の差分を見る → FF マージ）では、FF マージ対象のブランチは既にローカルに存在する
-  はずで、リモート追跡ブランチの checkout は閲覧目的が主になる。閲覧目的なら detached で足りる。
-  実運用で本当に不便なら v1.1 で明示的なメニュー項目として追加する
+  当初は detached 固定にしていた。「git コマンドで実行するのは checkout / fetch / FF マージのみ」
+  の厳格解釈で、ローカルブランチ作成は ref の新規作成だから範囲外、という理由である。
+  実際に触ってみると**リモート追跡ブランチを開く目的の多くが「作業を続ける」ほう**で、
+  そのたびにターミナルへ出る必要があった。利用者の判断で、
+  **確認画面を挟むことを条件に**許すことにした。
+
+  守っているのは「**黙って ref を作らない**」のほうで、そこは変えていない。
+  作るのはこの 1 経路だけであり、`checkout -b` は同じ名前があれば失敗するので、
+  既存のブランチを取り違えて上書きすることはない。同じ名前のローカルブランチが既にあれば、
+  そもそも「作る」を出さず「そのブランチへ切り替える」を出す。
+  **ブランチの削除・リネームとタグの操作は引き続き提供しない**
 
 - **dirty なら事前に検出して中止**し、理由を明示する。`--force` と自動 stash は提供しない
   （ビューワーがユーザーの未保存作業を消す事故を構造的に不可能にする）
@@ -925,6 +936,11 @@ ref ツリー（§6.4）の「3 件以上で畳む」とは規則が違う — �
 `fatal: '--detach' cannot be used with '-b/-B/--orphan'` という、原因を指していないエラーで
 落ちる。**完全な ref 名で渡すのが唯一の正しい塞ぎ方**であり、`--detach` はその上での念押し。
 
+**detached HEAD から離れるときの警告は入れていない**（承知の上）。git 自身が警告し reflog に
+残るうえ、**Givsoner はコミットを作れない**ので、この経路で失われる作業は
+「利用者がターミナルで detached のままコミットした場合」に限られる。判定には ref 全部からの
+到達可能性が要るので、必要になったときに入れる。
+
 **未追跡ファイルだけなら checkout を止めない。** checkout は未追跡ファイルを消さず、
 上書きになる場合は git 自身が拒む。ここで止めると、新しいファイルを書きかけの間は
 ブランチを切り替えられなくなる。止めるのは staged / unstaged / unmerged があるときだけで、
@@ -937,6 +953,18 @@ ref ツリー（§6.4）の「3 件以上で畳む」とは規則が違う — �
 - 主動線は「現在のブランチに upstream (`@{u}`) を取り込む」
 - 加えて任意 ref の右クリックから「現在のブランチに FF マージ」も可
 - FF 不可なら実行せず理由を表示するだけ
+
+**可否は手元のグラフから数える**（`ahead == 0 && behind > 0`）。`git merge-base --is-ancestor`
+は呼ばない（§4.5 と同じ理由）。**可視 ref で絞る前の全コミット集合で判定する** —
+表示を絞ってもグラフから消えるだけで、履歴は変わらない。
+
+**判定しても `--ff-only` は外さない。** 判定と実行の間にリポジトリは動きうるので、
+そこは git に止めてもらう。二重に見えるが、外すと「判定が古かったとき」に
+非 fast-forward マージが通ってしまう。
+
+**メニュー項目は常に押せる。** 押せない理由（進んでいる / 取り込むものが無い /
+detached / 判定できない）は確認画面に出す。無効なメニュー項目とツールチップより、
+ダイアログ 1 枚のほうが読まれる。
 
 ### 8.3 fetch
 
@@ -1600,7 +1628,7 @@ Phase 9 完了 ＋ **実リポジトリを 5 個以上登録して 1 週間実�
 ## 16. ディレクトリ構成
 
 `(済)` は実在するファイル。それ以外は未作成で、括弧内は作られるタスク。
-**最終更新は T-17 完了時点。**
+**最終更新は T-18 完了時点。**
 
 ```
 gitviewer/
@@ -1632,10 +1660,11 @@ gitviewer/
 │   │   ├── setup/                (済) 空状態と git 未検出画面
 │   │   └── common/               (済) SplitPane / ContextMenu / CommandPalette /
 │   │                                  NoticeBar / LoadProgress / ErrorBoundary /
-│   │                                  ProgressDialog（fetch の確認と結果 — T-17）
+│   │                                  ProgressDialog（fetch の確認と結果 — T-17）/
+│   │                                  ConfirmDialog / WriteOpsDialog (T-18)
 │   ├── hooks/                    (済) useTheme / useCommandLog /
 │   │                                  useCommitNavigation / useFileNavigation（§6.5）/
-│   │                                  useFetch (T-17)
+│   │                                  useFetch (T-17) / useWriteOps (T-18)
 │   ├── lib/
 │   │   ├── graphPath.ts          (済) レーン配列 -> SVG パス（純関数・テスト対象）
 │   │   ├── relativeTime.ts       (済) 相対日時（純関数・テスト対象）
@@ -1647,6 +1676,7 @@ gitviewer/
 │   │   ├── compareSelection.ts   (済) 2 点比較の選択状態（純関数・テスト対象 — T-15）
 │   │   ├── workingTree.ts        (済) 作業ツリーの一覧整形（純関数・テスト対象 — T-16）
 │   │   ├── fetchState.ts         (済) 一括 fetch の進行と要約（純関数・テスト対象 — T-17）
+│   │   ├── writeOps.ts           (済) checkout の選択肢と FF 可否（純関数・テスト対象 — T-18）
 │   │   └── ipc.ts                (済) Tauri invoke ラッパ
 │   ├── store/                    (済) settings / uiState / repositories / snapshot
 │   └── styles/                   (済) theme.css（トークン）/ app.css / graph.css
@@ -1661,7 +1691,8 @@ gitviewer/
     │   ├── reach.rs              (済) 到達可能集合と ahead/behind (T-09)
     │   ├── diff.rs               (済) コミット本文と変更ファイル一覧 (T-11)
     │   ├── status.rs             (済) 作業ツリーの状態 (T-16)
-    │   └── fetch.rs              (済) 生成した bare からの fetch (T-17)
+    │   ├── fetch.rs              (済) 生成した bare からの fetch (T-17)
+    │   └── writeops.rs           (済) 実物の git への checkout / merge (T-18)
     └── src/
         ├── main.rs               (済)
         ├── lib.rs                (済) Tauri コマンドの登録と AppState
@@ -1678,8 +1709,8 @@ gitviewer/
         │   ├── diff.rs           (済) コミット本文 / 変更ファイル一覧 (T-11)
         │   │                          ＋ unified diff の取得とパース (T-13)
         │   ├── fetchprogress.rs  (済) 進捗行のパース（純関数・テスト必須 — T-17）
-        │   └── ops.rs            (済) fetch (T-17)。checkout / merge --ff-only (T-18)
-        │                              と clone (T-19) もここへ足す
+        │   └── ops.rs            (済) fetch (T-17) / checkout / merge --ff-only (T-18)。
+        │                              clone (T-19) もここへ足す
         ├── graph/
         │   ├── mod.rs            (済) レーン確定の入口。可視 ref の絞り込みもここ
         │   ├── lane.rs           (済) レーン割り当て（最重要・テスト必須）
@@ -1730,6 +1761,7 @@ gitviewer/
 | fetch | `git -C <path> fetch --all --prune --tags --progress` |
 | checkout（ローカルブランチ）| `git -C <path> checkout <短い名前>` |
 | checkout（それ以外）| `git -C <path> checkout --detach <完全な ref 名 または SHA>` |
+| checkout（追跡ブランチ作成）| `git -C <path> checkout -b <名前> --track <完全な ref 名>`（**確認画面で選ばれたときだけ** — §8.1） |
 | FF マージ | `git -C <path> merge --ff-only <ref>` |
 | clone | `git clone --progress <url> <dir>` |
 

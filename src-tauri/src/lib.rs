@@ -6,7 +6,7 @@ pub mod model;
 mod redact;
 pub mod store;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -340,6 +340,204 @@ async fn compute_branch_status(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+
+/// checkout / FF マージを走らせてよいか（docs/DESIGN.md §8.1）。
+///
+/// **判定は `git::ops::preflight` の 1 箇所だけ。** ここは材料を集めて渡すだけで、
+/// フロントで条件を組み直さないこと（起動点が 4 つあるので必ず食い違う）。
+///
+/// probe と `status` で git を何回か起動するが、**これは書き込みの直前にしか走らない**。
+#[tauri::command]
+async fn preflight_write(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+) -> Result<git::ops::WriteGuard, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        Ok(guard_for(&EmittingLog::new(&handle, &log), &program, &path))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// 判定の材料を集める。**`preflight_write` と実行コマンドの両方がこれを通る。**
+///
+/// ダイアログを開いた時点と実行の瞬間で状態は変わりうるので、**表示用に 1 回、
+/// 実行の直前にもう 1 回**同じ関数を通す。判定するコードは 1 つのまま。
+fn guard_for(log: &dyn commandlog::LogSink, program: &str, path: &Path) -> git::ops::WriteGuard {
+    let probe = git::repo::probe(log, program, path);
+    let unborn = matches!(probe.head, Some(git::repo::HeadState::Unborn { .. }));
+
+    // bare には作業ツリーが無いので `status` を呼ばない（呼ぶと失敗する）。
+    let tree = if probe.is_bare {
+        None
+    } else {
+        git::status::working_tree(log, program, path).ok()
+    };
+
+    git::ops::preflight(
+        probe.is_bare,
+        unborn,
+        probe.index_lock_present,
+        tree.as_ref(),
+    )
+}
+
+/// checkout する（docs/DESIGN.md §8.1）。
+///
+/// **`--force` も自動 stash も無い**（CLAUDE.md §1）。走らせる前に必ず判定を通し、
+/// 止める理由が 1 つでもあれば実行しない。
+#[tauri::command]
+async fn checkout(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    target: git::ops::CheckoutTarget,
+) -> Result<git::ops::WriteOutcome, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        let sink = EmittingLog::new(&handle, &log);
+        let guard = guard_for(&sink, &program, &path);
+        if !guard.allowed() {
+            return Ok(refused(&guard));
+        }
+        git::ops::checkout(&sink, &program, &path, &target)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// fast-forward マージ（docs/DESIGN.md §8.2）。**`--ff-only` 固定**（CLAUDE.md §1）。
+#[tauri::command]
+async fn merge_ff(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    rev: String,
+) -> Result<git::ops::WriteOutcome, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        let sink = EmittingLog::new(&handle, &log);
+        let guard = guard_for(&sink, &program, &path);
+        if !guard.allowed() {
+            return Ok(refused(&guard));
+        }
+        git::ops::merge_ff(&sink, &program, &path, &rev)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// 実行の直前に状態が変わっていたときの返し。**理由はフロントが文言にする**（CLAUDE.md §6）。
+fn refused(guard: &git::ops::WriteGuard) -> git::ops::WriteOutcome {
+    git::ops::WriteOutcome {
+        ok: false,
+        message: String::new(),
+        details: Vec::new(),
+        refused: Some(guard.clone()),
+    }
+}
+
+/// HEAD と `rev` の ahead/behind（docs/DESIGN.md §8.2）。
+///
+/// **fast-forward できるのは `ahead == 0 && behind > 0` のときだけ。**
+/// `git merge-base --is-ancestor` を呼ばず、`compute_branch_status` と同じ
+/// メモリ上のグラフから数える（CLAUDE.md §2）。
+///
+/// **可視 ref で絞る前の全コミット集合で判定する。** 表示を絞ってもグラフから
+/// 消えるだけで、履歴は変わらない。
+#[tauri::command]
+async fn merge_check(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    rev_sha: String,
+) -> Result<MergeCheck, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let cache = state.snapshots.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        let snapshot = git::snapshot::load_cached(
+            &EmittingLog::new(&handle, &log),
+            &program,
+            &path,
+            &cache,
+            &repository.id,
+            false,
+            &Reporting::silent(),
+        )?;
+
+        let index = graph::reach::CommitIndex::new(&snapshot.commits);
+        let Some(head) = snapshot.head.sha.as_deref() else {
+            return Ok(MergeCheck::unknown());
+        };
+        Ok(match index.ahead_behind(head, &rev_sha) {
+            Some((ahead, behind)) => MergeCheck {
+                ahead,
+                behind,
+                known: true,
+            },
+            None => MergeCheck::unknown(),
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// [`merge_check`] の結果。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MergeCheck {
+    /// HEAD にあって相手に無い数。**0 でないと fast-forward できない。**
+    ahead: u32,
+    /// 相手にあって HEAD に無い数。取り込む件数。
+    behind: u32,
+    /// どちらも読み込んだコミット集合にあるか。false なら判定できない。
+    known: bool,
+}
+
+impl MergeCheck {
+    fn unknown() -> Self {
+        Self {
+            ahead: 0,
+            behind: 0,
+            known: false,
+        }
+    }
 }
 
 /// コミット 1 件の本文（docs/DESIGN.md §7.3）。
@@ -728,6 +926,10 @@ pub fn run() {
             load_working_file,
             fetch_repository,
             cancel_fetch,
+            preflight_write,
+            checkout,
+            merge_ff,
+            merge_check,
             load_settings,
             save_settings,
             load_ui_state,

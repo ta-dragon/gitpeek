@@ -33,6 +33,10 @@ type Props = {
   onCollapsedChange: (next: string[]) => void;
   /** そのコミットを選んでリストをスクロールさせる。 */
   onJump: (sha: string) => void;
+  /** checkout の確認を出す（T-18。docs/DESIGN.md §8.1）。 */
+  onCheckout: (entry: RefEntry) => void;
+  /** 現在のブランチへ FF マージする確認を出す（T-18。docs/DESIGN.md §8.2）。 */
+  onMerge: (entry: RefEntry) => void;
   /** コピーの結果など、短い通知を出す。 */
   onNotice: (message: string) => void;
 };
@@ -46,6 +50,8 @@ export function RefTree({
   onVisibleRefsChange,
   onCollapsedChange,
   onJump,
+  onCheckout,
+  onMerge,
   onNotice,
 }: Props) {
   const [filter, setFilter] = useState("");
@@ -74,6 +80,8 @@ export function RefTree({
       if (!entry.outOfGraph) onJump(entry.target);
     },
     onContextMenu: (entry, x, y) => setMenu({ entry, x, y }),
+    // **ダブルクリックで checkout**（docs/DESIGN.md §8.1）。確認は必ず出る。
+    onActivate: onCheckout,
   };
 
   /** プリセット。**タグは `excluded` に入れない**（起点 ref ではない）。 */
@@ -166,6 +174,8 @@ export function RefTree({
             onJump,
             onNotice,
             onVisibleRefsChange,
+            onCheckout,
+            onMerge,
           })}
         />
       )}
@@ -183,6 +193,7 @@ function Group({
   group: RefGroup;
   excluded: Set<string>;
   statusByRef: Map<string, BranchStatus>;
+  /** HEAD が乗っているローカルブランチの**短い名前**（`HeadInfo.branch`）。 */
   headBranch: string | null;
   callbacks: NodeCallbacks;
 }) {
@@ -250,8 +261,9 @@ function groupLabel(group: RefGroup): string {
 /**
  * 右クリックメニュー（docs/DESIGN.md §6.4）。
  *
- * checkout と FF マージは**項目としては出すが無効**にする。T-18 で中身が入るまで、
- * 「この機能はここにある」ことだけ示しておく。
+ * **checkout も FF マージも、押すと必ず確認が出る**（T-18）。ここでは可否を判定しない —
+ * 判定は Rust 側の 1 箇所だけで、押せない理由は確認画面に出す（docs/DESIGN.md §8.1）。
+ * メニューの側で条件を組み直すと、ダブルクリックやグラフ行の経路と結論が食い違う。
  */
 function menuItems(
   entry: RefEntry,
@@ -260,18 +272,18 @@ function menuItems(
     onJump: (sha: string) => void;
     onNotice: (message: string) => void;
     onVisibleRefsChange: (next: VisibleRefs) => void;
+    onCheckout: (entry: RefEntry) => void;
+    onMerge: (entry: RefEntry) => void;
   },
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
-    { label: ja.refTree.checkout, title: ja.refTree.notYet, disabled: true, onSelect: () => {} },
+    { label: ja.refTree.checkout, onSelect: () => actions.onCheckout(entry) },
   ];
 
   if (entry.kind !== "tag") {
     items.push({
       label: ja.refTree.merge,
-      title: ja.refTree.notYet,
-      disabled: true,
-      onSelect: () => {},
+      onSelect: () => actions.onMerge(entry),
     });
     items.push({
       label: ja.refTree.onlyThis,

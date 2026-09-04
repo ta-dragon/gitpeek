@@ -238,6 +238,19 @@ export function branchNames(refs: RefEntry[], kind?: "localBranch" | "remoteBran
 }
 
 /** フォルダ配下のチェック状態。中途半端なら `partial`。 */
+/**
+ * その ref に HEAD が乗っているか。
+ *
+ * **`HeadInfo.branch` は短い名前**（`symbolic-ref --short` の出力）で、
+ * `RefEntry.name` は完全な ref 名（`refs/heads/main`）。**そのまま比べると必ず false** になり、
+ * HEAD の印が一度も出ない。比べるのは `shortName` のほう。
+ *
+ * **種別も見る。** ブランチと同じ名前のタグは作れるので、名前だけでは取り違える。
+ */
+export function isHeadRef(entry: RefEntry, headBranch: string | null): boolean {
+  return entry.kind === "localBranch" && headBranch !== null && entry.shortName === headBranch;
+}
+
 export type CheckState = "on" | "off" | "partial";
 
 export function checkStateOf(excluded: Set<string>, names: string[]): CheckState {

@@ -29,6 +29,8 @@ type Props = {
   /** グラフ列の幅。行の左端に空ける。 */
   graphWidth: number;
   onSelect: (sha: string, compare: boolean) => void;
+  /** 行の右クリック（T-18）。checkout とコピーを出す。 */
+  onContextMenu: (sha: string, x: number, y: number) => void;
 };
 
 export const CommitRow = memo(function CommitRow({
@@ -42,6 +44,7 @@ export const CommitRow = memo(function CommitRow({
   dateFormat,
   graphWidth,
   onSelect,
+  onContextMenu,
 }: Props) {
   const absolute = absoluteTimeDetailed(commit.commitTime);
 
@@ -52,6 +55,13 @@ export const CommitRow = memo(function CommitRow({
       }`}
       // **Ctrl（Mac は Cmd）で 2 点比較**（docs/DESIGN.md §10.3）。
       onClick={(event) => onSelect(commit.sha, event.ctrlKey || event.metaKey)}
+      // **右クリックでも行を選ぶ。** メニューの対象と選択中の行がずれると、
+      // 「どのコミットに対する操作か」が読めなくなる。
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onSelect(commit.sha, false);
+        onContextMenu(commit.sha, event.clientX, event.clientY);
+      }}
       role="row"
     >
       <div className="crow__graph" style={{ width: graphWidth }} />

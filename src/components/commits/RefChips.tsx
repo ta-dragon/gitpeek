@@ -6,6 +6,7 @@
  */
 import { ja } from "../../i18n/ja";
 import type { RefEntry } from "../../lib/ipc";
+import { isHeadRef } from "../../lib/refTree";
 
 /** 1 行に出すチップの上限。これを超えたぶんは `+N` に畳む。 */
 export const MAX_CHIPS = 3;
@@ -16,7 +17,7 @@ export function RefChips({
   detachedHead,
 }: {
   refs: RefEntry[];
-  /** HEAD が指しているローカルブランチの完全な ref 名。detached なら null。 */
+  /** HEAD が乗っているローカルブランチの**短い名前**。detached なら null。 */
   headBranch: string | null;
   /** この行が detached HEAD の位置か。 */
   detachedHead: boolean;
@@ -34,7 +35,7 @@ export function RefChips({
           key={entry.name}
           className={
             `chip chip--${kindClass(entry.kind)}` +
-            `${entry.name === headBranch ? " chip--head" : ""}` +
+            `${isHeadRef(entry, headBranch) ? " chip--head" : ""}` +
             `${entry.orphan ? " chip--orphan" : ""}`
           }
           title={entry.orphan ? `${entry.name}

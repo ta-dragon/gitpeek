@@ -747,10 +747,23 @@ body {
   color: var(--text-dim);
 }
 
+/* 走らせない理由（T-18）。**注意（`.modal__note`）と見た目を分ける** —
+   片付ければ実行できるものと、実行できないものが同じ色だと読み分けられない。 */
+.modal__blocker {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  color: var(--danger);
+  background: var(--bg-inset);
+}
+
 .modal__actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  /* 選択肢が 3 つ並ぶと 1 行に収まらないことがある（リモート追跡ブランチ）。 */
+  flex-wrap: wrap;
 }
 
 /* 結果の一覧。**1 件の失敗で全体を止めない**ので、成功と失敗が混ざる。

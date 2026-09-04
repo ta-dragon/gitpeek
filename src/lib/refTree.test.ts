@@ -6,6 +6,7 @@ import {
   buildRefTree,
   checkStateOf,
   excludedSet,
+  isHeadRef,
   onlyVisible,
   withVisibility,
   type RefGroup,
@@ -194,5 +195,31 @@ describe("可視 ref", () => {
       checkStateOf(excludedSet({ mode: "custom", excluded: ["refs/heads/a"] }), names),
     ).toBe("partial");
     expect(checkStateOf(excludedSet({ mode: "custom", excluded: names }), names)).toBe("off");
+  });
+});
+
+describe("HEAD が乗っている ref", () => {
+  /** **`HeadInfo.branch` は短い名前。** 完全な ref 名と比べると必ず false になり、
+   *  HEAD の印が一度も出ない（T-18 で発覚）。 */
+  it("短い名前で比べる", () => {
+    expect(isHeadRef(ref("main"), "main")).toBe(true);
+    expect(isHeadRef(ref("main"), "refs/heads/main")).toBe(false);
+  });
+
+  it("別のブランチには立たない", () => {
+    expect(isHeadRef(ref("feature"), "main")).toBe(false);
+  });
+
+  it("detached では立たない", () => {
+    expect(isHeadRef(ref("main"), null)).toBe(false);
+  });
+
+  /** ブランチと同じ名前のタグは作れる。**名前だけで比べると取り違える。** */
+  it("同じ名前のタグには立たない", () => {
+    expect(isHeadRef(ref("main", "tag"), "main")).toBe(false);
+  });
+
+  it("リモート追跡ブランチにも立たない", () => {
+    expect(isHeadRef(ref("main", "remoteBranch"), "main")).toBe(false);
   });
 });

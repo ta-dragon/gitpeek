@@ -163,6 +163,20 @@ pub fn probe(log: &dyn LogSink, program: &str, path: &Path) -> RepositoryProbe {
     }
 }
 
+/// `.git` ディレクトリの絶対パス。取れなければ `None`。
+///
+/// **`<path>/.git` を組み立て直さないこと。** リンクされた作業ツリーでは `.git` は
+/// ディレクトリではなく本体を指すファイルであり、bare ではそもそも存在しない。
+/// どちらでも「`index.lock` が無い」と静かに嘘をつくことになる（CLAUDE.md §2）。
+pub fn git_dir(log: &dyn LogSink, program: &str, path: &Path) -> Option<PathBuf> {
+    exec::run(log, program, Some(path), &["rev-parse", "--absolute-git-dir"])
+        .ok()
+        .filter(exec::GitOutput::ok)
+        .map(|output| output.stdout_lossy().trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 /// 登録されているリモート名。取れなければ空。
 ///
 /// `.git/config` を自前で読まないのは、`include` や条件付き include でリモートが

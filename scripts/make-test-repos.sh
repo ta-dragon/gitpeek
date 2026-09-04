@@ -36,6 +36,9 @@
 #   fetch-client   clone 後に上流が動いたクローン（T-17。fetch すると ref が増減する）
 #   fetch-tag-origin.git / fetch-tag-client
 #                  上流がタグを付け替えたクローン（T-17。fetch がタグの上書きを拒む）
+#   ff-origin.git / ff-client
+#                  上流だけが進んだクローン（T-18。merge --ff-only が通る）
+#                  ※ FF できない側は diverged（手元も進んでいる）を使う
 
 set -eu
 
@@ -336,6 +339,28 @@ repo=$root/fetch-tag-src
 commit b.txt "付け替えの先"
 git_ -C "$repo" tag -f v1
 git_ -C "$repo" push --quiet --force "$root/fetch-tag-origin.git" v1
+
+# --- fast-forward できるクローン（T-18）--------------------------------------
+# **上流だけを進め、手元は動かさない。** `merge --ff-only` が通る唯一の形。
+# FF できない側は既存の `diverged`（手元も 2 つ進んでいる）をそのまま使う。
+#
+# リモート追跡ブランチからローカルブランチを作る検証にも使うので、
+# **ローカルには main しか置かない**（`origin/feature` に対応するローカルが無い状態）。
+new_repo ff-src
+commit a.txt "最初"
+
+git_ clone --quiet --bare "$root/ff-src" "$root/ff-origin.git"
+git_ clone --quiet "$root/ff-origin.git" "$root/ff-client"
+
+repo=$root/ff-src
+commit b.txt "上流で追加 1"
+commit c.txt "上流で追加 2"
+git_ -C "$repo" branch feature
+git_ -C "$repo" push --quiet "$root/ff-origin.git" main feature
+
+# 手元は動かさずに ref だけ取り込む。これで main は上流より 2 つ遅れる。
+git_ -C "$root/ff-client" fetch --quiet origin
+rm -rf "$root/ff-src"
 
 echo "生成しました: $root"
 ls "$root"

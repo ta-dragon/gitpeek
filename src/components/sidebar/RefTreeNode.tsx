@@ -7,7 +7,7 @@
  */
 import { ja } from "../../i18n/ja";
 import type { BranchStatus, RefEntry } from "../../lib/ipc";
-import { checkStateOf, type CheckState, type RefTreeNode } from "../../lib/refTree";
+import { checkStateOf, isHeadRef, type CheckState, type RefTreeNode } from "../../lib/refTree";
 
 /** 1 段ぶんの字下げ幅（px）。狭いサイドバーで深いパスも読めるよう控えめにする。 */
 const INDENT = 12;
@@ -20,6 +20,8 @@ export type NodeCallbacks = {
   onToggleVisible: (names: string[], show: boolean) => void;
   onJump: (entry: RefEntry) => void;
   onContextMenu: (entry: RefEntry, x: number, y: number) => void;
+  /** ダブルクリック。**checkout の確認を出す**（T-18。docs/DESIGN.md §8.1）。 */
+  onActivate: (entry: RefEntry) => void;
 };
 
 export function RefTreeNodeView({
@@ -88,7 +90,7 @@ export function RefTreeNodeView({
 
   const entry = node.entry;
   const status = statusByRef.get(entry.name);
-  const isHead = entry.name === headBranch;
+  const isHead = isHeadRef(entry, headBranch);
   // グラフから外している ref は淡くする。チェックの有無は小さくて遠目に分からない。
   const hidden = checkable && excluded.has(entry.name);
 
@@ -101,6 +103,9 @@ export function RefTreeNodeView({
           event.preventDefault();
           callbacks.onContextMenu(entry, event.clientX, event.clientY);
         }}
+        // **ダブルクリックで checkout。** 1 クリックはジャンプなので、
+        // ここで確認を出さないと「見に行くつもりが切り替わる」ことになる。
+        onDoubleClick={() => callbacks.onActivate(entry)}
       >
         {/* フォルダの三角と桁を揃えるための空き。 */}
         <span className="reftree__caret reftree__caret--leaf" aria-hidden="true" />

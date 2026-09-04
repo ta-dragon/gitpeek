@@ -257,6 +257,87 @@ export function cancelFetch(): Promise<void> {
   return invoke<void>("cancel_fetch");
 }
 
+
+/* ---------- checkout と FF マージ（T-18。`src-tauri/src/git/ops.rs`）---------- */
+
+/** 実行を止める理由。**1 つでもあれば走らせない。** */
+export type Blocker = "bare" | "dirty" | "indexLock" | "unborn";
+
+/**
+ * 書き込み前の判定。
+ *
+ * **判定は Rust 側の `git::ops::preflight` の 1 箇所だけ。** ここで条件を組み直すと、
+ * 起動点（右クリック / ダブルクリック / グラフ行 / 上流の取り込み）ごとに結論が食い違う。
+ */
+export type WriteGuard = {
+  blockers: Blocker[];
+  /** 未追跡ファイルの数。**止める理由ではない**が、確認画面には出す。 */
+  untracked: number;
+  /** 手を入れたファイルの数（ステージ済み ＋ 未ステージ ＋ 衝突）。 */
+  changed: number;
+};
+
+export function isAllowed(guard: WriteGuard): boolean {
+  return guard.blockers.length === 0;
+}
+
+/**
+ * checkout の対象。**渡し方が形で変わる**（docs/DESIGN.md §8.1。実測）。
+ *
+ * - `branch` … 既にあるローカルブランチ。**短い名前**（完全な ref 名だと detached になる）
+ * - `detach` … **完全な ref 名か SHA**（短い名前だと DWIM がブランチを勝手に作る）
+ * - `track`  … リモート追跡ブランチからローカルブランチを作る。
+ *   **利用者が確認画面で選んだときだけ**（CLAUDE.md §1）
+ */
+export type CheckoutTarget =
+  | { kind: "branch"; name: string }
+  | { kind: "detach"; rev: string }
+  | { kind: "track"; remoteRef: string; branch: string };
+
+export type WriteOutcome = {
+  ok: boolean;
+  message: string;
+  /** 生の stderr（マスキング済み）。展開して見せる。 */
+  details: string[];
+  /** 実行の直前に判定が変わっていたら、その内訳。走っていない。 */
+  refused: WriteGuard | null;
+};
+
+/** 走らせてよいかを聞く。**確認画面を出す前に必ず通す。** */
+export function preflightWrite(repositoryId: string): Promise<WriteGuard> {
+  return invoke<WriteGuard>("preflight_write", { repositoryId });
+}
+
+/**
+ * checkout する（docs/DESIGN.md §8.1）。
+ *
+ * **`--force` も自動 stash も無い**（CLAUDE.md §1）。Rust 側が実行の直前にもう一度
+ * 判定を通し、通らなければ走らせずに `refused` を返す。
+ */
+export function checkout(
+  repositoryId: string,
+  target: CheckoutTarget,
+): Promise<WriteOutcome> {
+  return invoke<WriteOutcome>("checkout", { repositoryId, target });
+}
+
+/** fast-forward マージ（`merge --ff-only` 固定。CLAUDE.md §1）。 */
+export function mergeFf(repositoryId: string, rev: string): Promise<WriteOutcome> {
+  return invoke<WriteOutcome>("merge_ff", { repositoryId, rev });
+}
+
+/** HEAD と相手の ahead/behind。**`ahead === 0 && behind > 0` のときだけ FF できる。** */
+export type MergeCheck = {
+  ahead: number;
+  behind: number;
+  /** どちらも読み込んだコミット集合にあるか。false なら判定できない。 */
+  known: boolean;
+};
+
+export function mergeCheck(repositoryId: string, revSha: string): Promise<MergeCheck> {
+  return invoke<MergeCheck>("merge_check", { repositoryId, revSha });
+}
+
 /* ---------- レーン割り当て（`src-tauri/src/graph/lane.rs`）---------- */
 
 /** 表示順。topo が既定。date は「この表示では線が交差します」の注記を出す。 */

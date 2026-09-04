@@ -24,6 +24,7 @@ import {
 } from "./lib/workingTree";
 import { CommandPalette } from "./components/common/CommandPalette";
 import { FetchConfirm, FetchDialog } from "./components/common/ProgressDialog";
+import { WriteOpsDialog, WriteOpsResult } from "./components/common/WriteOpsDialog";
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
 import { SplitPane } from "./components/common/SplitPane";
@@ -34,6 +35,8 @@ import { EmptyState } from "./components/setup/EmptyState";
 import { GitSetupScreen } from "./components/setup/GitSetupScreen";
 import { useCommandLog } from "./hooks/useCommandLog";
 import { useFetch } from "./hooks/useFetch";
+import { useWriteOps, type CheckoutSubject } from "./hooks/useWriteOps";
+import { checkoutChoices, checkoutCommit, type CheckoutChoice } from "./lib/writeOps";
 import { useTheme, type ThemePreference } from "./hooks/useTheme";
 import { ja } from "./i18n/ja";
 import { clearCompare, selectCommit, swapEnds } from "./lib/compareSelection";
@@ -46,6 +49,7 @@ import {
   type DiffSource,
   type GitStatus,
   type LoadPhase,
+  type RefEntry,
   type RepositoryEntry,
   type UiSettings,
 } from "./lib/ipc";
@@ -154,6 +158,8 @@ export default function App() {
 
   // `fetch` は window の同名関数と紛れるので別の名前にする。
   const fetching = useFetch();
+  // checkout と FF マージ（T-18）。**判定 → 確認 → 実行 → 読み直しの 1 本だけ。**
+  const writing = useWriteOps(repos.selectedId);
   // **個別のコールバックを取り出して使う。** `fetching` は毎回新しい object なので、
   // それを依存に置くと `keydown` の登録・解除が毎レンダリング走る。
   const { fetchOne: startFetch, askAll } = fetching;
@@ -314,6 +320,8 @@ export default function App() {
                       onJump={(sha) =>
                         setJumpTo((current) => ({ sha, nonce: (current?.nonce ?? 0) + 1 }))
                       }
+                      onCheckout={writing.askCheckout}
+                      onMerge={writing.askMerge}
                       onNotice={setMessage}
                     />
                   )
@@ -328,7 +336,24 @@ export default function App() {
                   onScan={() => void handleScan()}
                 />
               ) : (
-                <RepositoryPanel entry={selected} jumpTo={jumpTo} onNotice={setMessage} />
+                <RepositoryPanel
+                  entry={selected}
+                  jumpTo={jumpTo}
+                  onCheckoutCommit={(sha) =>
+                    writing.askCheckout(
+                      { kind: "commit", name: sha.slice(0, 8) },
+                      [
+                        {
+                          target: checkoutCommit(sha),
+                          primary: true,
+                          kind: "detach",
+                          name: sha.slice(0, 8),
+                        },
+                      ],
+                    )
+                  }
+                  onNotice={setMessage}
+                />
               )
             }
           />
@@ -358,6 +383,25 @@ export default function App() {
           progress={fetching.progress}
           onCancel={fetching.cancel}
           onClose={fetching.dismiss}
+        />
+      )}
+
+      {/* checkout と FF マージ（T-18。docs/DESIGN.md §8.1, §8.2）。
+          **確認は必ず出る。** 押せない理由もここに出す。 */}
+      {writing.request !== null && (
+        <WriteOpsDialog
+          request={writing.request}
+          onCheckout={writing.doCheckout}
+          onMerge={writing.doMerge}
+          onCancel={writing.dismiss}
+        />
+      )}
+
+      {(writing.busy || writing.outcome !== null) && (
+        <WriteOpsResult
+          outcome={writing.outcome ?? EMPTY_OUTCOME}
+          busy={writing.busy}
+          onClose={writing.dismiss}
         />
       )}
 
@@ -395,10 +439,15 @@ function isTyping(target: EventTarget | null): boolean {
 function RefTreePanel({
   entry,
   onJump,
+  onCheckout,
+  onMerge,
   onNotice,
 }: {
   entry: RepositoryEntry;
   onJump: (sha: string) => void;
+  /** checkout の確認。**選択肢を決めるのは `lib/writeOps.ts`**（純関数）。 */
+  onCheckout: (subject: CheckoutSubject, choices: CheckoutChoice[]) => void;
+  onMerge: (rev: string, revLabel: string, revSha: string, branch: string | null) => void;
   onNotice: (message: string) => void;
 }) {
   const snapshot = useSnapshot();
@@ -424,10 +473,29 @@ function RefTreePanel({
         }))
       }
       onJump={onJump}
+      onCheckout={(target) =>
+        onCheckout(
+          { kind: SUBJECT_KIND[target.kind], name: target.shortName },
+          checkoutChoices(target, data.refs),
+        )
+      }
+      onMerge={(target) =>
+        onMerge(target.name, target.shortName, target.target, data.head.branch)
+      }
       onNotice={onNotice}
     />
   );
 }
+
+/** ref の種別を確認画面の文面の種別へ。**タグとコミットで言うことが違う。** */
+const SUBJECT_KIND: Record<RefEntry["kind"], CheckoutSubject["kind"]> = {
+  localBranch: "branch",
+  remoteBranch: "remote",
+  tag: "tag",
+};
+
+/** 実行中はまだ結果が無い。**器だけ先に出して「実行しています…」を見せる。** */
+const EMPTY_OUTCOME = { ok: false, message: "", details: [], refused: null };
 
 /**
  * 選択中リポジトリの中身。
@@ -438,10 +506,13 @@ function RefTreePanel({
 function RepositoryPanel({
   entry,
   jumpTo,
+  onCheckoutCommit,
   onNotice,
 }: {
   entry: RepositoryEntry | null;
   jumpTo: { sha: string; nonce: number } | null;
+  /** グラフ行の右クリックから checkout の確認を出す（T-18）。 */
+  onCheckoutCommit: (sha: string) => void;
   onNotice: (message: string) => void;
 }) {
   const snapshot = useSnapshot();
@@ -489,6 +560,7 @@ function RepositoryPanel({
       order={snapshot.order}
       ui={settings.settings.ui}
       jumpTo={jumpTo}
+      onCheckoutCommit={onCheckoutCommit}
       onNotice={onNotice}
     />
   );
@@ -510,6 +582,7 @@ function CommitWorkspace({
   order,
   ui,
   jumpTo,
+  onCheckoutCommit,
   onNotice,
 }: {
   entry: RepositoryEntry;
@@ -519,6 +592,7 @@ function CommitWorkspace({
   /** 差分の表示設定もここから配る（`settings.json` の `ui`）。 */
   ui: UiSettings;
   jumpTo: { sha: string; nonce: number } | null;
+  onCheckoutCommit: (sha: string) => void;
   onNotice: (message: string) => void;
 }) {
   const { state: uiState } = useUiState();
@@ -687,6 +761,8 @@ function CommitWorkspace({
               jumpTo={jumpTo}
               order={order}
               onSelect={select}
+              onCheckoutCommit={onCheckoutCommit}
+              onNotice={onNotice}
               onColumnsChange={setColumns}
               onOrderChange={(next) => void snapshots.setOrder(next)}
             />

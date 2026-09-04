@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
-import { ContextMenu } from "../common/ContextMenu";
+import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
 import { CommitGraph } from "../graph/CommitGraph";
 import type { WorkingSummary } from "../../lib/workingTree";
 import { WorkingTreeRow } from "./WorkingTreeRow";
@@ -72,6 +72,10 @@ type Props = {
   jumpTo: { sha: string; nonce: number } | null;
   order: GraphOrder;
   onSelect: (sha: string, compare: boolean) => void;
+  /** 行の右クリックから checkout の確認を出す（T-18。docs/DESIGN.md §8.1）。 */
+  onCheckoutCommit: (sha: string) => void;
+  /** 短い通知（コピーの結果）。 */
+  onNotice: (message: string) => void;
   onColumnsChange: (next: ColumnWidths) => void;
   onOrderChange: (next: GraphOrder) => void;
 };
@@ -89,12 +93,16 @@ export function CommitList({
   jumpTo,
   order,
   onSelect,
+  onCheckoutCommit,
+  onNotice,
   onColumnsChange,
   onOrderChange,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [jump, setJump] = useState("");
   const [jumpMissed, setJumpMissed] = useState(false);
+  /** 行の右クリックメニュー（T-18）。親・子の選択メニューとは別に持つ。 */
+  const [rowMenu, setRowMenu] = useState<{ sha: string; x: number; y: number } | null>(null);
 
   /**
    * 実際に並べるコミット。**`layout.rows` が正**で、`commits` はその材料。
@@ -364,6 +372,7 @@ export function CommitList({
                     dateFormat={dateFormat}
                     graphWidth={width}
                     onSelect={onSelect}
+                    onContextMenu={(sha, x, y) => setRowMenu({ sha, x, y })}
                   />
                 </div>
               );
@@ -383,8 +392,59 @@ export function CommitList({
       {choice !== null && (
         <ContextMenu x={choice.x} y={choice.y} items={choice.items} onClose={closeChoice} />
       )}
+
+      {rowMenu !== null && (
+        <ContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          items={rowMenuItems(
+            shown.find((commit) => commit.sha === rowMenu.sha) ?? null,
+            onCheckoutCommit,
+            onNotice,
+          )}
+          onClose={() => setRowMenu(null)}
+        />
+      )}
     </div>
   );
+}
+
+/**
+ * 行の右クリックメニュー（T-18。docs/DESIGN.md §8.1）。
+ *
+ * **コミットへの checkout は必ず detached。** ここからブランチを作る経路は置かない
+ * （ブランチを作るのはリモート追跡ブランチの checkout だけ — CLAUDE.md §1）。
+ */
+function rowMenuItems(
+  commit: CommitMeta | null,
+  onCheckoutCommit: (sha: string) => void,
+  onNotice: (message: string) => void,
+): ContextMenuItem[] {
+  if (commit === null) return [];
+  return [
+    {
+      label: ja.commits.checkoutHere,
+      onSelect: () => onCheckoutCommit(commit.sha),
+    },
+    {
+      label: ja.commits.copySha,
+      onSelect: () => void copyText(commit.sha, onNotice),
+    },
+    {
+      label: ja.commits.copySubject,
+      onSelect: () => void copyText(commit.subject, onNotice),
+    },
+  ];
+}
+
+/** クリップボードへ書く。**失敗したら黙らず通知する**（`RefTree` と同じ扱い）。 */
+async function copyText(text: string, onNotice: (message: string) => void): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    onNotice(ja.commits.copied(text));
+  } catch {
+    onNotice(ja.commits.copyFailed);
+  }
 }
 
 /** 参照が毎回変わると `CommitRow` の memo が効かない。 */
