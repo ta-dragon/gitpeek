@@ -45,13 +45,17 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 
 | 項目 | 内容 |
 |---|---|
-| 直前に完了 | T-16 作業ツリーの read-only 表示（**Phase 5 完了**） |
-| 次にやる | **T-17 fetch と放置警告 — 実装は終わり、目視確認待ち** |
+| 直前に完了 | T-17 fetch と放置警告（目視 2026-09-04 通過） |
+| 次にやる | **T-18 checkout と FF マージのガード** |
 | 未解決の判断事項 | なし |
 
-**T-17 は ▸コマンド の受け入れ条件を満たしたところで止めてある。** ▸目視 が 5 項目
-残っているので、規約 3 のとおり完了にはしていない。目視が通ったらこの節と「完了済み」表を
-同じコミットで更新する。
+**Phase 6 は fetch まで入った。** 残りは checkout と FF マージ（T-18）で、
+書き込み系の入口は `src-tauri/src/git/ops.rs` に揃っている。
+
+**probe は 1 リポジトリあたり git を 5 回起動する。** T-17 でリモートの有無を足したぶん
+1 回増えた。この環境では 1 回 34ms（実測）なので、登録 7 件で一覧の更新が 240ms ほど伸びる。
+リモートの有無は「放置警告を永久に出し続けない」ための必須情報なので落とせない。
+気になるようになったら、**リポジトリごとの probe を並列にする**のが効く（いまは 1 件ずつ順）。
 
 **fetch の進捗は stdout ではなく stderr に出る。** `run_streaming` は stderr を別スレッドで
 読み切ってから返すので、そのままでは進捗が最後に 1 度で届く。**stderr を読みながら返す
@@ -147,7 +151,7 @@ v1 では非対象のままだが、恒久的な非対象ではなくなった�
 | 3 | 3 | T-09 → T-10 | **済** |
 | 4 | 4 | T-11 → T-12 → T-13 → T-14 | **済** |
 | 5 | 5 | T-15 → T-16 | **済** |
-| 6 | 6-7 | **T-17** → T-18 / T-19 | T-17 は目視待ち |
+| 6 | 6-7 | T-17 → **T-18** / T-19 | T-17 済 |
 | 7 | 8 | T-20 → T-21 → T-22 → T-23 | |
 | 8 | 9 | T-24 → T-25 → T-26 | |
 
@@ -184,248 +188,172 @@ graph LR
 
 # Phase 6-7 — 書き込み系操作
 
-## - [ ] T-17 [Phase 6] fetch と放置警告
+## - [ ] T-18 [Phase 6] checkout と FF マージのガード
 
-**目的**: fetch を実行し、上流との差分と「しばらく fetch していない」状態を可視化する。
+**目的**: checkout と fast-forward マージを、ユーザーの未保存作業を壊さない形で提供する。
 
-**参照**: DESIGN.md §8.3, §8.5, §3.2, §3.6, §6.5 / CLAUDE.md §1, §2, §4, §6
+**参照**: DESIGN.md §8.1, §8.2, §8.5, §3.6, §6.4 / CLAUDE.md §1, §2, §6
 
-**依存**: T-09, T-03
+**依存**: T-17, T-16
 
-**T-16 までの申し送り（着手時に確認すること。規約 4）**
+**T-17 までの申し送り（着手時に確認すること。規約 4）**
 
-- **fetch の進捗は stdout ではなく stderr に出る。** `exec::run_streaming` は stdout を
-  読みながら返すが、**stderr は別スレッドで最後まで読み切ってから返す**（デッドロック回避の
-  ためにそうしてある）。そのままでは進捗が全部終わってから 1 度に届く。
-  **stderr を読みながら返す入口を足すこと。** 新しい入口も `build()` を通す（CLAUDE.md §2）
-- 進捗バーの受け皿は `src/components/common/LoadProgress.tsx` に**既にある**。
-  fetch と clone でも使えるよう、スナップショットに依存しない引数にしてある。
-  **総数 `null` を受けて不定表示になる**ので、割合の出ない段階もそのまま流せる
-- `settings.json` の `fetch.staleWarningDays`（既定 7）は **T-01 で既に入っている**。新設不要
-- リポジトリ一覧の行に**バッジの場所を確保してある**（`RepositoryList.tsx` の
-  `repo__marks` と `ProbeBadges`）。放置警告アイコンはここへ入れる
-- 書き込み後の再読込は `snapshot.reload()`（＝ `load_repository_snapshot(force: true)`）。
-  **`force` 引数は既にある**ので新設不要（コメントに「fetch や checkout の直後に立てる」と
-  書いてある経路がこれ）
-- `RepositoryProbe` は `git_dir` を**絶対パス**で持っている（`rev-parse --absolute-git-dir`）。
-  `FETCH_HEAD` はここから引く
-- `Ctrl+R` / `Ctrl+Shift+R` は DESIGN.md §6.5 の表で fetch に割り当て済み。**まだ誰も実装していない**
+- 書き込み系の入口は `src-tauri/src/git/ops.rs`。**checkout / merge --ff-only もここへ足す**
+- **進捗は要らない。** どちらも一瞬で終わるので `exec::run` で足りる。
+  `exec::run_progress` ＋ `exec::Cancel` は fetch / clone のための入口で、ここでは使わない
+- 実行後の再読込は `snapshots.reload()`（`force: true`）＋ `repositories.refresh()`。
+  **`useFetch` の `drive()` 末尾と同じ手順**にすること
+- 確認ダイアログは `components/common/ProgressDialog.tsx` の `FetchConfirm` がひな形。
+  `Esc` で閉じる `useEscape` も同じファイルにある
+- **`.button--primary` の hover は `--accent-hover`。** 共通の `.button:hover` を効かせると
+  文字が地に溶ける（実測 1.20 / 1.30）
+- bare の判定は `RepositoryProbe.is_bare`。フロントには `RepositoryEntry.probe.isBare` で届く
+- ahead/behind は `compute_branch_status` の `BranchStatus[]`（`refName` / `upstream` /
+  `ahead` / `behind`）。**上流からの FF 可否はこれで判定できる**（`ahead === 0 && behind > 0`）
+- ref ツリーの右クリックメニューに **checkout と「現在のブランチに FF マージ」の項目が既にある**
+  （`RefTree.tsx` の `menuItems`）。`disabled: true` と `title: ja.refTree.notYet` を外して
+  中身を入れる。**`ja.refTree.notYet` は使い切ったら消すこと**
+- **グラフ行の右クリックメニューは無い。** `CommitRow.tsx` は `onClick` だけなので、
+  `RefTree` と同じ形で `common/ContextMenu.tsx` を付ける
+
+**T-16 の申し送りの訂正（規約 4。着手時に実物と突き合わせた結果）**
+
+- 「dirty の判定は `is_clean()` 1 つで足りる」は**足りない。** `is_clean()` は未追跡ファイルも
+  数える。擬似行を出すかどうかにはそれで正しいが、**checkout の可否は別の述語**にする
+  （下の「未追跡だけなら止めない」）
+- `WorkingTree::index_lock_present` は **`<path>/.git/index.lock` を組み立てている**
+  （`status.rs`）。リンクされた作業ツリーでは `.git` がファイルなので**永久に false**、
+  bare でも false になる。`repo.rs` は `git_dir` から正しく引いているので、
+  **T-18 で `status.rs` 側を `git_dir` 起点に直す。** ここを gate にする以上、
+  黙って通ってしまう経路を残せない（CLAUDE.md §2）
 
 **作成・変更するファイル**
 
 | 種別 | パス | 内容 |
 |---|---|---|
-| 新規 | `src-tauri/src/git/ops.rs` | fetch の実行と結果の組み立て |
-| 新規 | `src-tauri/src/git/fetchprogress.rs` | 進捗行のパース（純関数。単体テストはここ） |
-| 変更 | `src-tauri/src/git/exec.rs` | **stderr を読みながら返す入口** ＋ 中止 |
-| 変更 | `src-tauri/src/git/repo.rs` | リモートの有無と `FETCH_HEAD` の時刻を probe に足す |
-| 変更 | `src-tauri/src/lib.rs` | `fetch_repository` / `cancel_fetch` の登録と進捗イベント |
-| 新規 | `src-tauri/tests/fetch.rs` | 生成した bare からの fetch（結合） |
-| 変更 | `scripts/make-test-repos.sh` | fetch 元の bare と、その clone を足す |
-| 新規 | `src/components/common/ProgressDialog.tsx` | 進捗 ＋ キャンセル ＋ 結果サマリ |
-| 新規 | `src/lib/fetchState.ts` | 一括 fetch の進行と要約（純関数） |
-| 変更 | `src/components/sidebar/RepositoryList.tsx` | fetch ボタン、放置警告アイコン |
-| 変更 | `src/App.tsx` / `src/lib/ipc.ts` / `src/i18n/ja.ts` / `src/styles/app.css` | 配線 |
+| 変更 | `src-tauri/src/git/ops.rs` | `preflight` / `checkout` / `merge_ff` |
+| 変更 | `src-tauri/src/git/status.rs` | `index.lock` を `git_dir` から引く |
+| 変更 | `src-tauri/src/lib.rs` | 3 コマンドの登録 |
+| 新規 | `src-tauri/tests/writeops.rs` | 生成リポジトリで実際に checkout / merge（結合） |
+| 変更 | `scripts/make-test-repos.sh` | **FF できるクローン**を足す |
+| 新規 | `src/components/common/ConfirmDialog.tsx` | `FetchConfirm` を一般化した確認ダイアログ |
+| 新規 | `src/hooks/useWriteOps.ts` | 確認 → 実行 → 再読込の配線 |
+| 変更 | `src/components/sidebar/RefTree.tsx` | checkout / FF マージを有効化 |
+| 変更 | `src/components/commits/CommitRow.tsx` `CommitList.tsx` | 行の右クリックメニュー |
+| 変更 | `src/App.tsx` `src/lib/ipc.ts` `src/i18n/ja.ts` `src/styles/app.css` | 配線 |
 
 **実装内容**
 
-*実行（Rust）*
+*実行前の判定（`ops.rs`。**ここが T-18 の本体**）*
 
-- コマンドは **`fetch --all --prune --tags --progress`** で固定（DESIGN.md §8.3）
-  - **`--prune-tags` を足さないこと。** `--prune --tags` はタグを消さない。足すと
-    ローカルにしか無いタグが消え、**ref の削除**になる（CLAUDE.md §1 違反）
-  - **`--progress` は必須。** stderr が端末でないと git は進捗を出さないので、
-    付け忘れるとバーが一度も動かない
-  - ここでの `--all` は「全リモート」であって `git log --all` とは別物（DESIGN.md §8.3）
-- **リモートは 1 つずつ順に処理される**（`--all` の既定）。`--jobs` で並列にしないこと。
-  認証ウィンドウが同時に何枚も出る
-- 一括 fetch も**リポジトリを 1 つずつ順に**実行する。同じ理由
+- **判定は 1 つの関数に集める**（fetch の `is_stale` と同じ考え方）。起動点が 4 つある
+  （ref ツリーの右クリック / ダブルクリック / グラフ行の右クリック / 上流からの取り込み）ので、
+  **判定をボタンの側に置くと結論が食い違う**
+- 返すのは「止める理由」と「注意」の 2 本立て。**止める理由が 1 つでもあれば実行しない**
 
-*進捗のパース（`fetchprogress.rs`。ここが単体テストの本体）*
+  | 止める理由 | 判定 | 出典 |
+  |---|---|---|
+  | bare である | `probe.is_bare` | DESIGN.md §3.6 |
+  | 作業ツリーに変更がある | staged / unstaged / unmerged のどれかが空でない | DESIGN.md §8.1 |
+  | `index.lock` が残っている | `git_dir/index.lock` | CLAUDE.md §2 |
+  | コミットが 0 件 | `head.unborn` | — |
 
-- git の進捗は **`\r` 区切り**で同じ行を上書きしていく。`\n` だけで切ると 1 行も
-  確定しないまま最後にまとめて届く。**`\r` と `\n` の両方で切る**
-- 形は `<ラベル>: <割合>% (<済>/<全>)`。**先頭に `remote: ` が付くことがある**
-- **ラベルで判定しないこと。** git は環境によって進捗そのものを翻訳する。
-  **`(済/全)` と `%` だけを構造で取り**、ラベルは読み取らずそのまま表示へ回す
-- 割合の出ない段階（`Counting objects: 1234` など）は**件数だけ**を流す
-  （`LoadProgress` は総数 `null` を受ける）
-- 進捗でない行（`From https://…` / ` * [new branch] …` / エラー）は進捗として扱わず、
-  **結果の本文として残す**
+- **未追跡ファイルだけなら止めない。** checkout は未追跡ファイルを消さないし、上書きになる
+  場合は git 自身が拒む。ここで止めると、新しいファイルを書きかけの間はブランチを
+  切り替えられなくなる。**件数はダイアログに出す**（黙って通さない）
+- **ダイアログを開いた時点と実行の瞬間で状態は変わりうる。** 表示用に 1 回、コマンドの中で
+  もう 1 回、**同じ関数を通す**。判定するコードは 1 つのまま
 
-*キャンセル*
+*checkout — 対象の渡し方（**実測。ここを外すと ref が増える**）*
 
-- 実行中の子プロセスを終了させる。`run_streaming` は `Child` を握ったままなので、
-  **中止フラグを見て kill する**形にする
-- **中止しても、既に更新された ref は戻らない。** 「途中まで取り込まれています」と
-  結果に明示する。黙って「中止しました」だけ出さないこと
-- 一括の中止は「**次のリポジトリへ進まない**」という意味。実行中の 1 件は落とす
+- **ローカルブランチは短い名前（`main`）で渡す。** 完全な ref 名（`refs/heads/main`）を渡すと
+  git はブランチとして扱わず、**detached になる**
+- **それ以外は完全な ref 名 ＋ `--detach`。** リモート追跡ブランチは
+  `refs/remotes/origin/main`、タグは `refs/tags/v1`、コミットは SHA
+- **短い名前だけを渡してはいけない。** ローカルに同名が無いと、git は
+  **リモート追跡ブランチを追跡するローカルブランチを勝手に作る**（`checkout.guess` の既定が
+  true）。実測で `git checkout sideline` が `branch 'sideline' set up to track ...` を出して
+  ローカルブランチを 1 本増やした。**ref の新規作成であり CLAUDE.md §1 違反**
+- **短い名前 ＋ `--detach` で塞ごうとしないこと。** DWIM が内部で `-b` を立てるため
+  `fatal: '--detach' cannot be used with '-b/-B/--orphan'` という**見当違いのエラー**になる
+  （実測）。**完全な ref 名で渡すのが正解**
 
-*結果*
+*checkout — その他*
 
-- リポジトリごとに 成功 / 失敗 / 中止 と、失敗なら人間向けメッセージ 1 行。
-  **1 件の失敗で残りを止めない**
-- **stderr は `redact.rs` を通してから画面とログへ**（CLAUDE.md §4）。
-  `https://<user>:<token>@…` 形式のリモートは fetch の stderr に**平文で出る**
-- 認証失敗（`could not read Username` / `terminal prompts disabled` /
-  `Permission denied (publickey)` / `Host key verification failed`）は人間向けの
-  一文へ整形する。**`GIT_TERMINAL_PROMPT=0` と `BatchMode=yes` は `exec.rs` が
-  付けているので、無言でハングはしない**（CLAUDE.md §2）
+- 対象は **ローカルブランチ / リモート追跡ブランチ / タグ / 任意コミット**
+- detached になる場合は**ダイアログに明示**する（DESIGN.md §8.1）
+- **detached HEAD から離れるときは注意を出す。** いまの HEAD がどの ref からも到達できないなら、
+  離れると辿る手段が無くなる。到達可能性は T-09 の `reach.rs` で手元のグラフから判定する
+  （`git rev-list` を呼ばない。CLAUDE.md §2）
+- `--force` と自動 stash は**提供しない**（CLAUDE.md §1）
 
-*放置警告*
+*FF マージ*
 
-- **`<git_dir>/FETCH_HEAD` の mtime だけで判定する**（DESIGN.md §8.3）。
-  アプリ側に最終 fetch 時刻を記録しない。**無い＝一度も fetch していない**
-- `git_dir` は probe が絶対パスで持っている。**リンクされた作業ツリーでは
-  `FETCH_HEAD` もその作業ツリーの git dir 側にある**ので、`<path>/.git` を組み立て直さない
-- **リモートが 1 つも無いリポジトリでは警告を出さない。** 出すと、ローカルだけの
-  リポジトリが**永久に警告を出し続ける**（fetch しても `FETCH_HEAD` ができないため）。
-  probe にリモートの有無を足して判断する
-- 閾値は `settings.fetch.staleWarningDays`（既定 7）。**0 で無効**
-- 表示は**一覧行の控えめなアイコン ＋ ツールチップのみ**。モーダルもバナーも出さない
-
-*再読込*
-
-- fetch が成功したリポジトリのうち、**いま開いているものだけ**スナップショットを
-  `force: true` で取り直す（DESIGN.md §8.5）。レーンと ahead/behind が更新される
-- 開いていないリポジトリは取り直さない（切り替えたときに読む）
+- `git merge --ff-only <完全な ref 名>` 固定。**`--no-ff` も `--squash` も無い**
+- 主動線は「**現在のブランチに上流を取り込む**」。ref ツリーの現在ブランチ行と、
+  任意 ref の右クリックの 2 つから起動する
+- **FF できるかは手元のグラフから判定する。**「HEAD が対象の祖先で、かつ HEAD ≠ 対象」。
+  上流からの取り込みなら `BranchStatus` の `ahead === 0 && behind > 0` と同じこと
+  - **祖先判定は可視 ref で絞る前の全コミット集合で行う。** 表示を絞ってもグラフから
+    消えるだけで、履歴は変わらない
+- **FF できないときは項目を出すが無効にし、理由をツールチップに書く**
+  （「3 件進んでいるので fast-forward できません」）。押せない理由が分からないのが一番困る
+- **detached HEAD では FF マージを出さない。** 取り込む先のブランチが無い
 
 *起動点*
 
-- リポジトリ一覧のヘッダに「fetch」と「全て fetch」。行の右クリックにも「fetch」
-- `Ctrl+R` = 現在リポジトリ、`Ctrl+Shift+R` = 全リポジトリ（DESIGN.md §6.5）。
-  **`Ctrl+R` は WebView のページ再読込に取られる**ので `preventDefault` すること。
-  入力欄にフォーカスがあるときは横取りしない（既存の 2 箇所と同じ扱い）
-- **一括だけ実行前に確認ダイアログを 1 回**（対象数と、認証ウィンドウが出る可能性を明示）。
-  1 件の fetch には確認を出さない
+- ref ツリーの右クリック（既にある項目を有効化）＋ **ダブルクリックで checkout**
+- グラフ行の右クリックに「このコミットを checkout（detached）」を足す
+- **ショートカットは足さない**（DESIGN.md §6.5 の表に無い）
 
-**制約**
+*実行後*
 
-- **定期自動 fetch を持たない**（DESIGN.md §8.3）。**タイマーを置かないこと**
-- **最終 fetch 時刻をアプリ独自に記録しない**（CLI 併用と整合しなくなる）
-- git 実行は `exec.rs` を通す。**新しい入口も `build()` を通す**（CLAUDE.md §2）
-- **`--prune-tags` / `--depth` / `--recurse-submodules` / `--force` を付けない**（CLAUDE.md §1）
-- 秘匿情報は `redact.rs` を通す（CLAUDE.md §4）
-- 表示文言は `src/i18n/ja.ts` に集約する（CLAUDE.md §6）
-
-**受け入れ条件**
-
-- ▸コマンド: `npm run test:rust` — 進捗パース（**`\r` 区切り / `remote:` 前置 /
-  割合の無い行 / 翻訳された進捗 / 進捗でない行 / 壊れた行**）と、
-  生成した bare からの fetch で**リモート追跡 ref が増えること**、
-  `--prune` で消えた ref が消えること、
-  リモートが無いリポジトリで**放置警告が立たない**こと、
-  `FETCH_HEAD` の mtime による判定（無い / 新しい / 古い / 閾値 0）
-- ▸コマンド: `grep -rn 'prune-tags\|--depth\|--force\|recurse-submodules' src-tauri/src` に
-  違反が無いこと
-- ▸コマンド: `grep -rn 'setInterval' src/store src/App.tsx` に自動 fetch が無いこと
-- ▸コマンド: `npm run test` / `npm run typecheck` / `npm run check:rust`
-- ▸目視: 実リポジトリの fetch で進捗バーが動き、完了後に ahead/behind が更新されること
-- ▸目視: 認証が必要なリモートで**無言でハングしない**こと（GCM が出るか、失敗が出る）
-- ▸目視: 一括 fetch で確認ダイアログが 1 回だけ出て、途中でキャンセルできること
-- ▸目視: CLI で `git fetch` した直後にアプリが**誤警告しない**こと
-- ▸目視: 放置警告がアイコンとツールチップだけで、モーダルもバナーも出ないこと
-
-**テスト**: `npm run test:rust`, `npm run test`, `npm run typecheck`, 目視
-
-**T-17 で決めたこと（DESIGN.md §8.3.1 に転記済み）**
-
-- **進捗は stderr から読む。** `exec::run_progress` を足した（`build()` は通る）
-- **`\r` と `\n` の両方で切る。** 断片は UTF-8 の途中で切れるので**バイトで溜める**
-- **ラベルで判定しない。** git は進捗を翻訳する。`(済/全)` と `%` だけを構造で取る
-- **`--prune-tags` を足さない**（ref の削除になる）
-- **リモートが無いリポジトリでは放置警告を出さない**（永久に出続けるため）
-- **放置判定は Rust 側の 1 箇所**（`RepositoryEntry.fetch_stale`）
-- **中止の判定を成否より先に置く**（中止すると git は非ゼロで落ちる）。
-  そして**取り込み済みの ref は戻らない**ことを結果に書く
-- **キャンセルの見張りは `wait()` より先に畳む**（lock の待ち合わせで固まる）
-- **一括はフロントが 1 件ずつ呼ぶ。** 確認ダイアログは一括のときだけ 1 回
-- **進捗バーの「約」は呼び出し側が決める**（`LoadProgress` の `estimated`）
-- **上流のタグ付け替えは「一部成功」**（`FetchStatus::Partial`）。`--force` は付けず、
-  弾かれたタグ名と、利用者が自分で走らせるコマンドを伝える
-- **primary ボタンの hover は `--accent-hover` で持つ。** 共通の `.button:hover` を
-  効かせると文字が地に溶ける（ライト 1.20 / ダーク 1.30。実測）
-
-**T-17 で直さずに残したこと（承知の上）**
-
-- **`probe` が git を 1 回多く起動する。** リモートの有無を知るために `git remote` を
-  足したので、1 リポジトリあたり 4 回 → 5 回になった。**この環境では 1 回 34ms**
-  （実測）なので、登録 7 件で一覧の更新が 240ms ほど伸びる。リモートの有無は
-  「放置警告を永久に出し続けない」ための必須情報なので落とせない。
-  気になるようになったら、**リポジトリごとの probe を並列にする**のが効く
-  （いまは 1 件ずつ順に回している）。T-17 だけの話ではないので手を付けていない
-- **中止で落とせるのは git 本体だけ。** `git-remote-https` のような子は残りうる。
-  親が死ねば追って終わるが即座ではないので、**理屈の上では「中止しています…」の
-  まま返ってこない**経路がある。プロセスツリーごと落とすには Windows の Job Object が
-  要り、依存が増えるので入れていない。T-19（clone）で同じ問題に当たるはずなので、
-  そのときに一緒に考えること
-
-**T-18 / T-19 への申し送り**
-
-- 書き込み系の入口は `src-tauri/src/git/ops.rs`。**checkout / merge --ff-only もここへ足す**
-- 長い実行と中止は `exec::run_progress` ＋ `exec::Cancel`。clone の進捗も同じ形で取れる
-- 実行後の再読込は `snapshots.reload()`（`force: true`）＋ `repositories.refresh()`。
-  `useFetch` が最後にやっているのと同じ手順にすること
-- 確認ダイアログは `components/common/ProgressDialog.tsx` の `FetchConfirm` が
-  ひな形になる（T-18 の `ConfirmDialog` はこれを一般化する）
-- **`.repos__header` は 180px まで縮む。** ボタンを足すときは折り返しを確認すること
-
-**非スコープ**: checkout / FF マージ（T-18）／clone（T-19）／
-リモートの追加・削除・URL 変更（v1 の範囲外）
-
----
-
-> **ここから先は骨子。着手前に詳細化すること**（このファイルの規約 5）。
-
-## - [ ] T-18 [Phase 6] checkout と FF マージのガード
-
-**目的**: checkout と fast-forward マージを、ユーザーの未保存作業を壊さない形で提供する。
-
-**参照**: DESIGN.md §8.1, §8.2, §8.5, §3.6 / CLAUDE.md §1, §2
-
-**依存**: T-17, T-16
-
-**作成・変更するファイル**: `src-tauri/src/git/ops.rs`(変更) / `src/components/sidebar/RefTree.tsx`(変更) /
-`src/components/common/ConfirmDialog.tsx`(新)
-
-**T-16 からの申し送り**
-
-- dirty の判定は `git::status::working_tree(...).is_clean()` 1 つで足りる
-- **`.git/index.lock` は検出するだけ**にしてある（`WorkingTree::index_lock_present`）。
-  消す経路を作らないこと（CLAUDE.md §2）
-
-**T-10 からの申し送り**: ref ツリーの右クリックメニューに **checkout と「現在のブランチに
-FF マージ」の項目が既にある**（`RefTree.tsx` の `menuItems`）。`disabled: true` ＋
-ツールチップ「T-18 で実装します。」を外して中身を入れること。文言は `ja.refTree.checkout` /
-`ja.refTree.merge`、無効時の説明は `ja.refTree.notYet`（不要になったら消す）。
-
-**実装内容（骨子）**
-
-- **checkout**: ブランチツリーの右クリック ＋ ダブルクリック、グラフ上コミットの右クリックから起動。
-  対象はローカルブランチ / タグ / 任意コミット。**タグとコミットは detached になる旨をダイアログで明示**
-- **リモート追跡ブランチは detached HEAD にする。** `checkout -b --track` を実行しない
-- **dirty なら事前検出して中止**し、理由を明示する（T-16 の status を使う）
-- **FF マージ**: `merge --ff-only` 固定。主動線は「現在のブランチに upstream (`@{u}`) を取り込む」。
-  任意 ref の右クリックからも可。FF 不可なら実行せず理由を表示するだけ
-- bare は checkout を無効化、`index.lock` 残留は検出して明示
-- 実行後は**全コミットメタ情報を再取得してレーン再計算**する
+- **全コミットメタ情報を再取得してレーンを計算し直す**（DESIGN.md §8.5）。部分更新は持ち込まない
+- 一覧も取り直す（HEAD の表示と ahead/behind が変わる）
+- 失敗したら**人間向けメッセージ ＋ 展開で生 stderr**（DESIGN.md §3.6）。
+  fetch の `explain` と同じ形にする
 
 **制約**（すべて CLAUDE.md §1, §2）
 
 - **`--force` 付き checkout と自動 stash を提供しない**
 - **非 fast-forward マージを提供しない**（`merge` は常に `--ff-only`）
-- **ローカル追跡ブランチを自動作成しない**（v1）
-- **`.git/index.lock` を削除しない**
+- **ローカル追跡ブランチを自動作成しない。** 完全な ref 名で渡すこと
+- **ブランチ / タグの作成・削除・リネームをしない**
+- **`.git/index.lock` を削除しない。** 検出して表示するだけ
+- git 実行は `exec.rs` を通す（CLAUDE.md §2）
+- 表示文言は `src/i18n/ja.ts` に集約する（CLAUDE.md §6）
 
-**受け入れ条件（骨子）**: dirty なリポジトリで checkout が中止されること、
-FF 不可のときにマージが実行されないこと、bare で checkout が無効なこと、
-`grep -rn '\-\-force\|--ff\b\|stash' src-tauri/src` に違反が無いこと。
+**受け入れ条件**
 
-**テスト**: `cargo test`（テスト用リポジトリで実際に checkout / merge）, 目視
+- ▸コマンド: `npm run test:rust` — 判定（**bare / 汚れている / `index.lock` 残留 / unborn で
+  止まること**、**未追跡だけなら止まらないこと**）と、生成リポジトリで
+  **実際に checkout して HEAD が動くこと**、**リモート追跡ブランチを checkout しても
+  ローカルブランチが増えないこと**、FF できるクローンで `merge --ff-only` が通ること、
+  **分岐したクローン（`diverged`）でマージが実行されないこと**
+- ▸コマンド: `npm run test:rust` — 引数の固定テスト（fetch の
+  `fetch_args_stay_within_what_we_allow` と同じ形）で、checkout と merge の引数に
+  `--force` / `-f` / `--no-ff` / `--squash` / `-b` / `--track` が現れないこと
+- ▸コマンド: `grep -rn 'Command::new' src-tauri/src` が `exec.rs` だけであること（CLAUDE.md §2）
+- ▸コマンド: `npm run test` / `npm run typecheck` / `npm run check:rust`
+- ▸目視: 汚れたリポジトリで checkout が中止され、**何が汚れているかが分かる**こと
+- ▸目視: タグを checkout すると detached になる旨が事前に出ること
+- ▸目視: FF できない ref の項目が**無効で、理由が読める**こと
+- ▸目視: checkout 後にグラフの HEAD 印と ahead/behind が更新されること
+- ▸目視: bare リポジトリで checkout の項目が無効なこと
 
-**非スコープ**: clone（T-19）／ブランチ作成（v1.1）
+**テスト**: `npm run test:rust`, `npm run test`, `npm run typecheck`, 目視
+
+**着手時に足すテスト用リポジトリ**
+
+- **FF できるクローン**（`ff-client`）。上流だけを進め、手元は動かさない。
+  既存の `diverged` は手元も進んでいるので**そのまま FF 不可の側**として使える
+
+**非スコープ**: clone（T-19）／ブランチ作成（v1.1）／リモート追跡ブランチからの
+ローカルブランチ作成（v1.1。DESIGN.md §8.1）
 
 ---
+
+> **ここから先は骨子。着手前に詳細化すること**（このファイルの規約 5）。
 
 ## - [ ] T-19 [Phase 7] clone
 
@@ -436,6 +364,18 @@ FF 不可のときにマージが実行されないこと、bare で checkout �
 **依存**: T-17
 
 **作成・変更するファイル**: `src-tauri/src/git/ops.rs`(変更) / `src/components/setup/CloneDialog.tsx`(新)
+
+**T-17 からの申し送り**
+
+- **進捗と中止は `exec::run_progress` ＋ `exec::Cancel` がそのまま使える。**
+  `clone --progress` の stderr は fetch と同じ形なので、`fetchprogress.rs` のパーサも
+  そのまま通る（**ラベルは翻訳されうる**ので `(済/全)` と `%` だけを構造で取る）
+- **中止で落とせるのは git 本体だけ。** `git-remote-https` のような子は残りうる。
+  親が死ねば追って終わるが即座ではないので、**理屈の上では「中止しています…」のまま
+  返ってこない**経路がある。プロセスツリーごと落とすには Windows の Job Object が要り、
+  依存が増えるので T-17 では入れていない。**clone は fetch より長く走るので、
+  ここで決着を付けること**（入れないなら入れない理由を DESIGN.md に書く）
+- **中止しても取り込み済みのものは戻らない。** clone では**残骸ディレクトリ**がそれに当たる
 
 **実装内容（骨子）**
 
@@ -751,3 +691,4 @@ JSON パース失敗時に Markdown が表示され「構造化に失敗しま�
 | T-14 | 4 | Shiki ハイライトと大差分の折りたたみ | `9489720` |
 | T-15 | 5 | 任意 2 コミット間差分 | `50a12fb` |
 | T-16 | 5 | 作業ツリーの read-only 表示 | `fa7f998` |
+| T-17 | 6 | fetch と放置警告 | `b12ec13` `6677914` `4e61936` |
