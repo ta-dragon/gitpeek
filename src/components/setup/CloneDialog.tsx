@@ -11,7 +11,12 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { ja } from "../../i18n/ja";
-import { defaultFolderName, joinPath } from "../../lib/clonePath";
+import {
+  defaultFolderName,
+  joinPath,
+  rememberOption,
+  type RememberOption,
+} from "../../lib/clonePath";
 import type { CloneOutcome, CloneProgress, CloneRequest } from "../../lib/ipc";
 import { LoadProgress } from "../common/LoadProgress";
 
@@ -48,7 +53,8 @@ export function CloneDialog({
   const [folderEdited, setFolderEdited] = useState(false);
   // **サブモジュールは既定で取り込まない**（CLAUDE.md §1）。毎回チェックさせる。
   const [submodules, setSubmodules] = useState(false);
-  const [remember, setRemember] = useState(false);
+  // 既定の保存先を書き換えるかどうか。**押せる状態でチェックされたときだけ書く。**
+  const [rememberChecked, setRememberChecked] = useState(false);
 
   // URL から既定のフォルダ名を埋める。**決められないときは空**（利用者に入力させる）。
   const suggested = useMemo(() => defaultFolderName(url), [url]);
@@ -64,8 +70,10 @@ export function CloneDialog({
   const trimmedFolder = folder.trim();
   const preview = joinPath(trimmedParent, trimmedFolder);
   const ready = trimmedUrl !== "" && preview !== "";
-  // 既定と同じ場所なら「覚える」ことに意味が無いので、そもそも出さない。
-  const canRemember = trimmedParent !== "" && trimmedParent !== defaultParent;
+  // **判定は純関数 1 つ**（`lib/clonePath.ts`）。ここで条件を組み直さない —
+  // 直書きしていたせいでテストが当たらず、「既定と同じなら消す」が
+  // 「いつも消えている」になっていた（T-19 の目視で報告された）。
+  const remember = rememberOption(parent, defaultParent);
 
   const handlePick = async () => {
     const picked = await onPickParent();
@@ -105,8 +113,7 @@ export function CloneDialog({
               preview={preview}
               submodules={submodules}
               remember={remember}
-              canRemember={canRemember}
-              hasDefaultParent={defaultParent !== null}
+              rememberChecked={rememberChecked}
               onUrlChange={setUrl}
               onParentChange={setParent}
               onFolderChange={(value) => {
@@ -114,7 +121,7 @@ export function CloneDialog({
                 setFolder(value);
               }}
               onSubmodulesChange={setSubmodules}
-              onRememberChange={setRemember}
+              onRememberChange={setRememberChecked}
               onPick={() => void handlePick()}
             />
           )}
@@ -158,7 +165,9 @@ export function CloneDialog({
                       folderName: trimmedFolder,
                       recurseSubmodules: submodules,
                     },
-                    canRemember && remember,
+                    // **押せない状態のチェックは無視する。** 既に既定の場所へ
+                    // 書き直しても何も変わらないので、書きに行かない。
+                    remember.enabled && rememberChecked,
                   )
                 }
               >
@@ -179,8 +188,7 @@ function CloneForm({
   preview,
   submodules,
   remember,
-  canRemember,
-  hasDefaultParent,
+  rememberChecked,
   onUrlChange,
   onParentChange,
   onFolderChange,
@@ -193,10 +201,9 @@ function CloneForm({
   folder: string;
   preview: string;
   submodules: boolean;
-  remember: boolean;
-  /** 既定と違う場所を指しているか。同じなら「覚える」に意味が無い。 */
-  canRemember: boolean;
-  hasDefaultParent: boolean;
+  /** 既定の保存先をどう扱えるか（`lib/clonePath.ts` の純関数が決める）。 */
+  remember: RememberOption;
+  rememberChecked: boolean;
   onUrlChange: (value: string) => void;
   onParentChange: (value: string) => void;
   onFolderChange: (value: string) => void;
@@ -266,15 +273,17 @@ function CloneForm({
       />
 
       {/* 保存先を毎回入力させないための逃げ道。設定画面は T-25 なので、
-          いまはここが `workspaceRoot` を決められる唯一の場所。 */}
-      {canRemember && (
-        <Check
-          checked={remember}
-          label={ja.clone.rememberParent}
-          note={hasDefaultParent ? ja.clone.rememberParentReplaces : undefined}
-          onChange={onRememberChange}
-        />
-      )}
+          いまはここが `workspaceRoot` を決められる唯一の場所。
+
+          **押せないときも消さない。** 消すと、既定がどこにあるのか画面から
+          読めなくなり、勝手に変わっているようにしか見えない（目視で報告された）。 */}
+      <Check
+        checked={remember.enabled && rememberChecked}
+        disabled={!remember.enabled}
+        label={ja.clone.rememberParent}
+        note={rememberNote(remember)}
+        onChange={onRememberChange}
+      />
 
       {/* 認証ウィンドウが出る可能性を先に伝える。突然前面に出ると事故に見える。 */}
       <p className="modal__note">{ja.clone.authNote}</p>
@@ -292,21 +301,25 @@ function CloneForm({
  */
 function Check({
   checked,
+  disabled = false,
   label,
   note,
   onChange,
 }: {
   checked: boolean;
+  /** 押しても何も変わらない状態。**消さずに、押せない形で出す。** */
+  disabled?: boolean;
   label: string;
   note?: string;
   onChange: (value: boolean) => void;
 }) {
   return (
-    <div className="check">
+    <div className={`check${disabled ? " check--disabled" : ""}`}>
       <label className="check__row">
         <input
           type="checkbox"
           checked={checked}
+          disabled={disabled}
           onChange={(event) => onChange(event.target.checked)}
         />
         <span>{label}</span>
@@ -314,6 +327,26 @@ function Check({
       {note !== undefined && <p className="check__note">{note}</p>}
     </div>
   );
+}
+
+/**
+ * 既定の保存先について、いま何が起きるのかの 1 行。
+ *
+ * **いまの既定を必ず出す。** 出さないと、どこが既定なのか画面のどこにも現れない。
+ */
+function rememberNote(option: RememberOption): string {
+  switch (option.kind) {
+    case "empty":
+      return option.current === null
+        ? ja.clone.rememberNoneYet
+        : ja.clone.rememberCurrent(option.current);
+    case "same":
+      return ja.clone.rememberAlready(option.current ?? "");
+    case "unset":
+      return ja.clone.rememberFirst;
+    case "replace":
+      return ja.clone.rememberReplaces(option.current ?? "");
+  }
 }
 
 /** 失敗と中止の結果。**成功はここへ来ない**（呼び出し側が閉じて開く）。 */

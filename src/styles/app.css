@@ -788,6 +788,13 @@ body {
   color: var(--text-dim);
 }
 
+/* 押しても何も変わらない状態。**消さずに、押せない形で残す**（T-19）。
+   消すと既定の保存先がどこにあるのか画面から読めなくなる。 */
+.check--disabled .check__row {
+  cursor: default;
+  color: var(--text-faint);
+}
+
 /* clone の入力欄（T-19）。**ラベルと欄を縦に積む** — 横に並べると、
    長いパスの欄が狭くなって全体が読めない。 */
 .field {

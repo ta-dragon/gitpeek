@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { defaultFolderName, joinPath } from "./clonePath";
+import { defaultFolderName, joinPath, rememberOption, samePath } from "./clonePath";
 
 describe("defaultFolderName", () => {
   it("`.git` を落とす", () => {
@@ -81,5 +81,77 @@ describe("joinPath", () => {
     expect(joinPath("", "repo")).toBe("");
     expect(joinPath("C:\\ws", "")).toBe("");
     expect(joinPath("  ", "repo")).toBe("");
+  });
+});
+
+describe("samePath", () => {
+  // **Rust 側の `same_path` と同じ判定にする。** ここがずれると、既定の保存先が
+  // `C:\Gitwork` と `C:\Gitwork\` の間で往復して毎回書き換わる。
+  it("末尾の区切りを無視する", () => {
+    expect(samePath("C:\\Gitwork", "C:\\Gitwork\\")).toBe(true);
+    expect(samePath("C:\\Gitwork\\", "C:\\Gitwork")).toBe(true);
+  });
+
+  it("大文字小文字を区別しない（Windows）", () => {
+    expect(samePath("C:\\Gitwork", "c:\\gitwork")).toBe(true);
+  });
+
+  it("前後の空白を無視する", () => {
+    expect(samePath("  C:\\Gitwork  ", "C:\\Gitwork")).toBe(true);
+  });
+
+  it("別の場所は別と言う", () => {
+    expect(samePath("C:\\Gitwork", "C:\\Gitwork\\sub")).toBe(false);
+    expect(samePath("C:\\Gitwork", "D:\\Gitwork")).toBe(false);
+  });
+});
+
+describe("rememberOption", () => {
+  // **どの状態でも消さない。** 消すと既定がどこにあるのか画面から読めなくなり、
+  // 勝手に変わっているようにしか見えない（T-19 の目視で報告された）。
+  it("保存先が空欄でも状態を返す（消さない）", () => {
+    expect(rememberOption("", "C:\\Gitwork")).toEqual({
+      enabled: false,
+      kind: "empty",
+      current: "C:\\Gitwork",
+    });
+  });
+
+  it("既定がまだ無ければ決められる", () => {
+    expect(rememberOption("C:\\Gitwork", null)).toEqual({
+      enabled: true,
+      kind: "unset",
+      current: null,
+    });
+    // 空文字列も「無い」と同じに扱う（手編集で入りうる）。
+    expect(rememberOption("C:\\Gitwork", "  ").kind).toBe("unset");
+  });
+
+  // **これが「毎回変わる」の芯。** 同じ場所を別物と読むと、書き換えても状態が
+  // 変わらないので、押せるままになって既定が往復する。
+  it("すでに既定なら押させない（区切りと大小文字の違いを含む）", () => {
+    expect(rememberOption("C:\\Gitwork", "C:\\Gitwork")).toEqual({
+      enabled: false,
+      kind: "same",
+      current: "C:\\Gitwork",
+    });
+    expect(rememberOption("C:\\Gitwork\\", "C:\\Gitwork").enabled).toBe(false);
+    expect(rememberOption("c:\\gitwork", "C:\\Gitwork").enabled).toBe(false);
+  });
+
+  it("別の場所なら置き換えられると言う", () => {
+    expect(rememberOption("D:\\work", "C:\\Gitwork")).toEqual({
+      enabled: true,
+      kind: "replace",
+      current: "C:\\Gitwork",
+    });
+  });
+
+  // **いまの既定を必ず持って返す。** 文言に出すため — 出さないと、どこが既定なのか
+  // 画面のどこにも現れない。
+  it("いまの既定を必ず添える", () => {
+    for (const parent of ["", "C:\\Gitwork", "D:\\work"]) {
+      expect(rememberOption(parent, "C:\\Gitwork").current).toBe("C:\\Gitwork");
+    }
   });
 });
