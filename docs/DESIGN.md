@@ -1548,7 +1548,7 @@ enabled: true
       "order": 0,
       "visibleRefs": { "mode": "all", "excluded": [] },
       "defaultLlmProfileId": null,
-      "repoSkills": { "trusted": false, "hashes": {} }
+      "repoSkills": { "hashes": {}, "extra": {} }
     }
   ],
   "llmProfiles": [
@@ -1560,7 +1560,7 @@ enabled: true
       "contextWindow": 32768,
       "temperature": 0.2,
       "maxTokens": 4096,
-      "credentialKey": "givsoner/llm/uuid"
+      "credentialKey": "llm/uuid"
     }
   ],
   "ui": {
@@ -1570,12 +1570,25 @@ enabled: true
     "contextLines": 3,
     "ignoreWhitespace": false,
     "showLineEndings": false,
-    "commitOrder": "topo"
+    "commitOrder": "topo",
+    "collapseLines": 3000,
+    "collapseBytes": 512000
   },
   "fetch": { "staleWarningDays": 7 },
-  "review": { "concurrency": 1, "contextLines": 10 }
+  "review": { "concurrency": 1, "contextLines": 10 },
+  "skills": {
+    "useSkill": { "general-review": true },
+    "extra": { "general-review": "変数名の指摘は要りません" }
+  }
 }
 ```
+
+**`repoSkills` と `skills` の鍵が違うのは意図的**（§11.2.1）。リポジトリ内は
+「どのファイルの内容を信頼したか」が要点なのでファイル名を鍵にし、内蔵とグローバルは
+skill の名前を鍵にする。**`repoSkills.hashes` に記録があること＝そのファイルを使うこと。**
+
+**`skills.useSkill` に記録が無ければ、skill ファイルの `enabled` に従う。**
+利用者が触ったときだけ書き込まれるので、ファイル側の既定を後から変えれば反映される。
 
 ### 12.3 state.json（構造案）
 
@@ -1782,7 +1795,16 @@ T-06 で導入済み。
 ### 14.5 LLM
 
 OpenAI 互換のモックサーバを立ててテストし、**JSON パース失敗時の Markdown フォールバック経路を
-必ず通す**（§10.6）。
+必ず通す**（§10.6）。**モックサーバは `std::net::TcpListener` で自作**してある
+（`src-tauri/tests/common/mockhttp.rs`）。dev-dependency を増やさないため。
+
+**「組み立てが正しいこと」ではなく「実際に飛んだ要求」で見る**（T-20）。
+`Authorization` の有無も URL の形も、モックが記録した要求で確かめる。
+
+skill の信頼は**実ファイルで見る**（`src-tauri/tests/skills.rs`）。
+「サブディレクトリを辿らない」「symlink を辿らない」「大きすぎるものを読まない」は
+ファイルシステムを通さないと確かめられない。**未信頼の本文に目印を埋め、
+プロンプトへ渡りうる文字列を全部つないだものに 1 文字も出ないこと**を見る。
 
 ---
 
@@ -1866,7 +1888,7 @@ Phase 9 完了 ＋ **実リポジトリを 5 個以上登録して 1 週間実�
 ## 16. ディレクトリ構成
 
 `(済)` は実在するファイル。それ以外は未作成で、括弧内は作られるタスク。
-**最終更新は T-18 完了時点。**
+**最終更新は T-21 完了時点。**
 
 ```
 gitviewer/
@@ -1893,6 +1915,9 @@ gitviewer/
 │   │   │                              WordDiff / CollapsedNotice / CompareBar (T-15) /
 │   │   │                              WorkingTreeFiles / UntrackedFile /
 │   │   │                              useWorkingTree (T-16)
+│   │   ├── settings/             (済) LlmProfiles（接続先。T-20）/
+│   │   │                              SkillList（観点の一覧。T-21）/
+│   │   │                              RepositorySettingsDialog（リポジトリ 1 つぶん。T-21）
 │   │   ├── review/               AI レビュードロワー (T-23)
 │   │   ├── commandlog/           (済) git コマンドログパネル ＋ capacity（純関数）
 │   │   ├── setup/                (済) 空状態と git 未検出画面 ＋ CloneDialog (T-19)
@@ -1918,6 +1943,9 @@ gitviewer/
 │   │   ├── writeOps.ts           (済) checkout の選択肢と FF 可否（純関数・テスト対象 — T-18）
 │   │   ├── clonePath.ts          (済) URL -> 既定のフォルダ名 ＋ 既定の保存先の状態
 │   │   │                              （純関数・テスト対象 — T-19）
+│   │   ├── llmProfile.ts         (済) 接続先の検証と出し分け（純関数・テスト対象 — T-20）
+│   │   ├── llmMessage.ts         (済) 応答の整形と見出しの分割（純関数・テスト対象 — T-20）
+│   │   ├── skillTrust.ts         (済) 観点の出し分けと宛先（純関数・テスト対象 — T-21）
 │   │   └── ipc.ts                (済) Tauri invoke ラッパ
 │   ├── store/                    (済) settings / uiState / repositories / snapshot
 │   └── styles/                   (済) theme.css（トークン）/ app.css / graph.css
@@ -1934,7 +1962,11 @@ gitviewer/
     │   ├── status.rs             (済) 作業ツリーの状態 (T-16)
     │   ├── fetch.rs              (済) 生成した bare からの fetch (T-17)
     │   ├── writeops.rs           (済) 実物の git への checkout / merge (T-18)
-    │   └── clone.rs              (済) 生成した bare からの clone (T-19)
+    │   ├── clone.rs              (済) 生成した bare からの clone (T-19)
+    │   ├── common/mockhttp.rs    (済) 自作の HTTP モックサーバ (T-20)
+    │   ├── llm.rs                (済) 失敗の言い分けとマスキング (T-20)
+    │   ├── secrets.rs            (済) 資格情報の往復（**本物の資格情報マネージャー**）(T-20)
+    │   └── skills.rs             (済) 実ファイルでの読み込み範囲と信頼 (T-21)
     └── src/
         ├── main.rs               (済)
         ├── lib.rs                (済) Tauri コマンドの登録と AppState
@@ -1960,8 +1992,10 @@ gitviewer/
         │   ├── component.rs      (済) 連結成分（orphan 判定）
         │   └── reach.rs          (済) 到達可能集合と ahead/behind
         ├── llm/
-        │   ├── client.rs         OpenAI 互換クライアント (T-20)
-        │   ├── skill.rs          (T-21)
+        │   ├── mod.rs            (済) モジュール宣言
+        │   ├── client.rs         (済) OpenAI 互換クライアント (T-20)
+        │   ├── skill.rs          (済) 観点の読み込みと信頼判定 (T-21)
+        │   ├── skills/           (済) 内蔵 skill（`include_str!` で埋め込む）
         │   └── review.rs         (T-22)
         ├── store/
         │   ├── mod.rs            (済) 設定と状態のストアの入口
@@ -1972,7 +2006,7 @@ gitviewer/
         │   └── reviews.rs        (T-23)
         ├── commandlog.rs         (済) git コマンドログのリングバッファ
         ├── encoding.rs           (済) 文字コード判別・改行検出 (T-12)
-        ├── secret.rs             Windows 資格情報マネージャー (T-20)
+        ├── secret.rs             (済) Windows 資格情報マネージャー (T-20)
         ├── redact.rs             (済) マスキング（全ログ出力がここを通る）
         └── logging.rs            ログファイル (T-24)
 ```

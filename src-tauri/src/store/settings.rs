@@ -195,7 +195,9 @@ pub struct LlmProfile {
     pub context_window: u32,
     pub temperature: f32,
     pub max_tokens: u32,
-    /// 資格情報マネージャーの参照キー（例 `givsoner/llm/<id>`）。
+    /// 資格情報マネージャーの参照キー（`llm/<uuid>`）。サービス名は別
+    /// （`secret::SERVICE` = `com.tatsu.givsoner`）。
+    /// **採番するのは `Store::upsert_llm_profile` だけ**で、以後変えない。
     pub credential_key: String,
 }
 
