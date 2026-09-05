@@ -21,7 +21,7 @@ use tauri::AppHandle;
 use uuid::Uuid;
 
 use paths::StorePaths;
-use settings::{LoadError, RepositorySettings, Settings, SettingsRecovery};
+use settings::{LlmProfile, LoadError, RepositorySettings, Settings, SettingsRecovery};
 use state::{DebouncedWriter, UiState};
 
 /// フロントへ返す設定。退避が起きた場合はその記録を添える。
@@ -177,6 +177,89 @@ impl Store {
 
         settings.repositories.retain(|repository| repository.id != id);
         settings::save(&ready.paths, settings)
+    }
+
+    /// LLM プロファイルを保存順のまま返す。
+    pub fn llm_profiles(&self) -> Result<Vec<LlmProfile>, String> {
+        Ok(self.settings()?.settings.llm_profiles)
+    }
+
+    /// ID で 1 件引く。
+    pub fn llm_profile(&self, id: &str) -> Result<LlmProfile, String> {
+        self.llm_profiles()?
+            .into_iter()
+            .find(|profile| profile.id == id)
+            .ok_or_else(|| format!("接続先の設定が見つかりません: {id}"))
+    }
+
+    /// LLM プロファイルを追加・更新して、保存された姿を返す。
+    ///
+    /// **`id` と `credential_key` を決めるのはここだけ。** フロントから届いた値は
+    /// 使わない。参照キーを呼び出し側に選ばせると、別のプロファイルの資格情報を
+    /// 指す形が作れてしまう（CLAUDE.md §4）。
+    pub fn upsert_llm_profile(&self, incoming: LlmProfile) -> Result<LlmProfile, String> {
+        let ready = self.ready()?;
+        let mut slot = ready.settings.lock().expect("settings poisoned");
+        let settings = slot.loaded.as_mut().map_err(|error| error.clone())?;
+
+        let stored = match settings
+            .llm_profiles
+            .iter_mut()
+            .find(|profile| !incoming.id.is_empty() && profile.id == incoming.id)
+        {
+            Some(existing) => {
+                // 参照キーは採番したときのまま据え置く。名前や URL を変えても
+                // 資格情報を追いかけ直さなくて済む。
+                let credential_key = existing.credential_key.clone();
+                *existing = LlmProfile {
+                    credential_key,
+                    ..incoming
+                };
+                existing.clone()
+            }
+            None => {
+                let added = LlmProfile {
+                    id: Uuid::new_v4().to_string(),
+                    credential_key: crate::secret::new_credential_key(),
+                    ..incoming
+                };
+                settings.llm_profiles.push(added.clone());
+                added
+            }
+        };
+
+        settings::save(&ready.paths, settings)?;
+        Ok(stored)
+    }
+
+    /// LLM プロファイルを消し、**消したものを返す**。
+    ///
+    /// 呼び出し側は返ってきた `credential_key` の資格情報も消すこと。
+    /// 消し忘れると資格情報マネージャーに孤児が残る。
+    pub fn remove_llm_profile(&self, id: &str) -> Result<Option<LlmProfile>, String> {
+        let ready = self.ready()?;
+        let mut slot = ready.settings.lock().expect("settings poisoned");
+        let settings = slot.loaded.as_mut().map_err(|error| error.clone())?;
+
+        let Some(index) = settings
+            .llm_profiles
+            .iter()
+            .position(|profile| profile.id == id)
+        else {
+            return Ok(None);
+        };
+        let removed = settings.llm_profiles.remove(index);
+
+        // 消したプロファイルを既定にしていたリポジトリの参照も外す。
+        // 残すと「無い接続先」を指したままになる。
+        for repository in &mut settings.repositories {
+            if repository.default_llm_profile_id.as_deref() == Some(id) {
+                repository.default_llm_profile_id = None;
+            }
+        }
+
+        settings::save(&ready.paths, settings)?;
+        Ok(Some(removed))
     }
 
     pub fn ui_state(&self) -> Result<UiState, String> {

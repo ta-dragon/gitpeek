@@ -753,9 +753,11 @@ export type RepositorySettings = {
 };
 
 /**
- * T-20 で使う。T-01 では常に空配列。
  * **API キーはここに持たない。** 実体は Windows 資格情報マネージャーにあり、
  * ここにあるのは参照キーだけ（CLAUDE.md §4）。
+ *
+ * `id` と `credentialKey` を決めるのは Rust 側（`Store::upsert_llm_profile`）。
+ * 新規は両方とも空で送る。
  */
 export type LlmProfile = {
   id: string;
@@ -898,6 +900,86 @@ export function saveUiState(uiState: UiState): Promise<void> {
 
 export function appDataDir(): Promise<string> {
   return invoke<string>("app_data_dir");
+}
+
+/* ---------- LLM（`src-tauri/src/llm/client.rs` / `src-tauri/src/secret.rs`）---------- */
+
+/**
+ * 保存時に API キーをどう扱うか。**「空欄＝消す」にしない**ため種類で分ける
+ * （`src-tauri/src/lib.rs` の `ApiKeyUpdate` と同じ形）。
+ */
+export type ApiKeyUpdate =
+  | { kind: "keep" }
+  | { kind: "replace"; value: string }
+  | { kind: "clear" };
+
+/** 失敗の種類。画面はこれで復旧手順を出し分ける。 */
+export type LlmErrorKind =
+  | "unauthorized"
+  | "notFound"
+  | "status"
+  | "unreachable"
+  | "timeout"
+  | "badResponse"
+  | "badUrl"
+  | "config";
+
+/**
+ * LLM 側の失敗。**`detail` は生の応答**（Rust 側でマスク済み）。
+ *
+ * これはコマンドの `Err` としてそのまま届くので、`Error` ではなくこの形で来る。
+ * 判別には [`isLlmError`] を使うこと。
+ */
+export type LlmError = { kind: LlmErrorKind; message: string; detail: string };
+
+export function isLlmError(value: unknown): value is LlmError {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Partial<LlmError>;
+  return typeof candidate.kind === "string" && typeof candidate.message === "string";
+}
+
+export type LlmTestOutcome = {
+  model: string;
+  reply: string;
+  elapsedMs: number;
+  /** 生の応答。**マスク済み。** */
+  raw: string;
+};
+
+export type LlmModelList = { models: string[]; elapsedMs: number };
+
+/**
+ * プロファイルを保存する。**新規なら `id` と参照キーは Rust 側が採番して返す。**
+ * API キーの平文が通るのはこの経路だけで、行き先は資格情報マネージャーだけ。
+ */
+export function saveLlmProfile(
+  profile: LlmProfile,
+  apiKey: ApiKeyUpdate,
+): Promise<LlmProfile> {
+  return invoke<LlmProfile>("save_llm_profile", { profile, apiKey });
+}
+
+/** プロファイルを消す。**資格情報も一緒に消える。** */
+export function deleteLlmProfile(id: string): Promise<void> {
+  return invoke<void>("delete_llm_profile", { id });
+}
+
+/**
+ * API キーが保存済みのプロファイルの参照キー。**値そのものは返らない。**
+ * 「保存済み」の表示にだけ使う。
+ */
+export function llmCredentialKeys(): Promise<string[]> {
+  return invoke<string[]>("llm_credential_keys");
+}
+
+/** モデル一覧（`GET {baseUrl}/models`）。**取れなくても手入力できる。** */
+export function listLlmModels(id: string): Promise<LlmModelList> {
+  return invoke<LlmModelList>("list_llm_models", { id });
+}
+
+/** 接続テスト（`POST {baseUrl}/chat/completions` に 1 往復）。 */
+export function testLlmConnection(id: string): Promise<LlmTestOutcome> {
+  return invoke<LlmTestOutcome>("test_llm_connection", { id });
 }
 
 const SNAPSHOT_PROGRESS_EVENT = "snapshot-progress";

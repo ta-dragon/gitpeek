@@ -31,6 +31,7 @@ import { SplitPane } from "./components/common/SplitPane";
 import { RefTree } from "./components/sidebar/RefTree";
 import { RepositoryList, type SortMode } from "./components/sidebar/RepositoryList";
 import { Sidebar } from "./components/sidebar/Sidebar";
+import { LlmProfilesDialog } from "./components/settings/LlmProfiles";
 import { CloneDialog } from "./components/setup/CloneDialog";
 import { EmptyState } from "./components/setup/EmptyState";
 import { GitSetupScreen } from "./components/setup/GitSetupScreen";
@@ -61,6 +62,7 @@ import { useRepositories } from "./store/repositories";
 import {
   dismissSettingsNotice,
   initSettings,
+  refreshSettings,
   updateSettings,
   useSettings,
 } from "./store/settings";
@@ -96,6 +98,11 @@ export default function App() {
   const [detecting, setDetecting] = useState(false);
   const [logOpen, setLogOpen] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  /**
+   * AI レビューの接続先（T-20）。**T-25 でこの中身を設定画面へ移す**ので、
+   * いまは入口をヘッダのボタン 1 つに留めておく。
+   */
+  const [llmOpen, setLlmOpen] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   /**
    * ブランチツリーから「先頭コミットへジャンプ」したときの要求。
@@ -273,6 +280,11 @@ export default function App() {
         <button type="button" className="button" onClick={() => setLogOpen((open) => !open)}>
           {logOpen ? ja.commandLog.hide : ja.commandLog.show}
         </button>
+        {/* AI レビューの接続先（T-20）。**入口は 1 つだけ**にして、
+            T-25 で中身を設定画面へ移す。 */}
+        <button type="button" className="button" onClick={() => setLlmOpen(true)}>
+          {ja.llm.open}
+        </button>
       </header>
 
       {settings.recovered !== null && (
@@ -410,6 +422,15 @@ export default function App() {
           progress={fetching.progress}
           onCancel={fetching.cancel}
           onClose={fetching.dismiss}
+        />
+      )}
+
+      {/* AI レビューの接続先（T-20）。**API キーは資格情報マネージャーへ預ける。** */}
+      {llmOpen && (
+        <LlmProfilesDialog
+          profiles={settings.settings.llmProfiles}
+          onChanged={refreshSettings}
+          onClose={() => setLlmOpen(false)}
         />
       )}
 

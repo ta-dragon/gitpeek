@@ -29,6 +29,12 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 # 文字コード判別（docs/DESIGN.md §9.1）。Shift_JIS は Windows-31J として扱われる。
 encoding_rs = "0.8"
+# API キーの保管先（Windows 資格情報マネージャー。CLAUDE.md §4）。
+# 既定機能の `v1` だけで足り、プラットフォーム別のストアは target で絞られる。
+# `CredWriteW` を直に叩くとこのプロジェクト初の unsafe が要るので、依存 1 つと引き換えにしている。
+keyring = "4"
+# LLM への HTTP。**ブロッキング**であることが要件（このコードベースは spawn_blocking で揃えてある）。
+ureq = "3"
 
 [dev-dependencies]
 tempfile = "3"

@@ -2,8 +2,10 @@ pub mod commandlog;
 pub mod encoding;
 pub mod git;
 pub mod graph;
+pub mod llm;
 pub mod model;
 mod redact;
+pub mod secret;
 pub mod store;
 
 use std::path::{Path, PathBuf};
@@ -1001,6 +1003,116 @@ fn app_data_dir(state: State<'_, AppState>) -> Result<String, String> {
     state.store.root()
 }
 
+/// API キーの扱い方。**フロントは「空欄＝変えない」を自分で判断しない。**
+///
+/// 空欄のまま保存したときに既存のキーを消してしまう事故を、`Option` ではなく
+/// 種類で塞いである（真偽値を並べると成り立たない組み合わせが表現できてしまう）。
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+enum ApiKeyUpdate {
+    /// 触らない。編集フォームで API キー欄を空のまま保存したとき。
+    Keep,
+    /// 差し替える。
+    Replace { value: String },
+    /// 保存済みのキーを消す（キーの要らない接続先へ変えたとき）。
+    Clear,
+}
+
+/// LLM プロファイルを保存する。**新規なら ID と参照キーはここで採番される。**
+///
+/// API キーの平文が通るのはこの経路だけで、行き先は資格情報マネージャーだけ。
+/// `settings.json` へ書くのは参照キーだけ（CLAUDE.md §4）。
+#[tauri::command]
+fn save_llm_profile(
+    state: State<'_, AppState>,
+    profile: store::settings::LlmProfile,
+    api_key: ApiKeyUpdate,
+) -> Result<store::settings::LlmProfile, String> {
+    let stored = state.store.upsert_llm_profile(profile)?;
+    let secrets = secret::Secrets::new();
+    match api_key {
+        ApiKeyUpdate::Keep => {}
+        // 空文字を「預ける」意味は無いので消す扱いにする。フロントは空欄を
+        // `Keep` として送るので、ここへ来るのは手で組み立てた JSON だけ。
+        ApiKeyUpdate::Replace { value } if value.is_empty() => {
+            secrets.delete(&stored.credential_key)?
+        }
+        ApiKeyUpdate::Replace { value } => secrets.save(&stored.credential_key, &value)?,
+        ApiKeyUpdate::Clear => secrets.delete(&stored.credential_key)?,
+    }
+    Ok(stored)
+}
+
+/// LLM プロファイルを消す。**資格情報も一緒に消す**（孤児を残さない）。
+#[tauri::command]
+fn delete_llm_profile(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    if let Some(removed) = state.store.remove_llm_profile(&id)? {
+        secret::Secrets::new().delete(&removed.credential_key)?;
+    }
+    Ok(())
+}
+
+/// API キーが保存済みのプロファイルの参照キー。**値そのものは返さない。**
+///
+/// 画面の「保存済み」表示に使う。既存のキーを読み出して見せる経路は作らない。
+#[tauri::command]
+fn llm_credential_keys(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    let secrets = secret::Secrets::new();
+    Ok(state
+        .store
+        .llm_profiles()?
+        .into_iter()
+        .map(|profile| profile.credential_key)
+        .filter(|key| !key.is_empty() && secrets.has(key))
+        .collect())
+}
+
+/// 通信に要るもの一式を、**保存済みのプロファイル**から揃える。
+///
+/// フロントから平文のキーを受け取って試す形にはしない。試すために保存が要るぶん
+/// 手間だが、**キーが通る経路を「保存」1 つに閉じられる**（CLAUDE.md §4）。
+/// 押せない理由は画面が出す（`lib/llmProfile.ts` の `probeOption`）。
+fn saved_endpoint(
+    state: &State<'_, AppState>,
+    id: &str,
+) -> Result<(store::settings::LlmProfile, String), llm::client::LlmError> {
+    let profile = state
+        .store
+        .llm_profile(id)
+        .map_err(llm::client::LlmError::config)?;
+    let api_key = secret::Secrets::new()
+        .load(&profile.credential_key)
+        .map_err(llm::client::LlmError::config)?
+        // キーが無いのは失敗ではない。Ollama は認証不要で、空なら
+        // `Authorization` が付かない（`llm/client.rs`）。
+        .unwrap_or_default();
+    Ok((profile, api_key))
+}
+
+/// モデル名の候補。**取れなくても手入力できる**ので、失敗しても保存は妨げない。
+#[tauri::command]
+async fn list_llm_models(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<llm::client::ModelList, llm::client::LlmError> {
+    let (profile, api_key) = saved_endpoint(&state, &id)?;
+    tauri::async_runtime::spawn_blocking(move || llm::client::list_models(&profile, &api_key))
+        .await
+        .map_err(|error| llm::client::LlmError::config(error.to_string()))?
+}
+
+/// 接続テスト。**`/v1/models` では済ませず、実際に 1 往復させる。**
+#[tauri::command]
+async fn test_llm_connection(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<llm::client::TestOutcome, llm::client::LlmError> {
+    let (profile, api_key) = saved_endpoint(&state, &id)?;
+    tauri::async_runtime::spawn_blocking(move || llm::client::test_connection(&profile, &api_key))
+        .await
+        .map_err(|error| llm::client::LlmError::config(error.to_string()))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -1049,7 +1161,12 @@ pub fn run() {
             save_settings,
             load_ui_state,
             save_ui_state,
-            app_data_dir
+            app_data_dir,
+            save_llm_profile,
+            delete_llm_profile,
+            llm_credential_keys,
+            list_llm_models,
+            test_llm_connection
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -1062,4 +1179,57 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ApiKeyUpdate;
+    use crate::store::settings::LlmProfile;
+
+    /// **フロントが送る JSON をそのまま食えること**（T-18 / T-19 の申し送り）。
+    ///
+    /// 引数の組み立てだけを固定しても、受け取りの形が違えばコマンドは 1 度も走らない。
+    /// `serde` の `rename_all` は**変種の名前しか変えない**ので、フィールドは
+    /// `rename_all_fields` が要る（T-18 で落として嵌まった）。
+    #[test]
+    fn the_llm_profile_wire_format_matches_what_the_front_end_sends() {
+        let parsed: LlmProfile = serde_json::from_str(
+            r#"{"id":"","name":"ローカル","baseUrl":"http://localhost:11434/v1",
+                "model":"qwen2.5-coder:14b","contextWindow":32768,"temperature":0.2,
+                "maxTokens":4096,"credentialKey":""}"#,
+        )
+        .expect("フロントの JSON を食えること");
+
+        assert_eq!(parsed.name, "ローカル");
+        assert_eq!(parsed.base_url, "http://localhost:11434/v1");
+        assert_eq!(parsed.context_window, 32_768);
+        assert_eq!(parsed.max_tokens, 4_096);
+    }
+
+    /// API キーの扱いは 3 通りある。**`value` のキー名まで食えること。**
+    #[test]
+    fn the_api_key_update_wire_format_matches_what_the_front_end_sends() {
+        assert!(matches!(
+            serde_json::from_str::<ApiKeyUpdate>(r#"{"kind":"keep"}"#).expect("keep"),
+            ApiKeyUpdate::Keep
+        ));
+        assert!(matches!(
+            serde_json::from_str::<ApiKeyUpdate>(r#"{"kind":"clear"}"#).expect("clear"),
+            ApiKeyUpdate::Clear
+        ));
+
+        let replace = serde_json::from_str::<ApiKeyUpdate>(
+            r#"{"kind":"replace","value":"sk-example-0123456789"}"#,
+        )
+        .expect("replace");
+        match replace {
+            ApiKeyUpdate::Replace { value } => assert_eq!(value, "sk-example-0123456789"),
+            other => panic!("replace として読めていない: {other:?}"),
+        }
+
+        // **知らない種類を黙って握り潰さない。** 既定へ倒すと、キーを消すつもりの
+        // 操作が「触らない」に化ける。
+        assert!(serde_json::from_str::<ApiKeyUpdate>(r#"{"kind":"whatever"}"#).is_err());
+        assert!(serde_json::from_str::<ApiKeyUpdate>(r#"{"kind":"replace"}"#).is_err());
+    }
 }

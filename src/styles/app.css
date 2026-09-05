@@ -895,6 +895,106 @@ body {
   white-space: pre;
 }
 
+/* ---------- AI レビューの接続先（T-20）---------- */
+
+/* 登録済みの一覧。**名前・キーの有無・場所・操作**を 1 行に収める。
+   `.fetchResults` と同じ理由で `flex: 1 1 0` にしない（箱の高さは中身で決まる）。 */
+.llmList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.llmList__row {
+  display: grid;
+  grid-template-columns: max-content max-content 1fr max-content;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+
+.llmList__name {
+  font-weight: 600;
+}
+
+/* base URL とモデル名。**長くても行を割らずに省略する** — 折り返すと
+   操作ボタンの位置が行ごとにずれて押しにくい。 */
+.llmList__where {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llmList__actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* 削除の確認。**資格情報も一緒に消える**ので、1 クリックでは消さない。 */
+.llmList__confirm {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0 2px;
+  color: var(--danger);
+}
+
+/* 編集フォームのボタン列。**押せないものも消さずに並べる**ので、
+   狭いときは折り返す（`.modal__actions` と同じ理由）。 */
+.llmEditor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.llmEditor__actions .button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+}
+
+/* 入力が通らない理由。**注意（`.check__note`）と色を分ける** —
+   直せば進めるものと、ただの補足が同じ色だと読み分けられない。 */
+.field__problem {
+  margin: 0;
+  color: var(--danger);
+}
+
+/* アプリの説明とサーバの言い分を別の行にする（T-20 の目視で出た要望）。
+   `.modal__blocker` の中に段落を積むので、`<p>` の既定余白を消して詰める。 */
+.llmHeadline__line {
+  margin: 0;
+}
+
+.llmHeadline__line + .llmHeadline__line {
+  margin-top: 4px;
+}
+
+/* 生の応答。**`.fetchResults__raw` と分ける** — あちらは git の stderr で、
+   1 行が短く横スクロールで足りる。こちらは JSON なので折り返しが要る。
+
+   - `pre-wrap`: 整形した字下げは残したまま、長い行だけ折る
+   - `anywhere`: 区切りの無い長いトークン（base64 やハッシュ）も折る
+   - `max-height`: 何百行返ってきてもボタンを画面外へ押し出さない */
+.llmRaw {
+  max-height: 40vh;
+  margin: 4px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* 整形すると行数が増えるので、行間を詰めて 40vh に多く収める。 */
+  line-height: 1.45;
+}
+
 /* 放置警告は**アイコンとツールチップだけ**（docs/DESIGN.md §8.3）。
    モーダルもバナーも出さない。 */
 .repo__stale {

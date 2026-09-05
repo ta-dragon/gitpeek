@@ -638,6 +638,115 @@ export const ja = {
     next: "実装フェーズは CLAUDE.md §9 を参照。",
   },
 
+  /**
+   * LLM の接続先（T-20）。**入口はヘッダの「設定」ボタン 1 つ**で、
+   * T-25 で設定画面へ中身を移す。
+   *
+   * 文言は「何が起きるか」で書く（CLAUDE.md §6）。用語をそのまま出さない。
+   */
+  llm: {
+    open: "設定",
+    title: "AI レビューの接続先",
+    lead: "AI レビューに使う接続先を登録します。API キーは Windows の資格情報マネージャーに預けるので、設定ファイルには残りません。",
+    empty: "接続先がまだ登録されていません。",
+
+    add: "接続先を追加",
+    edit: "編集",
+    remove: "削除",
+    removeConfirm: (name: string) =>
+      `接続先「${name}」を削除します。預けてある API キーも一緒に消えます。`,
+
+    // --- 編集フォーム -------------------------------------------------
+    nameLabel: "この接続先の呼び名",
+    namePlaceholder: "手元の Ollama / 仕事用 など",
+    baseUrlLabel: "接続先の URL",
+    baseUrlPlaceholder: "http://localhost:11434/v1",
+    baseUrlNote:
+      "OpenAI 互換の入口を入れてください。多くは末尾が /v1 です。Ollama は http://localhost:11434/v1 です。",
+    modelLabel: "モデル名",
+    modelPlaceholder: "qwen2.5-coder:14b",
+    contextWindowLabel: "一度に渡せる長さ（トークン）",
+    contextWindowNote: "これを超えそうなときだけ、差分を分けて渡します。",
+    temperatureLabel: "temperature（0 に近いほど答えがぶれません）",
+    maxTokensLabel: "1 回の返答の上限（トークン）",
+
+    // 入力の問題。**押せないボタンを消さず、ここに理由を出す。**
+    problem: {
+      nameEmpty: "呼び名を入れてください。一覧でこの名前を出します。",
+      baseUrlEmpty: "接続先の URL を入れてください。",
+      baseUrlNotHttp: "URL は http:// か https:// で始めてください。",
+      modelEmpty: "モデル名を入れてください。下の「モデル名を取り出す」で候補を出せます。",
+      contextWindowNotNumber: "半角の数字で入れてください。",
+      contextWindowRange: "1 以上の数字を入れてください。",
+      temperatureNotNumber: "0 から 2 までの数字を入れてください。",
+      temperatureRange: "0 から 2 までの数字を入れてください。",
+      maxTokensNotNumber: "半角の数字で入れてください。",
+      maxTokensRange: "1 以上の数字を入れてください。",
+    },
+
+    // --- API キー -----------------------------------------------------
+    //
+    // **保存済みのキーは読み出さない。** 表示するのは「預かっている」ことだけ。
+    apiKeyLabel: "API キー",
+    apiKeyPlaceholderSaved: "預かっています（変えるときだけ入力してください）",
+    apiKeyPlaceholderEmpty: "キーの要らない接続先（Ollama など）では空のままにしてください",
+    apiKeySaved: "このパソコンの資格情報マネージャーに預かっています。ここには表示しません。",
+    apiKeyNone: "まだ預かっていません。キーの要らない接続先ならこのままで構いません。",
+    apiKeyReplaceNote: "保存すると、預かっているキーが入力した内容に入れ替わります。",
+    // 「消す」の選択肢。**押せないときも消さない**（CLAUDE.md §6）。
+    apiKeyClear: "預かっている API キーを消す",
+    apiKeyClearReady: "保存すると資格情報マネージャーから消えます。以後は認証なしで接続します。",
+    apiKeyClearNoKey: "この接続先には API キーを預かっていないので、消すものがありません。",
+    apiKeyClearTyped: "新しいキーを入力しているので、消すのではなく入れ替わります。",
+
+    // --- 保存・テスト -------------------------------------------------
+    save: "保存",
+    saving: "保存しています…",
+    cancel: "やめる",
+    close: "閉じる",
+    savedAt: (name: string) => `接続先「${name}」を保存しました。`,
+
+    fetchModels: "モデル名を取り出す",
+    fetchingModels: "モデル名を取り出しています…",
+    modelsFound: (n: number) => `${n} 件のモデル名が返りました。候補から選べます。`,
+    modelsEmpty: "モデル名は返りませんでした。手で入力してください。",
+
+    test: "つながるか試す",
+    testing: "試しています…",
+    testOk: (model: string, ms: number) =>
+      `${model} から返事が来ました（${ms.toLocaleString()} ミリ秒）。`,
+    testReply: (reply: string) => `返ってきた内容: ${reply}`,
+    details: "詳しい内容",
+    // JSON として読めたときは整形して出す。**整形したことを名乗る** —
+    // 生のままだと思って読むと、改行がサーバ由来かこちら由来か分からない。
+    detailsJson: "詳しい内容（読みやすく整形しています）",
+
+    // **押せない理由を必ず出す**（消すと何が効いているのか読めなくなる）。
+    probeNote: {
+      invalid: "上の入力を直すと試せます。",
+      unsaved: "先に保存すると試せます。API キーは保存したものを使います。",
+      dirty: "編集した内容が保存されていません。保存すると、その内容で試せます。",
+      ready: "保存してある内容と API キーで実際に 1 往復します。",
+    },
+
+    // 失敗したときの続き。**何をすればいいかまで書く。**
+    failureHint: {
+      unauthorized: "API キーを入力し直して保存してから、もう一度試してください。",
+      notFound: "URL の末尾が /v1 になっているか確かめてください。",
+      status: "接続先のサービス側で断られています。しばらく待つか、モデル名を確かめてください。",
+      unreachable:
+        "サーバが起動しているか確かめてください。Ollama なら `ollama serve` が動いている必要があります。",
+      timeout: "ローカルのモデルは初回の読み込みに時間がかかります。もう一度試してください。",
+      badResponse: "OpenAI 互換の入口を指しているか確かめてください。多くは末尾が /v1 です。",
+      badUrl: "URL を入れ直してください。",
+      config: "設定を読み込めませんでした。アプリを開き直してください。",
+    },
+
+    // 一覧の 1 行。
+    keyBadgeSaved: "キーあり",
+    keyBadgeNone: "キーなし",
+  },
+
   commandLog: {
     title: "git コマンドログ",
     show: "コマンドログを表示",
