@@ -32,7 +32,7 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 
 5. **骨子のままのタスクは、着手前に詳細化する。** ⑥実装内容と⑧受け入れ条件が埋まって
    いないタスクは、詳細化そのものを最初の作業として行う（本文に「骨子」と書いてある節から先）。
-   **いまは T-22 以降が骨子**（T-21 までは完了済み）。
+   **いまは T-23 以降が骨子**（T-22 は 2026-09-05 に詳細化済み・実装前）。
 
 6. **制約の再掲は出典付き。** 各タスクの「制約」に書かれた内容は CLAUDE.md / DESIGN.md からの
    再掲であり、必ず出典を併記してある。**食い違いを見つけたら CLAUDE.md 側が正。**
@@ -47,10 +47,10 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 | 項目 | 内容 |
 |---|---|
 | 直前に完了 | T-21 skill の読み込みと信頼モデル（目視 2026-09-05 通過） |
-| 次にやる | **T-22 レビュー実行エンジン（Phase 8）。着手前に詳細化**（規約 5） |
-| 未解決の判断事項 | なし |
+| 次にやる | **T-22 レビュー実行エンジン（Phase 8）。詳細化は済み、実装はこれから** |
+| 未解決の判断事項 | **T-22 の「この節で決めた実装レベルの選択」8 件の確認**（依存は増えない） |
 
-**T-22 以降が骨子**なので、着手時に詳細化そのものを最初の作業として行うこと（規約 5）。
+**T-23 以降が骨子**なので、着手時に詳細化そのものを最初の作業として行うこと（規約 5）。
 残りは T-22 → T-23 で Phase 8 が終わり、そのあと Phase 9（T-24 → T-25 → T-26）。
 
 **T-22 は T-20 と T-21 の上に乗る。** 3 つのチョークポイントが用意してある。
@@ -198,7 +198,7 @@ v1 では非対象のままだが、恒久的な非対象ではなくなった�
 | 4 | 4 | T-11 → T-12 → T-13 → T-14 | **済** |
 | 5 | 5 | T-15 → T-16 | **済** |
 | 6 | 6-7 | T-17 → T-18 → T-19 | **済**（書き込み系はこれで終わり）|
-| 7 | 8 | T-20 → T-21 → **T-22** → T-23 | いまここ。T-20 / T-21 は済。**T-22 以降は着手前に詳細化**（規約 5）|
+| 7 | 8 | T-20 → T-21 → **T-22** → T-23 | いまここ。T-20 / T-21 は済。**T-23 は着手前に詳細化**（規約 5）|
 | 8 | 9 | T-24 → T-25 → T-26 | |
 
 ```mermaid
@@ -234,44 +234,322 @@ graph LR
 
 # Phase 8 — AI レビュー
 
-> **ここから先は骨子。着手前に詳細化すること**（このファイルの規約 5）。
-
 ## - [ ] T-22 [Phase 8] レビュー実行エンジン
 
 **目的**: 差分をファイル単位で LLM に投げ、結果を構造化して受け取る。**フォールバック経路が要。**
+ここで作る「レビューを 1 回走らせる」経路を T-23 の画面がそのまま呼ぶ。
 
-**参照**: DESIGN.md §10.4〜10.7 / CLAUDE.md §7
+**参照**: DESIGN.md §10.4, §10.5, §10.6, §10.7, §11.3 / CLAUDE.md §2, §4, §7, §8
 
 **依存**: T-21, T-15
 
-**作成・変更するファイル**: `src-tauri/src/llm/review.rs`(新) / `src-tauri/src/llm/client.rs`(変更)
+**T-20 / T-21 までの申し送り（着手時に確認すること。規約 4）**
 
-**実装内容（骨子）**
+- **チョークポイントを外に書き直さない**（CLAUDE.md §4・§7）。
+  - `llm/client.rs` — 接続・タイムアウト・失敗の言い分け・**マスキング（`sanitize`）**。
+    **HTTP はここ以外に書かない。** ストリーミングもここへ足す
+  - `secret.rs` — API キーの出し入れ。**ここ以外でキーに触らない**
+  - `llm/skill.rs` — レビュー観点と信頼判定。**本文は `usable_body()` からしか出ない**
+- **`SkillEntry::preview` をプロンプトへ入れてはいけない**（CLAUDE.md §4）。
+  画面で読ませるためのもので、**未信頼の skill にも入っている**。
+  絞り込みは `SkillEntry::active()`（隠されていない ＋ 使う ＋ 信頼済み）を通す
+- **`ReviewSettings` は T-01 で既にある**（`store/settings.rs`）。
+  `concurrency: u8`（既定 1）と `context_lines: u8`（既定 10）で、**新設ではなくこれが正**。
+  `Settings::normalize` が `concurrency` を `1..=MAX_REVIEW_CONCURRENCY`(3) に丸める
+- **`saved_endpoint()` が lib.rs に既にある**。プロファイルとキーはここから取る。
+  **フロントから平文のキーを受け取る引数を増やさない**（DESIGN.md §10.2.1）
+- **`git::exec::Cancel` をそのまま使う**（中身は `Arc<AtomicBool>` だけ）。
+  中止の型を 2 つ作ると、どちらを見ているのか読めなくなる
+- **`uuid` / `sha2` / `serde_json` は既に依存にある。** T-22 で足す依存は**無い**
+- **判定・整形をコンポーネントやフックに直書きしない**（T-19・T-21 で嵌まった）。
+  ただし T-22 では**判定そのものを Rust に置く**（下の「見積もりを 2 言語に持たない」）
+- **フロントと Rust をまたぐ構造体は両方向テストする**（T-18 / T-21）。
+  送る側 `..._matches_what_the_front_end_sends` と受ける側 `..._matches_what_the_front_end_reads`
+- **最短・最長・空を列挙して書く**（T-20 で 1 文字のキーを踏んだ）。ここでは
+  **1 文字の API キー / 空のキー / hunk 0 個のファイル / 応答 0 バイト / 空の findings** が該当する
 
-- 投入単位は**ファイル単位 ＋ 最後に全体サマリ**。コンテキスト長超過時のみ hunk 分割にフォールバック
-- モデルに渡すのは**パス ＋ unified diff (`-U10`) ＋ コミットメッセージ ＋ skill 本文**のみ。
-  **ファイル全文は渡さない**
-- **JSON スキーマを要求し、パース失敗時は生出力を Markdown として表示するフォールバック**
-  （スキーマは DESIGN.md §10.6）
-- 既定は逐次（並列度 1）、設定で最大 3。いつでもキャンセル可
-- **1 ファイルの失敗で全体を止めない。** ファイル単位でエラーを記録し、サマリに「N 件失敗」を明示
-- ストリーミング表示（SSE のパース）
+**この節で決めた実装レベルの選択**（DESIGN.md 付録 B の範囲。**着手前に利用者へ確認する**）
 
-**制約**（CLAUDE.md §7）
+| 決めたこと | 理由 |
+|---|---|
+| **新しい依存は足さない。** SSE のパースも並列実行も `std` と `serde_json` で書く | SSE は「行に切って `data:` を読む」だけで、`git/fetchprogress.rs` が `\r` 区切りでやっているのと同じ形。並列度は最大 3 なので `std::thread::scope` で足りる |
+| 差分本文は **`FileDiff` の hunks から組み立てる**（`git diff` の生出力を別経路で取り直さない）| `file_diff` が**文字コードの判別を済ませてある**（`encoding.rs`）。生の stdout を直に使うと **Shift_JIS のファイルで JSON が壊れる**。組み立ては純関数なので、**hunk 分割がそのまま「hunk を選んで組み立て直す」で書ける** |
+| トークン見積もりは **Rust 側だけに置く**（`文字数 ÷ 4`。DESIGN.md §10.4）| 実行前パネル（T-23）の概算と、hunk 分割の判定が**同じ数**でなければならない。TS と Rust に 1 つずつ置くと必ずずれる。フロントへは**計算済みの数と「分割されます」の印**を渡す |
+| コンテキスト超過は **①見積もりで先に分ける ②それでも超過エラーが返ったら分けて 1 度だけ再試行** の 2 段 | `文字数 ÷ 4` は日本語で大きく外れる（1 文字 ≒ 1 トークン）。見積もりを賢くする代わりに、**外したときに拾える経路**を置く。DESIGN.md §10.4 の「粗い見積で足りる」を変えずに済む |
+| `response_format: {"type":"json_object"}` は **送る。咎められたら外して 1 度だけ再試行し、以後その実行では付けない** | 本命の接続先は**ローカルの小型モデル**で、§10.6 がフォールバックを必須にしたのは**それがスキーマを守れない**から。遵守率を上げる指定を自分から捨てない（Ollama は OpenAI 互換層でこれを `format: "json"` に読み替える）。ただし受け付けないサーバに当たると**全ファイルが 400 で落ちてレビューが丸ごと失われる**ので、決定 3 と同じ「2 段」で拾う。**プロンプトでの JSON 要求は外さない**（`format: json` だけでは空白を吐き続けることがある）|
+| ストリームのマスクは **末尾を持ち越してから流す**（ホールドバック）| チャンクの切れ目でキーが割れると、チャンクごとの `sanitize` をすり抜ける。**64 文字と鍵の長さの大きいほう**を手元に残し、次のチャンクと繋げてから流す |
+| 「使う」と決めた skill が **1 つも当てはまらないファイルはレビューしない** | 観点無しで投げると、モデルが勝手な基準で書く。**除外して理由を出す**ほうが読める（CLAUDE.md §6） |
+| 実サーバでの確認は **`#[ignore]` のテスト 1 本**（`GIVSONER_LLM_BASE_URL` を見て走る）| T-22 には画面が無い。**T-23 まで実物を一度も通さない**のは、T-18 の「緑でも動かない」を繰り返す |
 
-- **ファイル全文を渡さない**
-- **JSON → Markdown フォールバックは必須**。この経路をテストで必ず通す
-- 1 ファイルの失敗で全体を止めない
+**作成・変更するファイル**
 
-**受け入れ条件（骨子）**: モックサーバで
-①正しい JSON ②壊れた JSON ③JSON でない Markdown ④途中で切れた応答 ⑤HTTP エラー
-のすべてを流し、いずれもレビューが失われないこと。キャンセルが即座に効くこと。
+| 種別 | パス | 内容 |
+|---|---|---|
+| 新規 | `src-tauri/src/llm/review.rs` | 計画・プロンプト組み立て・実行・JSON パースとフォールバック |
+| 変更 | `src-tauri/src/llm/client.rs` | `chat_stream`（SSE ＋ 中止 ＋ **マスク済みの差分を流す**）を追加 |
+| 変更 | `src-tauri/src/llm/mod.rs` | `pub mod review;` |
+| 変更 | `src-tauri/src/git/diff.rs` | `DiffSource` を lib.rs から**引っ越す**（差分と共用。下記） |
+| 変更 | `src-tauri/src/lib.rs` | `plan_review` / `start_review` / `cancel_review` ＋ `review-progress` ＋ `AppState.review_cancel` |
+| 新規 | `src-tauri/tests/review.rs` | モックサーバでの結合テスト |
+| 変更 | `src-tauri/tests/common/mockhttp.rs` | **少しずつ返す応答**（SSE）と同時接続数の記録を足す |
+| 変更 | `src/lib/ipc.ts` | 型と `invoke` の口だけ（**画面は作らない**） |
 
-**テスト**: `cargo test`（OpenAI 互換モックサーバ）
+**実装内容**
 
-**非スコープ**: レビュー UI（T-23）
+*何を比べるかは既存の型で受ける（`git/diff.rs`）*
+
+- いま `lib.rs` に**私有**の `DiffSource`（`{kind:"range"|"workingTree"}`）がある。
+  レビューも同じものを指すので、**`git::diff::DiffSource` へ引っ越して共用する。**
+  ワイヤ形式は変えない（`kind` ＋ camelCase）。**両方が同じ型を使うので、
+  ワイヤ形式のテストが 1 本で両方に効く**
+- 未追跡ファイルは**レビュー対象にしない**。`git diff` に出ないので差分が無い（DESIGN.md §7.5）
+
+*計画（`plan_review`）*
+
+- 入力: `repository_id` / `source` / `profile_id`
+- `changed_files` を取り、ファイルごとに
+  - `file_diff`（`-U{review.context_lines}`、`ignore_whitespace: false`、文字コードは自動判別）
+  - 差分本文を組み立て、`文字数 ÷ 4` で見積もる
+  - 予算 = `context_window - max_tokens - 512`。超えるなら hunk 単位で `parts` に分ける
+- 出力（**除外するものも消さずに理由付きで残す**。CLAUDE.md §6）
+
+```rust
+pub struct ReviewPlan {
+    pub files: Vec<PlannedFile>,
+    pub skills: Vec<PlannedSkill>,     // 名前 ＋ 出どころ。**本文は入れない**
+    pub tokens_estimate: u32,
+    pub blocked: Option<String>,       // 実行できない理由（そのまま画面に出す）
+}
+pub struct PlannedFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: ChangeStatus,
+    pub tokens_estimate: u32,
+    pub parts: usize,                  // 2 以上なら「hunk 分割されます」
+    pub skipped: Option<String>,       // 「バイナリなので差分がありません」など
+}
+```
+
+- `blocked` になるのは: プロファイルが選ばれていない / 使う skill が 0 件 /
+  変更ファイルが 0 件。**押せない理由といまの値を文言に入れる**
+
+*400 の扱いは 3 系統（`review.rs`）*
+
+- **接続先の言い分で振り分ける。** 判定は `client.rs` に置く（`server_message` の解釈を
+  外へ持ち出さない）。`review.rs` は返ってきた種類で分岐するだけ
+  - `response_format` を咎めている → **その指定を外して 1 度だけ再試行**し、
+    **以後その実行では最初から付けない**（同じ 400 を全ファイルで踏み直さない）
+  - 文脈長・トークン数を咎めている → **hunk 分割して 1 度だけ再試行**
+  - どちらでもない → **再試行せず**、そのファイルだけ失敗として記録して次へ進む
+- **再試行はどの系統でも 1 度だけ。** 2 度目の 400 はそのまま失敗にする
+
+*実行（`start_review`）*
+
+- 入力: `repository_id` / `source` / `profile_id` / `paths`（利用者が残したファイル）
+- **計画は Rust 側で組み直す。** フロントから受け取るのは「どのファイルを外したか」だけで、
+  分割数も見積もりも渡させない（古い計画で走らせない）
+- ファイルごとに 1 リクエスト。分割されたファイルは**部分ごとに投げて 1 件へまとめる**
+- 全ファイルのあと**全体サマリ**を 1 リクエスト。渡すのは
+  **各ファイルの要約と指摘の見出しだけ**（差分は渡さない）。予算を超えたら
+  入るところまでにして「以下 N 件は要約に含めていません」を添える
+- 並列度は `review.concurrency`（既定 1・最大 3）。`std::thread::scope` で待ち行列から取る
+- **1 ファイルの失敗で全体を止めない。** そのファイルに `error` を記録して次へ進む
+- 中止は `Cancel`。**ファイルの切れ目とストリームのチャンクごとに見る**
+
+*プロンプト（`review.rs`。純関数）*
+
+- system: 役割 ＋ **要求する JSON スキーマ**（DESIGN.md §10.6 の 5 キー）＋
+  「指摘が無ければ `findings` は空配列」＋「差分に現れない行番号を書かない」＋
+  **当てはまる skill の本文**（`usable_body()` を名前付きで連結）
+- user: ファイルパス（リネームなら `旧 → 新`）／変更の種類／**unified diff** ／コミットメッセージ
+- **skill の当て方は `skill::matches_changes(entry, &[そのファイルのパス])`。**
+  ファイルごとに当たる観点が変わる（DESIGN.md §11.3）
+- **コミットメッセージを渡すのは 1 コミットを見ているときだけ**（`from` がその第 1 親）。
+  2 点比較と作業ツリーでは「何と何を比べているか」の 1 行だけを渡す
+  （どのメッセージを指すのか決まらないものを、決まったふりで渡さない）
+- **ファイル全文・リポジトリ構成・skill のパス・ハッシュは渡さない**（CLAUDE.md §7）
+
+*差分本文の組み立て（`review.rs`。純関数）*
+
+- `FileDiff.hunks` から `@@ -a,b +c,d @@ 見出し` ＋ ` ` / `+` / `-` を復元する
+- **バイナリは投げない**（`skipped` にして理由を出す）
+- 末尾に改行が無い行（`ending: None`）は `\ No newline at end of file` を添える
+- hunk 分割は**この関数に渡す hunk を選ぶだけ**。1 つの hunk だけで予算を超えるときは
+  そのまま投げ、`parts` に記録する（これ以上は割れない）
+
+*ストリーミング（`client.rs`）*
+
+- `POST {base}/chat/completions` に `"stream": true`。**接続テストは今まで通り `false`**
+- タイムアウトは**別立て**にする: 接続 10 秒 / **最初の応答まで 120 秒** /
+  本文全体は 600 秒（既定の `timeout_global` 120 秒のままだと、長い生成を途中で切る）
+- 本文は `Body::as_reader()` で読み進め、**行に切ってから** SSE として解釈する
+  - `:` で始まる行は無視（keepalive）
+  - `data: [DONE]` で終わり
+  - `data:` の JSON から `choices[0].delta.content` を足す
+  - **JSON でない `data:` 行は捨てるが、生の応答としては残す**
+  - **`stream` を無視して普通の JSON を返すサーバがある。** SSE として 1 件も読めず、
+    本文が chat completion として読めたら `choices[0].message.content` を使う
+- **チャンクをまたいだ行を必ずバッファする**（`\r\n` も `\n` も）
+- 流す差分は `sanitize` を通す。**末尾は持ち越す**（ホールドバック。上表）
+- チャンクごとに `cancel.is_cancelled()` を見て、立っていれば読むのをやめる
+
+*結果（`review.rs`）*
+
+```rust
+pub struct ReviewRun {
+    pub run_id: String,            // uuid。T-23 の保存名に使える
+    pub profile_id: String, pub model: String,
+    pub source: DiffSource, pub skills: Vec<PlannedSkill>,
+    pub files: Vec<ReviewFileResult>,
+    pub summary: Option<ReviewText>,
+    pub failed: usize,             // **サマリに出す「N 件失敗」の正**
+    pub cancelled: bool,
+    pub started_at: i64, pub elapsed_ms: u64,
+}
+pub struct ReviewFileResult {
+    pub path: String, pub old_path: Option<String>,
+    pub parts: usize,
+    pub text: Option<ReviewText>,  // 成功したぶん
+    pub error: Option<LlmError>,   // このファイルだけの失敗
+    pub elapsed_ms: u64, pub tokens_estimate: u32,
+}
+/// **構造化できたか、できなかったかの両方をここで持つ。**
+pub struct ReviewText {
+    pub summary: String,
+    pub findings: Vec<Finding>,
+    /// 構造化に失敗したときの生出力。**捨てない**（DESIGN.md §10.6）
+    pub markdown: Option<String>,
+    /// `markdown` が入っている理由。画面はこれをそのまま添える
+    pub fallback_reason: Option<String>,
+}
+```
+
+*JSON の読み取りとフォールバック（`review.rs`。純関数）*
+
+- 素で読む → ```` ```json ```` のフェンスを剥がして読む → 最初の `{` から最後の `}` を読む、
+  の順で試す。**どれも駄目なら `markdown` に生出力を入れて返す**
+- 読めても中身は繕う。**指摘を落とすほうが、ラベルが雑なことより悪い**
+  - `severity` が 4 つのどれでもない → `info` に寄せる
+  - `line` が無い / 0 → `None`
+  - `file` が無い → **いま見ているファイル名**で埋める
+  - `findings` が無い → 空配列
+  - `summary` が無い → 空文字（`markdown` は付けない。読めてはいる）
+
+*イベント（`lib.rs`）*
+
+- `review-progress` 1 本。`{kind}` で区別し、**どのファイルかを添える**
+  （`started` / `fileStarted` / `delta` / `fileDone` / `summaryStarted` / `summaryDelta` / `summaryDone`）
+- 並列度 2 以上では `delta` が混ざるので、**必ず `index` を見て振り分けられる形**にする
+- `run_id` を全イベントに載せる（中止して次を始めたとき、前の走りの残りを捨てられる）
+
+**制約**
+
+- **ファイル全文を渡さない**（CLAUDE.md §7）。渡すのは パス ＋ unified diff ＋
+  コミットメッセージ ＋ skill 本文だけ
+- **JSON → Markdown フォールバックは必須。** この経路をテストで必ず通す（CLAUDE.md §7）
+- **1 ファイルの失敗で全体を止めない**（CLAUDE.md §7）
+- **skill 本文は `usable_body()` からしか取らない。`preview` を渡さない**（CLAUDE.md §4）
+- **LLM から外へ出る文字列は `client.rs` の `sanitize` を通す**（CLAUDE.md §4）。
+  ストリームの差分も画面へ出るので同じ扱い
+- **git の実行は `git/exec.rs` を通す**（CLAUDE.md §2）。`Command::new("git")` を書かない
+- **HTTP は `llm/client.rs` を通す**（CLAUDE.md §7）。`review.rs` から `ureq` を直に触らない
+- 表示文言は `src/i18n/ja.ts`（CLAUDE.md §6）。ここで足すのは型と `invoke` の口だけ
+- **新しい依存を足さない**（足したくなったら実装前に利用者へ聞く）
+
+**受け入れ条件**
+
+*モックサーバで、レビューが失われないこと（DESIGN.md §10.6）*
+
+- ▸コマンド: `npm run test:rust` — ①正しい JSON ②```` ```json ```` で囲まれた JSON
+  ③前後に地の文が付いた JSON ④壊れた JSON ⑤JSON でない Markdown
+  ⑥**途中で切れた応答**（`[DONE]` が来ない）⑦**応答 0 バイト** のすべてで、
+  **受け取った本文が結果に残ること**（④〜⑥は `markdown` ＋ 理由が付くこと）
+- ▸コマンド: `npm run test:rust` — HTTP 401 / 404 / 500 で**そのファイルだけ失敗し、
+  残りは成功して `failed` が数えられる**こと
+- ▸コマンド: `npm run test:rust` — `severity` が未知 / `line` 欠落 / `file` 欠落 /
+  `findings` 欠落 でも**指摘が 1 件も落ちない**こと
+
+*中止（DESIGN.md §10.7）*
+
+- ▸コマンド: `npm run test:rust` — **1 文字ずつ返すモック**の途中で中止すると、
+  **次のチャンクで畳まれ** `cancelled: true` で返り、以降のファイルへ進まないこと
+- ▸コマンド: `npm run test:rust` — ファイルの切れ目で中止すると 2 件目が**始まらない**こと
+
+*秘匿情報（CLAUDE.md §4）*
+
+- ▸コマンド: `npm run test:rust` — サーバがキーを echo しても、
+  **結果とイベントに 1 文字も現れない**こと。**キーは 1 文字 / 空 / 長いものの 3 本**で見る
+- ▸コマンド: `npm run test:rust` — **キーが 2 つのチャンクに割れても伏せ字になる**こと
+- ▸コマンド: `npm run test:rust` — `Authorization` が**キーの無いときに付かない**こと
+
+*渡すものと渡さないもの（CLAUDE.md §7）*
+
+- ▸コマンド: `npm run test:rust` — **未信頼 skill の本文が要求本文に 1 文字も現れない**こと
+  （本文に目印を入れて確かめる）／`preview` を渡していないこと
+- ▸コマンド: `npm run test:rust` — `globs` に当たらない skill の本文が**そのファイルの
+  要求に載らない**こと
+- ▸コマンド: `npm run test:rust` — 要求本文が**差分と一致し、ファイル全文が入っていない**こと
+- ▸コマンド: `npm run test:rust` — 2 点比較と作業ツリーでは**コミットメッセージを渡さない**こと
+
+*投入単位と分割（DESIGN.md §10.5）*
+
+- ▸コマンド: `npm run test:rust` — `context_window` を小さくしたプロファイルで
+  **1 ファイルが 2 回に分かれて投げられ、結果が 1 件にまとまる**こと
+- ▸コマンド: `npm run test:rust` — **1 つの hunk だけで超過するとき**は分けずに投げ、
+  記録に残ること
+- ▸コマンド: `npm run test:rust` — 超過エラーが返ったら**分割して 1 度だけ再試行**すること
+- ▸コマンド: `npm run test:rust` — 並列度 3 で**同時に 3 本走る**こと（サーバ側で同時接続数を見る）
+- ▸コマンド: `npm run test:rust` — 全体サマリが**差分ではなく各ファイルの要約**を受け取ること
+
+*400 の扱い（決定 4）*
+
+- ▸コマンド: `npm run test:rust` — `response_format` を**既定で送っている**こと
+- ▸コマンド: `npm run test:rust` — `response_format` を咎める 400 で、**外して 1 度だけ再試行**し
+  成功すること。**2 ファイル目以降は最初から付けない**こと
+- ▸コマンド: `npm run test:rust` — 文脈長を咎める 400 では**分割して再試行**すること
+  （`response_format` を外す側と混ざらないこと）
+- ▸コマンド: `npm run test:rust` — どちらでもない 400 は**再試行せず**、
+  そのファイルだけ失敗になること
+- ▸コマンド: `npm run test:rust` — **2 度目の 400 は再試行しない**こと
+
+*組み立て（純関数）*
+
+- ▸コマンド: `npm run test:rust` — unified diff の組み立て:
+  追加 / 削除 / 複数 hunk / リネーム（`旧 → 新` が出る）/ **hunk 0 個** /
+  **末尾に改行が無い** / バイナリ（投げない）
+- ▸コマンド: `npm run test:rust` — SSE のパース: `data:` 複数 / `[DONE]` / 空行 /
+  コメント行（`: ping`）/ **JSON でない `data:` 行** / **チャンクの途中で切れた行** /
+  CRLF / **`stream` を無視して普通の JSON を返すサーバ**
+- ▸コマンド: `npm run test:rust` — 見積もり: 空 / 1 文字 / ASCII / 日本語
+
+*ワイヤ形式（T-18 / T-21 の申し送り）*
+
+- ▸コマンド: `npm run test:rust` —
+  `the_review_request_wire_format_matches_what_the_front_end_sends`（`DiffSource` を含む）
+- ▸コマンド: `npm run test:rust` —
+  `the_wire_format_matches_what_the_front_end_reads`（`ReviewPlan` / `ReviewRun` /
+  イベント。**skill 本文が webview へ出ないこと**も）
+
+*まとめ*
+
+- ▸コマンド: `npm run test:rust` / `npm run check:rust` / `npm run test` / `npm run typecheck`
+- ▸目視: **実サーバへ 1 回流す。** `GIVSONER_LLM_BASE_URL` を設定して
+  `cargo test --test review -- --ignored` を実行し、ローカル Ollama で
+  ①指摘が返る ②ストリームが少しずつ届く ③中止が効く の 3 つを確かめる
+
+**テスト**: `npm run test:rust`, `npm run check:rust`, `npm run test`, `npm run typecheck`, 目視
+
+**非スコープ**: レビュー UI と実行前パネル（T-23）／結果の永続化（T-23）／
+fetch 後の自動レビュー（v1 では持たない。DESIGN.md §10.3）／
+指摘の差分行へのインライン表示（T-23）
+
+**注記**: 3 日基準に収まる見込みだが、**ストリーミングと並列実行が同時に来るので、
+逐次 ＋ 非ストリーミングを先に通してから足すこと。** 画面が無いぶん
+「緑でも動かない」を踏みやすいので、実サーバへ流す `#[ignore]` のテストを最初に置く。
 
 ---
+
+> **ここから先は骨子。着手前に詳細化すること**（このファイルの規約 5）。
 
 ## - [ ] T-23 [Phase 8] レビュー UI と結果の永続化
 
