@@ -560,9 +560,18 @@ fn first_line(stderr: &str) -> Option<&str> {
 ///   外すとバーが一度も動かない
 /// - **`--depth` / `--single-branch` を付けない**（CLAUDE.md §1）。履歴グラフを見るための
 ///   アプリなので、浅いクローンは目的そのものを損なう
-/// - **`--recurse-submodules` を付けない**（CLAUDE.md §1）
-/// - **`--branch` を付けない。** 1 本だけ持ってきてもグラフが欠ける
+/// - **`--branch` を付けない。** clone したあとに切り替えればよく（T-18）、
+///   `--single-branch` と取り違えると履歴が欠ける
+/// - **`--recurse-submodules` はここに入れない。** 付けるのは
+///   **利用者が確認画面でチェックしたときだけ**（[`clone_args`]。CLAUDE.md §1）
 pub const CLONE_ARGS: &[&str] = &["clone", "--progress"];
+
+/// サブモジュールも取り込むときだけ足す引数（CLAUDE.md §1 / docs/DESIGN.md §8.4）。
+///
+/// **既定は付けない。** 2026-09-05 に利用者の判断で選べるようにしたもので、
+/// 「黙って付けない」ことが守るべき側。**`--shallow-submodules` は付けない** —
+/// サブモジュールだけ履歴が欠けると、そのフォルダを別途登録しても読めない。
+pub const CLONE_SUBMODULE_ARG: &str = "--recurse-submodules";
 
 /// 残骸を消せるまで待つ回数と間隔（[`clean_up`]）。
 ///
@@ -571,8 +580,14 @@ const CLEANUP_ATTEMPTS: u32 = 20;
 const CLEANUP_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// git へ渡す引数。**ここだけが clone の引数を組み立てる。**
-pub fn clone_args<'a>(url: &'a str, directory: &'a str) -> Vec<&'a str> {
+///
+/// `recurse_submodules` は利用者が確認画面でチェックしたときだけ true になる。
+/// **URL と保存先は必ず最後**（オプションとして解釈されない位置）。
+pub fn clone_args<'a>(url: &'a str, directory: &'a str, recurse_submodules: bool) -> Vec<&'a str> {
     let mut args = CLONE_ARGS.to_vec();
+    if recurse_submodules {
+        args.push(CLONE_SUBMODULE_ARG);
+    }
     args.push(url);
     args.push(directory);
     args
@@ -596,6 +611,12 @@ pub struct CloneRequest {
     pub parent_directory: String,
     /// 作るフォルダの名前。
     pub folder_name: String,
+    /// サブモジュールも取り込むか（CLAUDE.md §1）。
+    ///
+    /// **既定は false。** 確認画面のチェックボックスがそのまま入る。
+    /// `#[serde(default)]` を付けていないのは、**フロントが送り忘れたらその場で落ちて
+    /// ほしい**ため（黙って false になると、チェックしたのに取り込まれない）。
+    pub recurse_submodules: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -710,7 +731,7 @@ pub fn clone(
 
     let url = request.url.trim();
     let target = directory.display().to_string();
-    let args = clone_args(url, &target);
+    let args = clone_args(url, &target, request.recurse_submodules);
 
     let started = std::time::Instant::now();
     let output = exec::run_progress(log, program, None, &args, cancel, &mut |chunk| {
@@ -1184,41 +1205,77 @@ mod tests {
             url: url.to_string(),
             parent_directory: parent.to_string(),
             folder_name: name.to_string(),
+            recurse_submodules: false,
         }
     }
 
     /// **CLAUDE.md §1 の禁止事項が引数に紛れ込んでいないこと。**
     ///
     /// `--depth` を足すと履歴が欠け、このアプリの目的そのものが成立しない。
+    /// **サブモジュールを選んだかどうかに関わらず、ここは変わらない。**
     #[test]
     fn clone_args_stay_within_what_we_allow() {
         assert_eq!(CLONE_ARGS, &["clone", "--progress"]);
 
-        let args = clone_args("https://example.com/o/r.git", "C:\\ws\\r");
+        for recurse in [false, true] {
+            let args = clone_args("https://example.com/o/r.git", "C:\\ws\\r", recurse);
+            for banned in [
+                "--depth",
+                "--shallow-since",
+                // サブモジュールを取り込むときも**浅くしない**。そのフォルダを
+                // 別途登録して読めなくなる。
+                "--shallow-submodules",
+                "--single-branch",
+                "--branch",
+                "-b",
+                "--bare",
+                "--mirror",
+                "--no-checkout",
+            ] {
+                assert!(
+                    !args.contains(&banned),
+                    "{banned} を付けてはいけない（recurse={recurse}）: {args:?}",
+                );
+            }
+        }
+    }
+
+    /// **サブモジュールは既定で取り込まない。** 黙って付けてはいけない（CLAUDE.md §1）。
+    #[test]
+    fn submodules_are_left_alone_unless_asked() {
+        let args = clone_args("https://example.com/o/r.git", "C:\\ws\\r", false);
         assert_eq!(
             args,
             ["clone", "--progress", "https://example.com/o/r.git", "C:\\ws\\r"],
         );
-        for banned in [
-            "--depth",
-            "--shallow-since",
-            "--single-branch",
-            "--recurse-submodules",
-            "--branch",
-            "-b",
-            "--bare",
-            "--mirror",
-        ] {
-            assert!(!args.contains(&banned), "{banned} を付けてはいけない: {args:?}");
-        }
+        assert!(!args.contains(&"--recurse-submodules"), "{args:?}");
+    }
+
+    /// 利用者が確認画面でチェックしたときだけ取り込む（2026-09-05 に利用者の判断で追加）。
+    #[test]
+    fn submodules_are_recursed_when_asked() {
+        let args = clone_args("https://example.com/o/r.git", "C:\\ws\\r", true);
+        assert_eq!(
+            args,
+            [
+                "clone",
+                "--progress",
+                "--recurse-submodules",
+                "https://example.com/o/r.git",
+                "C:\\ws\\r",
+            ],
+        );
     }
 
     /// **URL と保存先は引数の最後**（オプションとして解釈されない位置）。
+    /// サブモジュールの引数が割り込んでも、この位置は動かない。
     #[test]
     fn the_url_and_the_target_come_last() {
-        let args = clone_args("git@host:o/r.git", "D:\\ws\\r");
-        assert_eq!(args[args.len() - 2], "git@host:o/r.git");
-        assert_eq!(args[args.len() - 1], "D:\\ws\\r");
+        for recurse in [false, true] {
+            let args = clone_args("git@host:o/r.git", "D:\\ws\\r", recurse);
+            assert_eq!(args[args.len() - 2], "git@host:o/r.git");
+            assert_eq!(args[args.len() - 1], "D:\\ws\\r");
+        }
     }
 
     #[test]
@@ -1263,11 +1320,29 @@ mod tests {
     #[test]
     fn the_clone_wire_format_matches_what_the_front_end_sends() {
         let parsed: CloneRequest = serde_json::from_str(
-            r#"{"url":"https://example.com/o/r.git","parentDirectory":"C:\\ws","folderName":"r"}"#,
+            r#"{"url":"https://example.com/o/r.git","parentDirectory":"C:\\ws","folderName":"r","recurseSubmodules":false}"#,
         )
         .expect("フロントの JSON を食えること");
 
         assert_eq!(parsed, request("https://example.com/o/r.git", "C:\\ws", "r"));
+
+        // **チェックが入った形も食えること。** ここが false のまま届くと、
+        // 「チェックしたのに取り込まれていない」という気付きにくい壊れ方をする。
+        let checked: CloneRequest = serde_json::from_str(
+            r#"{"url":"https://example.com/o/r.git","parentDirectory":"C:\\ws","folderName":"r","recurseSubmodules":true}"#,
+        )
+        .expect("フロントの JSON を食えること");
+        assert!(checked.recurse_submodules);
+
+        // **送り忘れたらその場で落ちること**（`#[serde(default)]` を付けていない理由）。
+        // 黙って false になると、チェックしたのに取り込まれない形で壊れる。
+        assert!(
+            serde_json::from_str::<CloneRequest>(
+                r#"{"url":"u","parentDirectory":"C:\\ws","folderName":"r"}"#,
+            )
+            .is_err(),
+            "欠けたまま既定値で通してはいけない",
+        );
     }
 
     /// 失敗の言い換えは fetch と共用するが、**動詞は差し替わる**こと。

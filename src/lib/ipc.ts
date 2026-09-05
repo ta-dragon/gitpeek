@@ -273,6 +273,14 @@ export type CloneRequest = {
   parentDirectory: string;
   /** そこへ作るフォルダの名前。 */
   folderName: string;
+  /**
+   * サブモジュールも取り込むか（`--recurse-submodules`）。
+   *
+   * **既定は false。** 確認画面でチェックされたときだけ true にする
+   * （CLAUDE.md §1 — 黙って取り込まない）。**Rust 側に `serde(default)` は無い**ので、
+   * 送り忘れるとコマンドが 1 度も走らない。
+   */
+  recurseSubmodules: boolean;
 };
 
 /** `cancelled` は利用者が止めた場合。**残骸は消してある。** */

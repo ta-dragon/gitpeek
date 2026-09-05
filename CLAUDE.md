@@ -23,7 +23,11 @@ Givsoner は**ビューワー**である。以下は「未実装」ではなく�
 - stage / unstage / discard / stash の作成・適用（作業ツリーは **read-only** 表示のみ）
 - `--force` 付き checkout、自動 stash
 - 非 fast-forward マージ（`merge` は常に `--ff-only`）
-- shallow clone (`--depth`)、`--recurse-submodules`
+- shallow clone (`--depth`)、`--single-branch`、clone 時のブランチ指定 (`--branch`)
+- **サブモジュールの自動取り込み。** `--recurse-submodules` を付けるのは
+  「clone の確認画面で**利用者がチェックした**とき」だけ
+  （2026-09-05 に利用者の判断で追加。DESIGN.md §8.4）。**既定は OFF で、黙って付けない。**
+  `--shallow-submodules` は付けない（そのフォルダを別途登録しても読めなくなる）
 - **タグ**の作成・削除・リネーム、**ブランチの削除・リネーム**
 - **ブランチの自動作成。** ref を新しく作るのは
   「リモート追跡ブランチを checkout するときに、**利用者が確認画面で選んだ**ローカル追跡ブランチ」
@@ -240,8 +244,10 @@ GIT_SSH_COMMAND=ssh -o BatchMode=yes     # 無いとパスフレーズ待ちで�
   確認を経たときだけ作られること ＋ 上流が設定されること /
   判定（bare / 汚れている / `index.lock` / unborn で止まり、**未追跡だけなら止まらない**）/
   **分岐したブランチで FF マージが実行されず HEAD が動かないこと**
-- **clone**: 引数の形（**`--depth` / `--single-branch` / `--recurse-submodules` / `--branch` が
-  現れないこと**）／ URL → 既定のフォルダ名（`.git` 付き / 無し / 末尾スラッシュ /
+- **clone**: 引数の形（**`--depth` / `--single-branch` / `--branch` / `--shallow-submodules` が
+  現れないこと**）／ **`--recurse-submodules` が既定で現れず、選ばれたときだけ現れること**
+  （組み立てだけでなく、**実際に起動したプロセスの記録**でも見る）／
+  URL → 既定のフォルダ名（`.git` 付き / 無し / 末尾スラッシュ /
   **SCP 形式 (`git@host:o/repo.git`)** / 決められない入力は空）／ 生成した bare からローカル
   clone できること ／ **既にあるフォルダなら git を起動する前に止まり、消さないこと** /
   **失敗しても自分が作らなかったフォルダを消さないこと** / 中止が「失敗」にならず残骸も残らないこと /

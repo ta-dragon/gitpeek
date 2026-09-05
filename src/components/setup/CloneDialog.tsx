@@ -35,7 +35,7 @@ export function CloneDialog({
   outcome: CloneOutcome | null;
   /** フォルダ選択ダイアログを開く。選ばれなければ null。 */
   onPickParent: () => Promise<string | null>;
-  onStart: (request: CloneRequest) => void;
+  onStart: (request: CloneRequest, rememberParent: boolean) => void;
   onCancel: () => void;
   /** 結果から入力へ戻る。**入力欄はそのまま残る。** */
   onBack: () => void;
@@ -46,6 +46,9 @@ export function CloneDialog({
   const [folder, setFolder] = useState("");
   // **利用者が名前を触ったら、URL の変更で上書きしない。**
   const [folderEdited, setFolderEdited] = useState(false);
+  // **サブモジュールは既定で取り込まない**（CLAUDE.md §1）。毎回チェックさせる。
+  const [submodules, setSubmodules] = useState(false);
+  const [remember, setRemember] = useState(false);
 
   // URL から既定のフォルダ名を埋める。**決められないときは空**（利用者に入力させる）。
   const suggested = useMemo(() => defaultFolderName(url), [url]);
@@ -61,6 +64,8 @@ export function CloneDialog({
   const trimmedFolder = folder.trim();
   const preview = joinPath(trimmedParent, trimmedFolder);
   const ready = trimmedUrl !== "" && preview !== "";
+  // 既定と同じ場所なら「覚える」ことに意味が無いので、そもそも出さない。
+  const canRemember = trimmedParent !== "" && trimmedParent !== defaultParent;
 
   const handlePick = async () => {
     const picked = await onPickParent();
@@ -85,6 +90,9 @@ export function CloneDialog({
                 estimated={false}
                 elapsedMs={progress?.elapsedMs ?? 0}
               />
+              {/* **サブモジュールごとに進捗が数え直される。** 何度も 0 に戻るのを
+                  「止まった／やり直している」と読まれないように先に言う。 */}
+              {submodules && <p className="modal__note">{ja.clone.submodulesProgressNote}</p>}
               <p className="modal__note">{ja.clone.cancelNote}</p>
             </>
           ) : outcome !== null ? (
@@ -95,6 +103,9 @@ export function CloneDialog({
               parent={parent}
               folder={folder}
               preview={preview}
+              submodules={submodules}
+              remember={remember}
+              canRemember={canRemember}
               hasDefaultParent={defaultParent !== null}
               onUrlChange={setUrl}
               onParentChange={setParent}
@@ -102,6 +113,8 @@ export function CloneDialog({
                 setFolderEdited(true);
                 setFolder(value);
               }}
+              onSubmodulesChange={setSubmodules}
+              onRememberChange={setRemember}
               onPick={() => void handlePick()}
             />
           )}
@@ -138,11 +151,15 @@ export function CloneDialog({
                 className="button button--primary"
                 disabled={!ready}
                 onClick={() =>
-                  onStart({
-                    url: trimmedUrl,
-                    parentDirectory: trimmedParent,
-                    folderName: trimmedFolder,
-                  })
+                  onStart(
+                    {
+                      url: trimmedUrl,
+                      parentDirectory: trimmedParent,
+                      folderName: trimmedFolder,
+                      recurseSubmodules: submodules,
+                    },
+                    canRemember && remember,
+                  )
                 }
               >
                 {ja.clone.run}
@@ -160,20 +177,31 @@ function CloneForm({
   parent,
   folder,
   preview,
+  submodules,
+  remember,
+  canRemember,
   hasDefaultParent,
   onUrlChange,
   onParentChange,
   onFolderChange,
+  onSubmodulesChange,
+  onRememberChange,
   onPick,
 }: {
   url: string;
   parent: string;
   folder: string;
   preview: string;
+  submodules: boolean;
+  remember: boolean;
+  /** 既定と違う場所を指しているか。同じなら「覚える」に意味が無い。 */
+  canRemember: boolean;
   hasDefaultParent: boolean;
   onUrlChange: (value: string) => void;
   onParentChange: (value: string) => void;
   onFolderChange: (value: string) => void;
+  onSubmodulesChange: (value: boolean) => void;
+  onRememberChange: (value: boolean) => void;
   onPick: () => void;
 }) {
   return (
@@ -228,14 +256,63 @@ function CloneForm({
         {preview === "" ? ja.clone.previewEmpty : ja.clone.preview(preview)}
       </p>
 
-      {/* 保存先の既定が無いと毎回入力させることになるので、設定の場所を伝える。 */}
-      {!hasDefaultParent && <p className="modal__note">{ja.clone.noWorkspaceRoot}</p>}
+      {/* **サブモジュールは既定 OFF**（CLAUDE.md §1）。黙って取り込まない。
+          取り込むものの話が先で、アプリの設定の話は後。 */}
+      <Check
+        checked={submodules}
+        label={ja.clone.submodules}
+        note={ja.clone.submodulesNote}
+        onChange={onSubmodulesChange}
+      />
+
+      {/* 保存先を毎回入力させないための逃げ道。設定画面は T-25 なので、
+          いまはここが `workspaceRoot` を決められる唯一の場所。 */}
+      {canRemember && (
+        <Check
+          checked={remember}
+          label={ja.clone.rememberParent}
+          note={hasDefaultParent ? ja.clone.rememberParentReplaces : undefined}
+          onChange={onRememberChange}
+        />
+      )}
 
       {/* 認証ウィンドウが出る可能性を先に伝える。突然前面に出ると事故に見える。 */}
       <p className="modal__note">{ja.clone.authNote}</p>
       {/* 提供しないものを先に言う（CLAUDE.md §1）。 */}
       <p className="modal__note">{ja.clone.fullHistoryNote}</p>
     </>
+  );
+}
+
+/**
+ * 選択肢 1 つ。**ラベルの下に「何が起きるか」を添える。**
+ *
+ * チェックボックスの名前だけでは、押すと何が変わるのかが読めない
+ * （T-18 の「FF マージ」と同じ失敗をしないため）。
+ */
+function Check({
+  checked,
+  label,
+  note,
+  onChange,
+}: {
+  checked: boolean;
+  label: string;
+  note?: string;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="check">
+      <label className="check__row">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+        <span>{label}</span>
+      </label>
+      {note !== undefined && <p className="check__note">{note}</p>}
+    </div>
   );
 }
 

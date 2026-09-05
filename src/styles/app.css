@@ -766,6 +766,28 @@ body {
   overflow: auto;
 }
 
+/* clone の選択肢（T-19）。**ラベルの下に「何が起きるか」を添える**ので、
+   チェックボックス 1 つが 2 行になる。 */
+.check {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.check__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+/* 説明はチェックボックスの幅ぶん下げて、ラベルの続きだと分かるようにする。
+   `1em`（チェックボックス）＋ `.check__row` の gap と揃えてある。 */
+.check__note {
+  margin: 0 0 0 calc(1em + 8px);
+  color: var(--text-dim);
+}
+
 /* clone の入力欄（T-19）。**ラベルと欄を縦に積む** — 横に並べると、
    長いパスの欄が狭くなって全体が読めない。 */
 .field {

@@ -21,6 +21,8 @@ fn request(url: &str, parent: &Path, name: &str) -> CloneRequest {
         url: url.to_string(),
         parent_directory: parent.display().to_string(),
         folder_name: name.to_string(),
+        // **既定は取り込まない**（CLAUDE.md §1）。取り込む試験だけ上書きする。
+        recurse_submodules: false,
     }
 }
 
@@ -214,5 +216,70 @@ fn credentials_in_the_url_are_masked_everywhere() {
     assert!(
         logged.contains("127.0.0.1"),
         "何を触ったのかは残すこと:\n{logged}",
+    );
+}
+
+/// **チェックが実際に git まで届いていること**（2026-09-05 に追加した選択肢）。
+///
+/// 引数の組み立て（`clone_args`）はユニットテストで固定してあるが、それだけでは
+/// 「チェックボックスは動くのにフラグが 1 度も渡っていない」形の壊れ方を拾えない。
+/// **実際に起動したプロセスの記録**で見る。
+///
+/// **サブモジュールが実際に取り込まれることは、ここでは確かめられない。**
+/// git 2.38 以降はサブモジュールの `file` トランスポートを既定で拒むので
+/// （`fatal: transport 'file' not allowed`。この環境の git 2.43 で実測）、
+/// ローカルパスの上流では成功しない。`protocol.file.allow` を緩めるのは
+/// **全 git 呼び出しに効いてしまう**ので行わない（CLAUDE.md §2）。
+/// 実物のサブモジュール付きリポジトリでの確認は目視に回す。
+#[test]
+fn the_submodule_flag_reaches_git() {
+    let dir = tempfile::tempdir().expect("一時ディレクトリ");
+    let log = CommandLog::default();
+
+    let mut request = request(&source_url(), dir.path(), "with-submodules");
+    request.recurse_submodules = true;
+
+    // サブモジュールを持たないリポジトリなので、フラグを付けても素通りして成功する。
+    let outcome =
+        ops::clone(&log, "git", &request, &Cancel::new(), &mut |_| {}).expect("clone を起動できること");
+    assert_eq!(outcome.status, CloneStatus::Success, "{outcome:#?}");
+
+    let args = log
+        .entries()
+        .into_iter()
+        .find(|entry| entry.args.first().map(String::as_str) == Some("clone"))
+        .expect("clone を起動した記録があること")
+        .args;
+    assert!(
+        args.contains(&"--recurse-submodules".to_string()),
+        "チェックしたのにフラグが渡っていない: {args:?}",
+    );
+}
+
+/// **既定では付けない。** 黙って取り込んではいけない（CLAUDE.md §1）。
+#[test]
+fn the_submodule_flag_is_absent_by_default() {
+    let dir = tempfile::tempdir().expect("一時ディレクトリ");
+    let log = CommandLog::default();
+
+    let outcome = ops::clone(
+        &log,
+        "git",
+        &request(&source_url(), dir.path(), "plain"),
+        &Cancel::new(),
+        &mut |_| {},
+    )
+    .expect("clone を起動できること");
+    assert_eq!(outcome.status, CloneStatus::Success, "{outcome:#?}");
+
+    let args = log
+        .entries()
+        .into_iter()
+        .find(|entry| entry.args.first().map(String::as_str) == Some("clone"))
+        .expect("clone を起動した記録があること")
+        .args;
+    assert!(
+        !args.contains(&"--recurse-submodules".to_string()),
+        "頼まれていないのに付けている: {args:?}",
     );
 }

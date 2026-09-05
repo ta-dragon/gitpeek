@@ -21,6 +21,7 @@ import {
   type CloneRequest,
 } from "../lib/ipc";
 import * as repositories from "../store/repositories";
+import { updateSettings } from "../store/settings";
 
 export type CloneState = {
   /** ダイアログを開いているか。 */
@@ -66,7 +67,7 @@ export function useClone(onDone: (message: string) => void) {
   }, []);
 
   const start = useCallback(
-    async (request: CloneRequest) => {
+    async (request: CloneRequest, rememberParent: boolean) => {
       if (running.current) return;
       running.current = true;
       setState({ open: true, busy: true, progress: null, outcome: null, cancelling: false });
@@ -75,6 +76,14 @@ export function useClone(onDone: (message: string) => void) {
         const outcome = await cloneRepository(request);
 
         if (outcome.status === "success" && outcome.path !== null) {
+          // **既定の保存先を覚えるのは成功したときだけ。** 失敗した場所を
+          // 次回の既定にすると、同じ失敗を繰り返す入口になる。
+          if (rememberParent) {
+            await updateSettings((current) => ({
+              ...current,
+              workspaceRoot: request.parentDirectory,
+            }));
+          }
           // **Rust が返したパスで登録する。** 登録と選択は既存の 1 本を通す。
           await repositories.add(outcome.path);
           setState(CLOSED);
@@ -137,7 +146,8 @@ export function useClone(onDone: (message: string) => void) {
   return {
     ...state,
     show,
-    start: (request: CloneRequest) => void start(request),
+    start: (request: CloneRequest, rememberParent: boolean) =>
+      void start(request, rememberParent),
     cancel,
     back,
     dismiss,
