@@ -49,9 +49,12 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 | 次にやる | **T-20 LLM プロバイダ設定と資格情報保管（Phase 8）** |
 | 未解決の判断事項 | なし |
 
-**ここから先は骨子しかない。** T-20 以降は⑥実装内容と⑧受け入れ条件が埋まっていないので、
-**詳細化そのものを最初の作業として行うこと**（規約 5）。Phase 8 は AI レビューで、
+**T-20 は詳細化済み**なので、その節を読めばそのまま着手できる。**T-21 以降は骨子**なので、
+着手時に詳細化そのものを最初の作業として行うこと（規約 5）。Phase 8 は AI レビューで、
 T-20 → T-21 → T-22 → T-23 の順に依存している。
+
+**T-20 は `secret.rs` と `client.rs` を先に閉じてから画面へ行くこと。** 画面から作ると、
+API キーが通る経路が増えてから塞ぐことになる。
 
 **Phase 8 で最初に効く制約は CLAUDE.md §4 と §7。** とくに
 「**API キーを `settings.json` に書かない**（Windows 資格情報マネージャーへ）」と
@@ -191,43 +194,137 @@ graph LR
 
 ---
 
-> **ここから先は骨子。着手前に詳細化すること**（このファイルの規約 5）。
-
 # Phase 8 — AI レビュー
 
 ## - [ ] T-20 [Phase 8] LLM プロバイダ設定と資格情報保管
 
-**目的**: OpenAI 互換の接続先をプロファイルとして保存し、API キーを安全に扱う。
+**目的**: OpenAI 互換の接続先をプロファイルとして保存し、**API キーを平文でどこにも残さず**扱う。
+Phase 8 の土台であり、ここで作る `llm/client.rs` を T-22 のレビュー実行が使う。
 
-**参照**: DESIGN.md §10.1, §10.2 / CLAUDE.md §4, §7
+**参照**: DESIGN.md §10.1, §10.2, §12.2 / CLAUDE.md §4, §7
 
 **依存**: T-01
 
-**作成・変更するファイル**: `src-tauri/src/llm/client.rs`(新) / `src-tauri/src/secret.rs`(新) /
-`src/components/settings/LlmProfiles.tsx`(新)
+**T-19 までの申し送り（着手時に確認すること。規約 4）**
 
-**実装内容（骨子）**
+- **`LlmProfile` と `ReviewSettings` は T-01 で既にある**（`src-tauri/src/store/settings.rs` /
+  `src/lib/ipc.ts`）。**新設ではなく、これが正**。保持項目は
+  `id` / `name` / `base_url` / `model` / `context_window` / `temperature` / `max_tokens` /
+  `credential_key`。**`credential_key` は既に「参照キーだけ」の形**になっている
+- 既定プロファイルは**リポジトリごと**（`RepositorySettings.default_llm_profile_id`）。
+  グローバルの既定は持たない
+- **設定の保存は `Store::save_settings` を通す。** `settings.json` は手編集を想定した
+  唯一のファイルなので（DESIGN.md §12.2）、書き方を増やさない
+- **フロントから構造体を送るなら `rename_all` を忘れない**（T-18 で嵌まった）。
+  Rust 側がその JSON を実際に食えることをテストで固定する（CLAUDE.md §8）
+- **判定・整形はコンポーネントに直書きしない**（T-19 で嵌まった）。純関数は
+  `src/lib/*.ts` へ置き、`*.test.ts` を対で作る（CLAUDE.md §8）
+- ダイアログは `components/common/ConfirmDialog.tsx` / `CloneDialog.tsx` の形が使える。
+  **選択肢は押せないときも消さない**（CLAUDE.md §6）
+- **設定画面は T-25。** T-20 ではヘッダに入口を 1 つ足してモーダルで出し、
+  T-25 でその中身を設定画面へ移す（**画面をもう 1 枚作らない**）
 
-- プロファイル CRUD（名前 / base URL / モデル / コンテキスト長 / temperature / max tokens）
-- **API キーは Windows 資格情報マネージャーに保存**し、`settings.json` には `credentialKey` のみ
-- `/v1/models` を叩いてモデル名を補完する
-- 接続テストボタン（1 リクエスト投げて応答を確認）
-- Ollama も `http://localhost:11434/v1` で同じ経路を通す
+**この節で決めた実装レベルの選択**（DESIGN.md 付録 B の範囲）
 
-**制約**（CLAUDE.md §4, §7）
+| 決めたこと | 理由 |
+|---|---|
+| 資格情報は **`keyring` crate**（Windows Credential Manager バックエンド）| `CredWriteW` を直に叩くと**このプロジェクト初の `unsafe`** とワイド文字列の自前変換が要る。依存 1 つと引き換えに unsafe ゼロを保つ |
+| HTTP は **`ureq`（ブロッキング）＋ rustls** | このコードベースは全部ブロッキング ＋ `spawn_blocking`（`exec.rs`）。T-22 の SSE も `run_progress` と同じ「チャンクを読んで行に切る」形でそのまま書ける。`reqwest` を入れると async の流儀が 2 つ並ぶ |
+| モックサーバは **`std::net::TcpListener` で自作** | dev-dependency を増やさない。必要なのは固定レスポンスを返すだけ |
 
-- **API キーを `settings.json` に書かない**
-- **OpenAI 互換 API 1 系統のみ。** Ollama ネイティブ API (`/api/chat`) を実装しない
-- API キーが画面表示・ログに出る経路を作らない（`redact.rs` を通す）
+**作成・変更するファイル**
 
-**受け入れ条件（骨子）**: 資格情報マネージャーへの保存と読み出し、
-`settings.json` に平文キーが現れないこと、接続テストが Ollama と OpenAI 互換の両方で通ること。
+| 種別 | パス | 内容 |
+|---|---|---|
+| 新規 | `src-tauri/src/secret.rs` | 資格情報マネージャーの読み書き。**ここ以外でキーに触らない** |
+| 新規 | `src-tauri/src/llm/mod.rs` | モジュール宣言 |
+| 新規 | `src-tauri/src/llm/client.rs` | OpenAI 互換クライアント（`/v1/models` と接続テスト）|
+| 新規 | `src-tauri/tests/llm.rs` | モックサーバでの結合テスト |
+| 変更 | `src-tauri/src/lib.rs` | コマンド登録 |
+| 変更 | `src-tauri/Cargo.toml` | `keyring` / `ureq` |
+| 新規 | `src/components/settings/LlmProfiles.tsx` | プロファイルの一覧と編集 |
+| 新規 | `src/lib/llmProfile.ts` | 入力の検証と既定値（**純関数。テストはここ**）|
+| 変更 | `src/lib/ipc.ts` / `src/App.tsx` / `src/i18n/ja.ts` / `src/styles/app.css` | 配線 |
 
-**テスト**: `cargo test`（モックサーバ）, 目視
+**実装内容**
 
-**非スコープ**: skill（T-21）／レビュー実行（T-22）
+*資格情報（`secret.rs`）*
+
+- `save(key, secret)` / `load(key) -> Option<String>` / `delete(key)` の 3 つだけ。
+  **サービス名は `com.tatsu.givsoner`、ユーザー名は `credential_key`** に固定する
+- `credential_key` は**プロファイル作成時に `llm/<uuid>` を採番**して以後変えない。
+  名前や base URL を変えても資格情報を追いかけ直さなくて済む
+- **キーの値を戻り値以外へ出さない。** `Debug` に載せない、ログに書かない、
+  エラーメッセージへ混ぜない。**エラーは「保存できませんでした」までしか言わない**
+- プロファイル削除時に資格情報も消す。**消し忘れると資格情報マネージャーに孤児が残る**
+
+*クライアント（`llm/client.rs`）*
+
+- `list_models(profile, api_key) -> Vec<String>`（`GET {base_url}/models`）
+- `test_connection(profile, api_key) -> TestResult`
+  （`POST {base_url}/chat/completions` に `max_tokens` 小さめの 1 往復）
+  - **`/v1/models` だけで済ませない。** Ollama は認証不要なので、models が通っても
+    実際の生成が通るとは限らない。**1 往復して応答が返ることまで見る**
+- `Authorization: Bearer <key>` は**キーが空でないときだけ付ける**（Ollama は不要）
+- **タイムアウトは接続 10 秒 / 応答 120 秒。** ローカル Ollama は初回のモデルロードで
+  数十秒かかるので、短くすると「壊れている」ように見える
+- 失敗は人間向けの 1 行 ＋ 展開で生の応答（DESIGN.md §3.6。fetch / clone と同じ形）。
+  **401 / 404 / 接続不可 / タイムアウト / JSON でない応答**を言い分ける
+- **base URL は末尾の `/` を落として `/models` を繋ぐ。** `http://localhost:11434/v1/` を
+  貼られても壊れないように
+
+*画面（`LlmProfiles.tsx` ＋ `lib/llmProfile.ts`）*
+
+- 一覧（名前 / base URL / モデル）＋ 追加・編集・削除
+- 編集フォーム: 名前 / base URL / モデル / コンテキスト長 / temperature / max tokens / API キー
+- **API キー欄は `type="password"`。既存のキーは読み出して表示しない** —
+  「保存済み」と出すだけで、空のままなら**既存のキーを変えない**
+- 「モデル一覧を取得」ボタン → `/v1/models` の結果を `<datalist>` で補完。
+  **取得できなくても手入力できる**（自前 API 互換サーバで `/models` を持たないものがある）
+- 「接続テスト」ボタン → 結果を 1 行 ＋ 展開で生の応答
+- 入力の検証は**純関数**（`lib/llmProfile.ts`）: base URL が http/https か、
+  数値の範囲（context_window ≥ 1 / temperature 0〜2 / max_tokens ≥ 1）、名前が空でないか。
+  **押せないときもボタンを消さず、理由を出す**（CLAUDE.md §6）
+- 入口はヘッダの「設定」ボタン 1 つ（T-25 で設定画面へ移す）
+
+**制約**
+
+- **API キーを `settings.json` に書かない。** 書くのは `credential_key` だけ（CLAUDE.md §4）
+- **キーが画面表示・ログ・エラーに出る経路を作らない。** `redact.rs` を通す（CLAUDE.md §4）
+- **OpenAI 互換 API 1 系統のみ。** Ollama ネイティブ API (`/api/chat`) を実装しない（CLAUDE.md §7）
+- 外部通信は LLM API と git だけ（CLAUDE.md §1）。**モデル一覧の取得先を増やさない**
+- 表示文言は `src/i18n/ja.ts` に集約する（CLAUDE.md §6）
+
+**受け入れ条件**
+
+- ▸コマンド: `npm run test:rust` — 資格情報の**保存 → 読み出し → 削除**が往復すること、
+  削除後に読むと `None` になること
+- ▸コマンド: `npm run test:rust` — **保存した `settings.json` に平文のキーが 1 文字も
+  現れないこと**（ファイルを読んで確かめる）
+- ▸コマンド: `npm run test:rust` — モックサーバで
+  ①正常な `/v1/models` ②正常な chat ③401 ④404 ⑤JSON でない応答 ⑥接続不可
+  のすべてが**言い分けられること**、いずれでも**キーが結果に現れないこと**
+- ▸コマンド: `npm run test:rust` — `Authorization` が**キーが空のときは付かない**こと
+  （Ollama 向け）、base URL の末尾スラッシュの有無で URL が変わらないこと
+- ▸コマンド: `npm run test` — 入力の検証（base URL / 数値の範囲 / 空の名前）
+- ▸コマンド: `npm run test` / `npm run typecheck` / `npm run check:rust`
+- ▸目視: Ollama（`http://localhost:11434/v1`）で接続テストが通ること
+- ▸目視: OpenAI 互換の有償 API で接続テストが通ること
+- ▸目視: **資格情報マネージャーに項目ができ、プロファイルを消すと消えること**
+- ▸目視: キーを保存したあと `settings.json` を開いて、**平文が無いこと**
+- ▸目視: 接続できないときに「何をすればいいか」が読めること
+
+**テスト**: `npm run test:rust`, `npm run test`, `npm run typecheck`, 目視
+
+**非スコープ**: skill（T-21）／レビュー実行とストリーミング（T-22）／レビュー UI（T-23）／
+プロファイルごとのプロキシ設定（v1 の範囲外）
+
+**注記**: 3 日基準に収まる見込み。**`secret.rs` と `client.rs` を先に閉じてから画面へ行く**
+（画面から作ると、キーが通る経路が増えてから塞ぐことになる）。
 
 ---
+
+> **ここから先は骨子。着手前に詳細化すること**（このファイルの規約 5）。
 
 ## - [ ] T-21 [Phase 8] skill の読み込みと信頼モデル
 
