@@ -33,9 +33,11 @@ import { RepositoryList, type SortMode } from "./components/sidebar/RepositoryLi
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { LlmProfilesDialog } from "./components/settings/LlmProfiles";
 import { RepositorySettingsDialog } from "./components/settings/RepositorySettingsDialog";
+import { ReviewDrawer } from "./components/review/ReviewDrawer";
 import { CloneDialog } from "./components/setup/CloneDialog";
 import { EmptyState } from "./components/setup/EmptyState";
 import { GitSetupScreen } from "./components/setup/GitSetupScreen";
+import { useReview } from "./hooks/useReview";
 import { useCommandLog } from "./hooks/useCommandLog";
 import { useClone } from "./hooks/useClone";
 import { useFetch } from "./hooks/useFetch";
@@ -44,16 +46,20 @@ import { checkoutChoices, checkoutCommit, type CheckoutChoice } from "./lib/writ
 import { useTheme, type ThemePreference } from "./hooks/useTheme";
 import { ja } from "./i18n/ja";
 import { clearCompare, selectCommit, swapEnds } from "./lib/compareSelection";
+import { findingsFor } from "./lib/reviewFindings";
+import { defaultSelection, initialProfile } from "./lib/reviewPlan";
 import {
   appDataDir,
   detectGit,
   isGitUsable,
   loadCommitMessage,
   MIN_VERSION_FALLBACK,
+  setRepositoryLlmProfile,
   type ColumnWidths,
   type CommitMeta,
   type DiffSource,
   type GitStatus,
+  type LlmProfile,
   type LoadPhase,
   type RefEntry,
   type RepositoryEntry,
@@ -395,6 +401,7 @@ export default function App() {
               ) : (
                 <RepositoryPanel
                   entry={selected}
+                  dataDir={dataDir}
                   jumpTo={jumpTo}
                   onCheckoutCommit={(sha) =>
                     writing.askCheckout(
@@ -616,6 +623,7 @@ const EMPTY_OUTCOME = { ok: false, message: "", details: [], refused: null };
  */
 function RepositoryPanel({
   entry,
+  dataDir,
   jumpTo,
   onCheckoutCommit,
   onCheckoutRef,
@@ -623,6 +631,8 @@ function RepositoryPanel({
   onNotice,
 }: {
   entry: RepositoryEntry | null;
+  /** `%APPDATA%\com.tatsu.givsoner`。**履歴 0 件のときに保存先を出す**のに使う。 */
+  dataDir: string;
   jumpTo: { sha: string; nonce: number } | null;
   /** グラフ行の右クリックから checkout の確認を出す（T-18）。 */
   onCheckoutCommit: (sha: string) => void;
@@ -674,6 +684,12 @@ function RepositoryPanel({
       layout={layout}
       order={snapshot.order}
       ui={settings.settings.ui}
+      profiles={settings.settings.llmProfiles}
+      repositoryDefaultProfile={
+        settings.settings.repositories.find((it) => it.id === entry.id)
+          ?.defaultLlmProfileId ?? null
+      }
+      dataDir={dataDir}
       jumpTo={jumpTo}
       onCheckoutCommit={onCheckoutCommit}
       onCheckoutRef={onCheckoutRef}
@@ -698,6 +714,9 @@ function CommitWorkspace({
   layout,
   order,
   ui,
+  profiles,
+  repositoryDefaultProfile,
+  dataDir,
   jumpTo,
   onCheckoutCommit,
   onCheckoutRef,
@@ -710,6 +729,11 @@ function CommitWorkspace({
   order: ReturnType<typeof useSnapshot>["order"];
   /** 差分の表示設定もここから配る（`settings.json` の `ui`）。 */
   ui: UiSettings;
+  /** AI レビューの接続先（T-23）。**0 件でもドロワーは開く**（理由を出す）。 */
+  profiles: LlmProfile[];
+  /** このリポジトリで前回選んだ接続先（DESIGN.md §10.2）。 */
+  repositoryDefaultProfile: string | null;
+  dataDir: string;
   jumpTo: { sha: string; nonce: number } | null;
   onCheckoutCommit: (sha: string) => void;
   /** ref チップの右クリックから（T-18）。**ref ツリーと同じ翻訳を通す。** */
@@ -837,6 +861,22 @@ function CommitWorkspace({
       ? null
       : (workingList.find((item) => entryKey(item) === entryKey(workingSelection)) ?? null);
 
+  /* ---------- AI レビュー（T-23）---------- */
+
+  const review = useReview(entry.id);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+
+  // 接続先の既定は純関数が決める（`lib/reviewPlan.ts`）。**勝手に 1 つ目を選ばない。**
+  useEffect(() => {
+    setProfileId((current) =>
+      current !== null && profiles.some((it) => it.id === current)
+        ? current
+        : initialProfile(profiles, repositoryDefaultProfile),
+    );
+  }, [profiles, repositoryDefaultProfile]);
+
   /** 差分の出どころ。**呼び出し側で決めて `DiffPane` へ渡す。** */
   const diffSource: DiffSource | null = viewingWorking
     ? workingEntry === null || workingEntry.change === null
@@ -850,18 +890,98 @@ function CommitWorkspace({
     ? (workingEntry?.change ?? null)
     : (files.changes.find((change) => change.path === perRepository.selectedFile) ?? null);
 
+  /**
+   * レビューの対象。**いま差分ペインが見ているものと同じ。**
+   *
+   * 「レビューするために選び直す」を作らない — 見ているものをそのまま投げる。
+   */
+  const reviewSource: DiffSource | null = viewingWorking
+    ? { kind: "workingTree", staged: false }
+    : files.range === null
+      ? null
+      : rangeSource(files.range);
+
+  // ドロワーを開いた／対象が変わったら計画を取り直す。**古い計画で走らせない。**
+  useEffect(() => {
+    if (!reviewOpen || reviewSource === null || profileId === null) return;
+    void review.refreshPlan(reviewSource, profileId);
+    // `reviewSource` は毎回作り直されるので、中身で見る。
+  }, [reviewOpen, profileId, JSON.stringify(reviewSource)]);
+
+  // 計画が変わったら選択を作り直す。**送れないファイルは選ばない。**
+  useEffect(() => {
+    setSelectedPaths(defaultSelection(review.state.plan));
+  }, [review.state.plan]);
+
+  const openReview = useCallback(() => {
+    setReviewOpen(true);
+    review.show("preflight");
+    void review.refreshHistory();
+  }, [review]);
+
+  // `Ctrl+Shift+A` で開く（DESIGN.md §6.5）。**入力欄では横取りしない。**
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName.toLowerCase();
+      if (tag === "input" || tag === "textarea" || target?.isContentEditable === true) return;
+
+      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        openReview();
+        return;
+      }
+      // `Esc` でドロワーを閉じる（DESIGN.md §6.5）。**開いているときだけ横取りする。**
+      if (event.key === "Escape" && reviewOpen) {
+        event.preventDefault();
+        setReviewOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [openReview, reviewOpen]);
+
+  const runReview = () => {
+    if (reviewSource === null || profileId === null) return;
+    // 選んだ接続先をこのリポジトリの既定として覚える（DESIGN.md §10.2）。
+    void setRepositoryLlmProfile(entry.id, profileId).catch(() => {});
+    void review.run(reviewSource, profileId, selectedPaths);
+  };
+
+  /**
+   * いま差分ペインに出しているファイルへ付いた指摘（T-23）。
+   *
+   * **結果を出しているときだけ。** 実行中や実行前は付けない
+   * （途中の指摘を行に付けると、あとで消えて見える）。
+   */
+  const diffFindings = useMemo(() => {
+    const path = diffChange?.path ?? null;
+    if (review.state.stored === null || path === null) return [];
+    return findingsFor(review.state.stored.run, path);
+  }, [review.state.stored, diffChange?.path]);
+
+  /** 指摘から差分へ飛ぶ。**そのファイルを開くところまで。** */
+  const jumpToFinding = (path: string, _line: number) => {
+    setViewingWorking(false);
+    selectFile(path);
+  };
+
   return (
     <SplitPane
       direction="row"
       unit="px"
       anchor="second"
-      size={uiState.paneRatios.commitInfoWidth}
+      size={
+        reviewOpen ? uiState.paneRatios.reviewDrawerWidth : uiState.paneRatios.commitInfoWidth
+      }
       min={COMMIT_INFO_MIN}
       max={COMMIT_INFO_MAX}
       onSizeChange={(width) =>
         updateUiState((current) => ({
           ...current,
-          paneRatios: { ...current.paneRatios, commitInfoWidth: width },
+          paneRatios: reviewOpen
+            ? { ...current.paneRatios, reviewDrawerWidth: width }
+            : { ...current.paneRatios, commitInfoWidth: width },
         }))
       }
       first={
@@ -925,6 +1045,7 @@ function CommitWorkspace({
               }
               bodyRef={files.bodyRef}
               ui={ui}
+              findings={diffFindings}
               onUiChange={(change) =>
                 void updateSettings((current) => ({
                   ...current,
@@ -936,7 +1057,42 @@ function CommitWorkspace({
         />
       }
       second={
-        viewingWorking ? (
+        // **ドロワーはコミット情報の列と入れ替える**（DESIGN.md §6.1）。
+        // 3 列 ＋ ドロワーでは差分が潰れる。ドロワーは指摘から差分へ飛べるので、
+        // 変更ファイル一覧の役目をそのまま引き取れる。
+        reviewOpen ? (
+          <ReviewDrawer
+            state={review.state}
+            profiles={profiles}
+            profileId={profileId}
+            selected={selectedPaths}
+            reviewsDir={dataDir === "" ? null : `${dataDir}\reviews`}
+            onProfileChange={setProfileId}
+            onSelectedChange={setSelectedPaths}
+            onRun={runReview}
+            onCancel={() => void review.cancel()}
+            onShow={review.show}
+            onOpenHistory={(file) => void review.openHistoryEntry(file)}
+            onJump={jumpToFinding}
+            onClose={() => setReviewOpen(false)}
+            onNotice={onNotice}
+          />
+        ) : (
+          <div className="cinfo-stack">
+            {/* **入口を画面に出す。** ショートカットだけだと存在に気付けない。 */}
+            <div className="cinfo-stack__bar">
+              <button
+                type="button"
+                className="button button--small"
+                // 対象が決まっていないときも**消さずに**押せない形で残す。
+                disabled={reviewSource === null}
+                onClick={openReview}
+                title="Ctrl+Shift+A"
+              >
+                {ja.review.open}
+              </button>
+            </div>
+            {viewingWorking ? (
           working.tree === null ? (
             <div className="cinfo cinfo--empty">
               <p>{working.error ?? ja.diff.loading}</p>
@@ -972,6 +1128,8 @@ function CommitWorkspace({
           onSelectFile={selectFile}
           onNotice={onNotice}
         />
+            )}
+          </div>
         )
       }
     />

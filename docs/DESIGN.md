@@ -1691,10 +1691,7 @@ skill の名前を鍵にする。**`repoSkills.hashes` に記録があること�
 
 ### 12.4 レビュー結果の永続化
 
-**保存する。** `reviews/<repo-id>/<timestamp>.json` に 1 レビュー 1 ファイル。
-
-メタデータに（リポジトリ ID / from-SHA / to-SHA / 比較モード / skill 集合 / モデル名 /
-実行日時 / 概算トークン数）を全部持つ。
+**保存する。** `reviews/<repo-id>/<日時>-<runId の先頭 8 桁>.json` に 1 レビュー 1 ファイル。
 
 **同じ組み合わせで再実行しても上書きせず、履歴として積む。**
 モデルや skill を変えて同じ差分をレビューし直し、結果を見比べたくなる場面が多いため。
@@ -1702,31 +1699,50 @@ skill の名前を鍵にする。**`repoSkills.hashes` に記録があること�
 リポジトリごとに「レビュー履歴」一覧を持ち、開くと当時の差分と並べて再表示する。
 Markdown は出力専用（「Markdown で書き出し」ボタンで生成）。
 
-```json
+#### 形は T-22 の `ReviewRun` をそのまま包む（T-23 で決めた。2026-09-06）
+
+**当初はここに別の形の JSON を書いていたが、実装に合わせて書き直した。**
+T-22 の `llm/review.rs` が返す `ReviewRun` が同じ内容を既に持っており、
+**別の形へ変換すると変換器を両側に合わせ続ける**ことになるため（規約 4 の
+「先行タスクの実装が正」）。包む側が足すのは 4 つだけ。
+
+```jsonc
 {
   "schemaVersion": 1,
   "repositoryId": "uuid",
-  "from": "sha", "to": "sha",
-  "diffMode": "two-dot",
-  "skills": ["general-review"],
-  "profile": { "name": "local-qwen", "model": "qwen2.5-coder:14b", "baseUrl": "..." },
-  "startedAt": "2026-09-01T12:00:00+09:00",
-  "finishedAt": "2026-09-01T12:04:31+09:00",
-  "approxTokens": 12345,
-  "failedCount": 0,
-  "files": [
-    {
-      "path": "src/foo.ts",
-      "status": "ok",
-      "structured": true,
-      "findings": [],
-      "raw": null,
-      "error": null
-    }
-  ],
-  "summary": "全体サマリ"
+  "savedAt": "2026-09-06T12:04:31+09:00",
+  "file": "20260906T120431-1a2b3c4d.json",   // 自分の名前。一覧から開く鍵
+  "profile": {                                // 実行時の控え
+    "name": "local-qwen",
+    "model": "qwen2.5-coder:14b",
+    "baseUrl": "http://localhost:11434/v1"    // **redact 済み**
+  },
+  "run": { /* ReviewRun そのまま */ }
 }
 ```
+
+`ReviewRun` 側に、当初 §12.4 が求めていた情報は全部ある。
+
+| 当初の案 | いまの居場所 |
+|---|---|
+| `from` / `to` / `diffMode` | `run.source`（`DiffSource`。作業ツリーも同じ型で表せる）|
+| `skills` | `run.skills`（名前 ＋ 出どころ）|
+| `profile` | 包む側の `profile`（**ID だけでは後から読めない**ので控えを残す）|
+| `startedAt` / `finishedAt` | `run.startedAt` ＋ `run.elapsedMs` |
+| `approxTokens` | `run.files[].tokensEstimate` の合計 |
+| `failedCount` | `run.failed` |
+| `structured` / `raw` | `run.files[].text.markdown`（**入っていれば構造化に失敗**）|
+
+**プロファイルの `baseUrl` は `redact` を通してから書く**（§13.4 / CLAUDE.md §4）。
+`https://user:token@host` を貼られていても平文で残さない。
+
+**保存するのは Rust 側（`start_review` の中）。** フロントに保存させると、
+例外や画面遷移で**保存し忘れる経路**ができる。**中止したレビューも積む** —
+途中まででも読む価値があり、捨てるほうが損。一覧には「中止」と出す。
+
+**一覧は壊れた 1 件で落とさない。** 読めないファイルと、`schemaVersion` が
+将来版のファイルは、**理由付きで一覧に並べる**（skill の一覧と同じ扱い。§11.2.1）。
+黙って消すと、あったはずの結果が無いのか壊れているのか区別が付かない。
 
 ---
 

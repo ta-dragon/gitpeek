@@ -16,6 +16,7 @@ import {
   type DiffSource,
   type FileChange,
   type FileDiff,
+  type Finding,
   type TextEncoding,
   type UiSettings,
 } from "../../lib/ipc";
@@ -40,6 +41,12 @@ type Props = {
   /** `Enter` でフォーカスを移す先。 */
   bodyRef: React.RefObject<HTMLDivElement | null>;
   ui: UiSettings;
+  /**
+   * このファイルに付いた AI レビューの指摘（T-23）。無ければ空。
+   *
+   * **差分に無い行を指したものは行に付かない**（`lib/reviewFindings.ts` が振り分ける）。
+   */
+  findings: Finding[];
   onUiChange: (change: Partial<UiSettings>) => void;
 };
 
@@ -51,6 +58,7 @@ export function DiffPane({
   conflictPath,
   bodyRef,
   ui,
+  findings,
   onUiChange,
 }: Props) {
   const [diff, setDiff] = useState<FileDiff | null>(null);
@@ -175,6 +183,7 @@ export function DiffPane({
           loading={loading}
           error={error}
           ui={ui}
+          findings={findings}
           expanded={expanded}
           scrollRef={bodyRef}
           onExpand={() => setExpanded(true)}
@@ -198,6 +207,7 @@ function Body({
   loading,
   error,
   ui,
+  findings,
   expanded,
   scrollRef,
   onExpand,
@@ -212,6 +222,7 @@ function Body({
   loading: boolean;
   error: string | null;
   ui: UiSettings;
+  findings: Finding[];
   expanded: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onExpand: () => void;
@@ -278,6 +289,7 @@ function Body({
       hunks={diff.hunks}
       layout={ui.diffLayout}
       showLineEndings={ui.showLineEndings}
+      findings={findings}
       scrollRef={scrollRef}
     />
   );

@@ -15,9 +15,10 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { useResolvedTheme } from "../../hooks/useTheme";
-import { allWordSegments, buildRows, type DiffLayout } from "../../lib/diffRows";
+import { allWordSegments, buildRows, type DiffLayout, type DiffRow } from "../../lib/diffRows";
 import { highlightDiff, languageOf, type Chunk } from "../../lib/highlight";
-import type { DiffLine, Hunk } from "../../lib/ipc";
+import type { DiffLine, Finding, Hunk } from "../../lib/ipc";
+import { bySeverity, placeFindings } from "../../lib/reviewFindings";
 import { HunkHeading, SplitRow, type RowContext } from "./SideBySide";
 import { UnifiedRow } from "./Unified";
 
@@ -32,6 +33,7 @@ export function DiffBody({
   hunks,
   layout,
   showLineEndings,
+  findings,
   scrollRef,
 }: {
   /** ハイライトの言語を決めるのに使う。 */
@@ -39,10 +41,18 @@ export function DiffBody({
   hunks: Hunk[];
   layout: DiffLayout;
   showLineEndings: boolean;
+  /**
+   * このファイルに付いた AI レビューの指摘（T-23）。
+   *
+   * **差分に無い行を指したものはここでは出さない。** 振り分けは
+   * `lib/reviewFindings.ts` の純関数が決める（無い行に出すと別の行の指摘に見える）。
+   */
+  findings: Finding[];
   /** スクロールしているのは `.dpane__body`。仮想化はその上で行う。 */
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   const rows = useMemo(() => buildRows(hunks, layout), [hunks, layout]);
+  const placed = useMemo(() => placeFindings(findings, hunks).byLine, [findings, hunks]);
   const segments = useMemo(() => allWordSegments(hunks), [hunks]);
   const colors = useHighlight(path, hunks);
 
@@ -84,10 +94,37 @@ export function DiffBody({
             ) : (
               <SplitRow left={row.left} right={row.right} context={context} />
             )}
+            <FindingBadge findings={placed.get(newLineOf(row) ?? -1)} />
           </div>
         );
       })}
     </div>
+  );
+}
+
+/** その行の変更後の行番号。**指摘は変更後の行で指す**（system プロンプトの約束）。 */
+function newLineOf(row: DiffRow): number | null {
+  if (row.kind === "single") return row.line.newLine;
+  if (row.kind === "pair") return row.right?.newLine ?? null;
+  return null;
+}
+
+/**
+ * 指摘が付いた行の印（T-23）。
+ *
+ * **一番重いものの色で 1 つだけ出す。** 同じ行に何件あっても行が伸びない。
+ * 中身はドロワー側で読む（ここは「ここに指摘がある」を示すだけ）。
+ */
+function FindingBadge({ findings }: { findings: Finding[] | undefined }) {
+  if (findings === undefined || findings.length === 0) return null;
+  const worst = bySeverity(findings)[0];
+  return (
+    <span
+      className={`drow__badge drow__badge--${worst.severity}`}
+      title={findings.map((finding) => finding.title).join(" / ")}
+    >
+      {findings.length === 1 ? "!" : findings.length}
+    </span>
   );
 }
 

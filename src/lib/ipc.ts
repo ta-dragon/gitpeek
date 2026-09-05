@@ -1189,11 +1189,49 @@ export function planReview(options: {
   return invoke<ReviewPlan>("plan_review", options);
 }
 
+/** 実行時に使ったプロファイルの控え。**`baseUrl` は redact 済み。** */
+export type ProfileSnapshot = { name: string; model: string; baseUrl: string };
+
+/**
+ * 保存された 1 件（`src-tauri/src/store/reviews.rs`）。
+ *
+ * **保存の形とフロントが読む形が同じ。** 変換を挟まないので、
+ * 履歴から開いたものと走り終えた直後のものを同じ部品で出せる。
+ */
+export type StoredReview = {
+  schemaVersion: number;
+  repositoryId: string;
+  savedAt: string;
+  /** 自分のファイル名。**履歴から開く鍵。** */
+  file: string;
+  profile: ProfileSnapshot;
+  run: ReviewRun;
+};
+
+/** 履歴一覧の 1 行。**全文は持たない。** */
+export type ReviewIndexRow = {
+  file: string;
+  savedAt: string;
+  model: string;
+  profileName: string;
+  /** 当時の 2 点。**差分を出し直すのに使う。** */
+  source: DiffSource | null;
+  files: number;
+  findings: number;
+  failed: number;
+  cancelled: boolean;
+  /** 読めなかった理由。null なら読めている。**消さずに並べる。** */
+  unreadable: string | null;
+};
+
 /**
  * レビューを走らせる。
  *
  * `runId` は**呼ぶ側が採番する** — 走り始める前にイベントの受け口を用意できるように。
  * `paths` は実行前パネルで**残された**ファイル。計画そのものは Rust 側が組み直す。
+ *
+ * **走り終えると Rust 側が保存する。** 戻り値は保存された 1 件で、
+ * `file` がそのまま履歴の鍵になる（保存し忘れる経路を作らないため）。
  */
 export function startReview(options: {
   runId: string;
@@ -1201,8 +1239,40 @@ export function startReview(options: {
   source: DiffSource;
   profileId: string;
   paths: string[];
-}): Promise<ReviewRun> {
-  return invoke<ReviewRun>("start_review", options);
+}): Promise<StoredReview> {
+  return invoke<StoredReview>("start_review", options);
+}
+
+/** レビューの履歴（新しい順）。**読めないものも理由付きで並ぶ。** */
+export function listReviews(repositoryId: string): Promise<ReviewIndexRow[]> {
+  return invoke<ReviewIndexRow[]>("list_reviews", { repositoryId });
+}
+
+/** 履歴 1 件の全文。 */
+export function loadReview(repositoryId: string, file: string): Promise<StoredReview> {
+  return invoke<StoredReview>("load_review", { repositoryId, file });
+}
+
+/**
+ * レビュー結果を Markdown として書き出す。
+ *
+ * **`@tauri-apps/plugin-fs` は入れていない。** 要るのはこの 1 用途だけなので、
+ * 行き先は保存ダイアログで選んだパスに限り、書き込みは Rust 側で行う。
+ */
+export function exportMarkdown(path: string, text: string): Promise<void> {
+  return invoke<void>("export_markdown", { path, text });
+}
+
+/**
+ * リポジトリごとの既定 LLM 接続先を覚える（DESIGN.md §10.2）。
+ *
+ * **実行前パネルで選んだものをそのまま覚える。** 毎回選び直させない。
+ */
+export function setRepositoryLlmProfile(
+  repositoryId: string,
+  profileId: string | null,
+): Promise<void> {
+  return invoke<void>("set_repository_llm_profile", { repositoryId, profileId });
 }
 
 /**

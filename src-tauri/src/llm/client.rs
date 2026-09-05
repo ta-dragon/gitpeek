@@ -60,7 +60,7 @@ const RAW_LIMIT: usize = 4_000;
 const HEADLINE_LIMIT: usize = 200;
 
 /// 失敗の種類。**画面はこれで文言と復旧手順を出し分ける。**
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LlmErrorKind {
     /// 401 / 403。API キーが違う・足りない。
@@ -83,7 +83,7 @@ pub enum LlmErrorKind {
 }
 
 /// 失敗の中身。`message` を 1 行で出し、`detail` は展開で見せる。
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LlmError {
     pub kind: LlmErrorKind,

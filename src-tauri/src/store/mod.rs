@@ -3,6 +3,7 @@
 //! - `paths` — ディレクトリレイアウトの解決
 //! - `settings` — 手編集を想定した `settings.json`
 //! - `state` — アプリが随時上書きする `state.json`
+//! - `reviews` — レビュー結果。**上書きせず履歴として積む**（DESIGN.md §12.4）
 //! - `json` — アトミック書き込み
 //!
 //! 読み書きのロジックはすべて「パスを引数で受け取る関数」であり `AppHandle` に依存しない。
@@ -10,6 +11,7 @@
 
 pub mod json;
 pub mod paths;
+pub mod reviews;
 pub mod settings;
 pub mod state;
 
@@ -303,6 +305,24 @@ impl Store {
     }
 
     /// リポジトリ内 skill の「追加の指示」。
+    /// リポジトリごとの既定 LLM プロファイル（DESIGN.md §10.2）。
+    ///
+    /// **実行前パネルで選んだものをそのまま覚える。** 毎回選び直させない。
+    /// 知らない ID は受けない — 消えたプロファイルを指したまま残ると、
+    /// 次に開いたとき「選ばれているのに使えない」状態になる。
+    pub fn set_repository_llm_profile(
+        &self,
+        repository_id: &str,
+        profile_id: Option<&str>,
+    ) -> Result<(), String> {
+        if let Some(id) = profile_id {
+            self.llm_profile(id)?;
+        }
+        self.edit_repository(repository_id, |repository| {
+            repository.default_llm_profile_id = profile_id.map(str::to_string);
+        })
+    }
+
     pub fn set_repo_skill_extra(
         &self,
         repository_id: &str,

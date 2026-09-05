@@ -37,7 +37,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSetBuilder};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::store::settings::{RepoSkillTrust, SkillSettings};
@@ -56,7 +56,7 @@ pub const MAX_FILES: usize = 64;
 const BUILT_IN: &str = include_str!("skills/general-review.md");
 
 /// skill の出どころ。**画面に必ず出す** — どれが効いているのか読めなくなるため。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SkillOrigin {
     /// 同梱。編集できない。

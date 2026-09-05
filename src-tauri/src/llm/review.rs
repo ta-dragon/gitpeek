@@ -70,7 +70,7 @@ impl Severity {
 }
 
 /// 指摘 1 件。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Finding {
     pub file: String,
@@ -82,8 +82,8 @@ pub struct Finding {
 }
 
 /// モデルの応答 1 つ分。**構造化できたかどうかの両方をここで持つ。**
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct ReviewText {
     pub summary: String,
     pub findings: Vec<Finding>,
@@ -100,7 +100,7 @@ impl ReviewText {
 }
 
 /// 一覧に出す skill。**本文は入れない**（webview へ渡すものなので）。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlannedSkill {
     pub name: String,
@@ -133,7 +133,7 @@ pub struct ReviewPlan {
 }
 
 /// ファイル 1 つ分の結果。
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewFileResult {
     pub path: String,
@@ -148,7 +148,7 @@ pub struct ReviewFileResult {
 }
 
 /// レビュー 1 回分。**T-23 はこれをそのまま履歴へ積む。**
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewRun {
     pub run_id: String,

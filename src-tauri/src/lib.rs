@@ -1210,6 +1210,10 @@ async fn plan_review(
 /// `paths` は実行前パネルで**残された**ファイル。計画そのものは Rust 側で組み直す
 /// （古い計画で走らせない）。`run_id` はフロントが採番して渡す —
 /// **走り始める前にイベントの受け口を用意できる**ようにするため。
+///
+/// **走り終えたらここで保存する**（T-23）。フロントに保存させると、
+/// 例外や画面遷移で**保存し忘れる経路**ができる。中止したものも積む
+/// （途中まででも読む価値があり、捨てるほうが損）。
 #[tauri::command]
 async fn start_review(
     app: AppHandle,
@@ -1219,10 +1223,12 @@ async fn start_review(
     source: DiffSource,
     profile_id: String,
     paths: Vec<String>,
-) -> Result<llm::review::ReviewRun, llm::client::LlmError> {
+) -> Result<store::reviews::StoredReview, llm::client::LlmError> {
     let setup = review_setup(&state, &repository_id, &profile_id).await?;
     let log = state.log.clone();
     let handle = app.clone();
+    // **保存に使うぶんは手元に残す。** `setup` はブロッキングタスクへ渡ってしまう。
+    let profile = setup.profile.clone();
 
     // 中止の合図を先に置く。**終わったら必ず外す**（次の走りが「中止済み」を
     // 引き継いで即座に止まらないように）。
@@ -1260,7 +1266,63 @@ async fn start_review(
         *slot = None;
     }
 
-    outcome?
+    let run = outcome??;
+    let store_paths = state
+        .store
+        .paths()
+        .map_err(llm::client::LlmError::config)?;
+    store::reviews::save(store_paths, &repository_id, &profile, run)
+        .map_err(llm::client::LlmError::config)
+}
+
+/// レビューの履歴（新しい順）。**読めないものも理由付きで並ぶ。**
+#[tauri::command]
+fn list_reviews(
+    state: State<'_, AppState>,
+    repository_id: String,
+) -> Result<Vec<store::reviews::ReviewIndexRow>, String> {
+    Ok(store::reviews::list(state.store.paths()?, &repository_id))
+}
+
+/// 履歴 1 件の全文。
+#[tauri::command]
+fn load_review(
+    state: State<'_, AppState>,
+    repository_id: String,
+    file: String,
+) -> Result<store::reviews::StoredReview, String> {
+    store::reviews::load(state.store.paths()?, &repository_id, &file)
+}
+
+/// レビュー結果を Markdown として書き出す（DESIGN.md §12.4）。
+///
+/// **保存形式は JSON のままで、Markdown は出力専用。** 組み立てはフロントの
+/// 純関数（`lib/reviewMarkdown.ts`）で、ここは書くだけ。
+///
+/// **`tauri-plugin-fs` は入れない。** 依存 2 つ（npm と Cargo）と引き換えに
+/// 得られるのは「任意のファイルを書く」機能で、要るのはこの 1 用途だけ。
+/// 行き先は利用者が保存ダイアログで選んだパスに限る。
+#[tauri::command]
+async fn export_markdown(path: String, text: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        store::json::write_atomic(&PathBuf::from(&path), &text)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// リポジトリごとの既定 LLM プロファイルを覚える（DESIGN.md §10.2）。
+///
+/// **リポジトリに紐づくものなので、アプリ全体の設定に混ぜない**（CLAUDE.md §6）。
+#[tauri::command]
+fn set_repository_llm_profile(
+    state: State<'_, AppState>,
+    repository_id: String,
+    profile_id: Option<String>,
+) -> Result<(), String> {
+    state
+        .store
+        .set_repository_llm_profile(&repository_id, profile_id.as_deref())
 }
 
 /// 実行中のレビューを止める。走っていなければ何もしない。
@@ -1337,7 +1399,11 @@ pub fn run() {
             set_skill_extra,
             plan_review,
             start_review,
-            cancel_review
+            cancel_review,
+            list_reviews,
+            load_review,
+            export_markdown,
+            set_repository_llm_profile
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -1754,5 +1820,86 @@ mod tests {
         .unwrap();
         assert_eq!(wrapped["runId"], "r1");
         assert_eq!(wrapped["kind"], "summaryStarted");
+    }
+
+    /// **保存した結果をフロントがそのまま読めること**（T-23）。
+    ///
+    /// `StoredReview` は保存の形でもあるので、**書いた JSON がそのまま
+    /// 画面の型と一致する**。ここがずれると、履歴が黙って空になる。
+    #[test]
+    fn the_stored_review_wire_format_matches_what_the_front_end_reads() {
+        use crate::git::diff::DiffSource;
+        use crate::llm::review::ReviewRun;
+        use crate::store::reviews::{ProfileSnapshot, ReviewIndexRow, StoredReview};
+
+        let stored = StoredReview {
+            schema_version: 1,
+            repository_id: "r1".to_string(),
+            saved_at: "2026-09-06T12:04:31+09:00".to_string(),
+            file: "20260906T120431-1a2b3c4d.json".to_string(),
+            profile: ProfileSnapshot {
+                name: "ローカル".to_string(),
+                model: "qwen2.5-coder:14b".to_string(),
+                base_url: "http://localhost:11434/v1".to_string(),
+            },
+            run: ReviewRun {
+                run_id: "1a2b3c4d".to_string(),
+                profile_id: "p1".to_string(),
+                model: "qwen2.5-coder:14b".to_string(),
+                source: DiffSource::Range {
+                    parent: Some("aaa".to_string()),
+                    sha: "bbb".to_string(),
+                    symmetric: false,
+                },
+                skills: Vec::new(),
+                files: Vec::new(),
+                summary: None,
+                failed: 0,
+                cancelled: false,
+                started_at: 1_700_000_000_000,
+                elapsed_ms: 9,
+            },
+        };
+        let json = serde_json::to_value(&stored).unwrap();
+        assert_eq!(json["schemaVersion"], 1);
+        assert_eq!(json["repositoryId"], "r1");
+        assert_eq!(json["savedAt"], "2026-09-06T12:04:31+09:00");
+        assert_eq!(json["file"], "20260906T120431-1a2b3c4d.json");
+        assert_eq!(json["profile"]["baseUrl"], "http://localhost:11434/v1");
+        assert_eq!(json["run"]["runId"], "1a2b3c4d");
+        assert_eq!(json["run"]["source"]["kind"], "range");
+
+        // **書いたものを読み戻せること。** 履歴を開く経路がこれに乗っている。
+        let back: StoredReview = serde_json::from_value(json).expect("読み戻せること");
+        assert_eq!(back, stored);
+
+        let row = ReviewIndexRow {
+            file: "a.json".to_string(),
+            saved_at: "2026-09-06T12:04:31+09:00".to_string(),
+            model: "m".to_string(),
+            profile_name: "ローカル".to_string(),
+            source: Some(DiffSource::WorkingTree { staged: true }),
+            files: 3,
+            findings: 5,
+            failed: 1,
+            cancelled: true,
+            unreadable: None,
+        };
+        let json = serde_json::to_value(&row).unwrap();
+        assert_eq!(json["profileName"], "ローカル");
+        assert_eq!(json["source"]["kind"], "workingTree");
+        assert_eq!(json["findings"], 5);
+        assert_eq!(json["cancelled"], true);
+        assert_eq!(json["unreadable"], serde_json::Value::Null);
+
+        // **読めなかった行も同じ形で届く。** 画面から消さないため。
+        let broken = ReviewIndexRow {
+            file: "b.json".to_string(),
+            unreadable: Some("JSON として読めませんでした。".to_string()),
+            ..ReviewIndexRow::default()
+        };
+        let json = serde_json::to_value(&broken).unwrap();
+        assert_eq!(json["unreadable"], "JSON として読めませんでした。");
+        assert_eq!(json["source"], serde_json::Value::Null);
     }
 }

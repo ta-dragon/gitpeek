@@ -27,6 +27,8 @@ use givsoner_lib::llm::review::{
     self, ReviewEvent, ReviewPlan, ReviewRun, ReviewSink, Severity,
 };
 use givsoner_lib::llm::skill::{self, SkillEntry};
+use givsoner_lib::store::paths::StorePaths;
+use givsoner_lib::store::reviews;
 use givsoner_lib::store::settings::{LlmProfile, RepoSkillTrust, SkillSettings};
 
 use common::{fixtures, log};
@@ -933,6 +935,84 @@ fn tells_the_finish_reason_when_the_answer_was_cut_by_max_tokens() {
             .is_some_and(|it| it.contains("max tokens")),
         "何をすればいいかまで書くこと: {text:?}"
     );
+}
+
+// ---- 走らせた結果を積む（T-23。DESIGN.md §12.4）--------------------------------
+
+/// **同じ差分を 2 回レビューすると 2 件残る。**
+///
+/// `start_review` は Tauri の `AppHandle` が要るので呼べないが、
+/// その中身（`review::run` → `reviews::save`）はここでそのまま通せる。
+#[test]
+fn reviewing_the_same_diff_twice_keeps_two_entries() {
+    let server = serving(GOOD_JSON);
+    let harness = Harness::new(&server.base_url());
+    let store = tempfile::tempdir().unwrap();
+    let paths = StorePaths::new(store.path());
+
+    for _ in 0..2 {
+        let (run, _) = harness.run(&["追加.txt"]);
+        reviews::save(&paths, "repo-1", &harness.profile, run).expect("保存できること");
+    }
+
+    let rows = reviews::list(&paths, "repo-1");
+    assert_eq!(rows.len(), 2, "上書きせず積むこと: {rows:?}");
+    assert!(rows.iter().all(|row| row.unreadable.is_none()));
+    assert!(rows.iter().all(|row| row.findings == 1), "{rows:?}");
+    assert!(rows.iter().all(|row| row.failed == 0));
+
+    // **書いたものをそのまま読み戻せること。** 履歴を開く経路がこれに乗っている。
+    let opened = reviews::load(&paths, "repo-1", &rows[0].file).expect("開けること");
+    assert_eq!(opened.run.files.len(), 1);
+    assert_eq!(opened.profile.model, harness.profile.model);
+}
+
+/// **中止したレビューも積む。** 途中まででも読む価値があり、捨てるほうが損。
+#[test]
+fn a_cancelled_review_is_still_saved_and_marked() {
+    let long: String = (0..400).map(|_| sse_delta("あ")).collect();
+    let server = MockServer::always(
+        Canned::sse(format!("{long}{SSE_DONE}")).in_chunks(1, Duration::from_millis(2)),
+    );
+    let harness = Harness::new(&server.base_url());
+    let store = tempfile::tempdir().unwrap();
+    let paths = StorePaths::new(store.path());
+
+    let cancel = Cancel::new();
+    let stopper = cancel.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(150));
+        stopper.cancel();
+    });
+
+    let run = harness.run_with(TEXT_FILES, &cancel, &Recorder::default());
+    assert!(run.cancelled);
+    reviews::save(&paths, "repo-1", &harness.profile, run).expect("中止したものも保存する");
+
+    let rows = reviews::list(&paths, "repo-1");
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].cancelled, "一覧に中止と出せること: {rows:?}");
+}
+
+/// **保存したファイルに資格情報の平文が 1 文字も無いこと**（CLAUDE.md §4）。
+///
+/// 組み立ての固定ではなく、**書かれたファイルを読んで**確かめる。
+#[test]
+fn the_saved_file_never_holds_a_plaintext_credential() {
+    let server = serving(GOOD_JSON);
+    let mut harness = Harness::new(&server.base_url());
+    let secret = "ghp_secretvalue0123456789";
+    harness.profile.base_url = format!("https://tatsu:{secret}@example.invalid/v1");
+
+    let store = tempfile::tempdir().unwrap();
+    let paths = StorePaths::new(store.path());
+    // 接続できない URL なので全ファイルが失敗するが、**保存はされる。**
+    let (run, _) = harness.run(&["追加.txt"]);
+    let saved = reviews::save(&paths, "repo-1", &harness.profile, run).expect("保存できること");
+
+    let text = std::fs::read_to_string(paths.review_dir("repo-1").join(&saved.file)).unwrap();
+    assert!(!text.contains(secret), "平文の資格情報が残っている");
+    assert!(text.contains("***"), "伏せ字になっていること: {text}");
 }
 
 // ---- 実サーバ（目視用）--------------------------------------------------------

@@ -836,6 +836,106 @@ export const ja = {
       "このリポジトリには観点のファイルが置かれていません。.gitviewer\skills\ に .md を置くとここに出ます。",
   },
 
+  /**
+   * AI レビュー（T-23）。
+   *
+   * **「何が起きるか」で書く。** git や LLM の用語をそのまま出さない
+   * （「hunk 分割」は通じない。CLAUDE.md §6）。
+   */
+  review: {
+    title: "AI レビュー",
+    open: "AI レビュー",
+    close: "閉じる",
+    back: "戻る",
+    run: "レビューを実行",
+    cancel: "中止",
+    cancelling: "中止しています…",
+    running: "レビュー中",
+    rerun: "もう一度レビューする",
+    exportMarkdown: "Markdown で書き出し",
+    exported: (path: string) => `${path} に書き出しました。`,
+    historyTab: "履歴",
+    profile: "接続先",
+    profilePlaceholder: "接続先を選んでください",
+    noProfiles: "接続先がまだありません。設定で追加すると実行できます。",
+    skillsUsed: "使う観点",
+    noSkills: "使う観点がありません。",
+    fallbackDefault: "構造化に失敗しました。モデルの出力をそのまま表示しています。",
+    offDiffNote: "この差分に無い行を指しています。",
+    wholeFileNote: "ファイル全体への指摘です。",
+    noFindings: "指摘はありませんでした。",
+    emptyResult: "応答がありませんでした。",
+    summaryHeading: "全体の要約",
+    findingsHeading: (n: number) => `指摘 ${n} 件`,
+    detail: "接続先からの応答",
+
+    gate: {
+      noPlan: "レビューの対象を調べています。",
+      noProfile: "接続先がまだありません。設定で接続先を追加すると実行できます。",
+      alreadyRunning: "いまレビューを実行中です。終わるか中止すると次を始められます。",
+      nothingSelected: "ファイルが 1 つも選ばれていません。1 つ以上チェックしてください。",
+      noProfileChosen: "接続先が選ばれていません。上のドロップダウンから選んでください。",
+    },
+
+    plan: {
+      lead: "この内容でレビューします。外したいファイルはチェックを外してください。",
+      tokens: (n: number) => `送る量はおよそ ${n.toLocaleString()} トークンです。`,
+      counts: (sending: number, skipped: number) =>
+        skipped === 0
+          ? `${sending} 件を送ります。`
+          : `${sending} 件を送ります（${skipped} 件は送りません）。`,
+      splitInto: (parts: number) => `大きいので ${parts} 回に分けて送ります。`,
+      selectAll: "すべて選ぶ",
+      selectNone: "すべて外す",
+      empty: "レビューできるファイルがありません。",
+    },
+
+    status: {
+      waiting: "待機中",
+      running: "実行中",
+      done: "済",
+      failed: "失敗",
+      skipped: "送りません",
+    },
+
+    source: {
+      staged: "コミット予定の変更（ステージ済み）",
+      unstaged: "まだコミットしていない変更",
+      root: (to: string) => `最初のコミット ${to}`,
+      range: (from: string, to: string) => `${from} から ${to} への変更`,
+      symmetric: (from: string, to: string) => `${from} と ${to}（分かれたところから）`,
+    },
+
+    history: {
+      title: "レビュー履歴",
+      empty: "このリポジトリではまだレビューしていません。",
+      emptyWhere: (dir: string) => `結果は ${dir} に積まれます。`,
+      unreadable: "読めません",
+      findings: (n: number) => `指摘 ${n} 件`,
+      failed: (n: number) => `${n} 件失敗`,
+      cancelled: "中止",
+      open: "開く",
+      viewing: "履歴を表示しています。",
+    },
+
+    markdown: {
+      title: "AI レビュー結果",
+      savedAt: "実行日時",
+      model: "モデル",
+      target: "対象",
+      counts: "件数",
+      skills: "観点",
+      summary: "全体の要約",
+      fileCount: (n: number) => `ファイル ${n} 件`,
+      findingCount: (n: number) => `指摘 ${n} 件`,
+      failed: (n: number) => `${n} 件のファイルはレビューに失敗しました`,
+      cancelled: "途中で中止しました",
+      noFindings: "指摘はありませんでした。",
+      noResult: "応答がありませんでした。",
+      saveTitle: "Markdown で書き出し",
+    },
+  },
+
   commandLog: {
     title: "git コマンドログ",
     show: "コマンドログを表示",
