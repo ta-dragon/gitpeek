@@ -29,6 +29,7 @@ export function RepositoryList({
   onReorder,
   onFetch,
   onFetchAll,
+  onClone,
 }: {
   entries: RepositoryEntry[];
   selectedId: string | null;
@@ -44,6 +45,8 @@ export function RepositoryList({
   onFetch: (id: string) => void;
   /** 一括。**確認ダイアログは呼び出し側が出す**（docs/DESIGN.md §8.3）。 */
   onFetchAll: () => void;
+  /** URL から clone（T-19）。**空状態からも押せること**（`EmptyState`）。 */
+  onClone: () => void;
 }) {
   // 一括 fetch の相手はリモートを持つ登録だけ。**1 つも無ければボタンを押させない**
   // （押せるのに何も起きないボタンになる）。
@@ -100,6 +103,15 @@ export function RepositoryList({
         </button>
         <button type="button" className="button button--small" onClick={onScan} disabled={busy}>
           {ja.repositories.scanShort}
+        </button>
+        <button
+          type="button"
+          className="button button--small"
+          onClick={onClone}
+          disabled={busy}
+          title={ja.repositories.cloneHint}
+        >
+          {ja.repositories.cloneShort}
         </button>
         <button
           type="button"

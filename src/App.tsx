@@ -31,9 +31,11 @@ import { SplitPane } from "./components/common/SplitPane";
 import { RefTree } from "./components/sidebar/RefTree";
 import { RepositoryList, type SortMode } from "./components/sidebar/RepositoryList";
 import { Sidebar } from "./components/sidebar/Sidebar";
+import { CloneDialog } from "./components/setup/CloneDialog";
 import { EmptyState } from "./components/setup/EmptyState";
 import { GitSetupScreen } from "./components/setup/GitSetupScreen";
 import { useCommandLog } from "./hooks/useCommandLog";
+import { useClone } from "./hooks/useClone";
 import { useFetch } from "./hooks/useFetch";
 import { useWriteOps, type CheckoutSubject } from "./hooks/useWriteOps";
 import { checkoutChoices, checkoutCommit, type CheckoutChoice } from "./lib/writeOps";
@@ -159,6 +161,8 @@ export default function App() {
 
   // `fetch` は window の同名関数と紛れるので別の名前にする。
   const fetching = useFetch();
+  // clone（T-19）。**成功したら登録してそのまま開く**ので、報告はバナー 1 行で足りる。
+  const cloning = useClone(setMessage);
   /**
    * 選んだコミットを画面内へ寄せる。**連番を上げて「新しい依頼」だと分からせる。**
    * 同じ SHA をもう一度指しても動くようにするため。
@@ -332,6 +336,7 @@ export default function App() {
                     onReorder={(ids) => void repositories.reorder(ids)}
                     onFetch={fetchOne}
                     onFetchAll={() => askAll(fetchTargets)}
+                    onClone={cloning.show}
                   />
                 }
                 refs={
@@ -353,6 +358,7 @@ export default function App() {
                   busy={repos.busy}
                   onAdd={() => void handleAdd()}
                   onScan={() => void handleScan()}
+                  onClone={cloning.show}
                 />
               ) : (
                 <RepositoryPanel
@@ -404,6 +410,22 @@ export default function App() {
           progress={fetching.progress}
           onCancel={fetching.cancel}
           onClose={fetching.dismiss}
+        />
+      )}
+
+      {/* clone（T-19。docs/DESIGN.md §8.4）。**成功したら黙って閉じて開く。** */}
+      {cloning.open && (
+        <CloneDialog
+          defaultParent={settings.settings.workspaceRoot}
+          busy={cloning.busy}
+          cancelling={cloning.cancelling}
+          progress={cloning.progress}
+          outcome={cloning.outcome}
+          onPickParent={() => pickFolder(ja.clone.parentLabel)}
+          onStart={cloning.start}
+          onCancel={cloning.cancel}
+          onBack={cloning.back}
+          onClose={cloning.dismiss}
         />
       )}
 

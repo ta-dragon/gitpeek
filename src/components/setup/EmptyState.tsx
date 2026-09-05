@@ -3,16 +3,18 @@ import { ja } from "../../i18n/ja";
 /**
  * リポジトリが 1 つも無いときの画面（docs/DESIGN.md §13.2）。
  *
- * clone は T-19 まで無効。押せないボタンを消すのではなく、
- * 「あるが未実装」と分かる形で残す。
+ * **clone はここからも押せること**（T-19）。1 件も登録が無い状態が
+ * clone をいちばん使う場面なので、一覧のヘッダだけに置くと届かない。
  */
 export function EmptyState({
   onAdd,
   onScan,
+  onClone,
   busy,
 }: {
   onAdd: () => void;
   onScan: () => void;
+  onClone: () => void;
   busy: boolean;
 }) {
   return (
@@ -27,9 +29,14 @@ export function EmptyState({
           <button type="button" className="button" onClick={onScan} disabled={busy}>
             {ja.repositories.scan}
           </button>
-          <button type="button" className="button" disabled title={ja.emptyState.cloneDisabled}>
+          <button
+            type="button"
+            className="button"
+            onClick={onClone}
+            disabled={busy}
+            title={ja.repositories.cloneHint}
+          >
             {ja.repositories.clone}
-            <span className="badge badge--muted">{ja.common.notImplemented}</span>
           </button>
         </div>
       </div>

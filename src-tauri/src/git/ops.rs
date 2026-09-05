@@ -2,9 +2,9 @@
 //!
 //! **git に対して書き込むのは checkout / fetch / merge --ff-only / clone の 4 つだけ**
 //! （CLAUDE.md §1）。このモジュールに他の操作を足さないこと。
-//! v1 で入っているのは fetch と checkout / merge --ff-only で、clone は T-19 で足す。
+//! v1 で入っているのは fetch / checkout / merge --ff-only / clone の 4 つ。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -226,6 +226,15 @@ fn summarize(lines: &[String]) -> String {
 /// 認証まわりが分かりにくいのは、`exec.rs` が `GIT_TERMINAL_PROMPT=0` と
 /// `BatchMode=yes` を付けている（＝無言でハングしない代わりに、その場で落ちる）ため。
 fn explain(stderr: &str) -> String {
+    explain_transport(stderr, "fetch")
+}
+
+/// [`explain`] の本体。**clone と共用する**（相手は同じリモートで、出る stderr も同じ）。
+///
+/// `what` は画面に出す動詞（`fetch` / `clone`）。**言い換えの中身は共通でよいが、
+/// 「ターミナルで一度これを実行して」の例まで `fetch` 固定にすると、clone で
+/// 見当違いの指示になる**ので、そこだけ差し替える。
+fn explain_transport(stderr: &str, what: &str) -> String {
     const AUTH: &[&str] = &[
         "could not read Username",
         "could not read Password",
@@ -234,7 +243,9 @@ fn explain(stderr: &str) -> String {
     ];
 
     if AUTH.iter().any(|needle| stderr.contains(needle)) {
-        return "認証できませんでした。ターミナルで一度 `git fetch` を実行して資格情報を登録してください。".to_string();
+        return format!(
+            "認証できませんでした。ターミナルで一度 `git {what}` を実行して資格情報を登録してください。"
+        );
     }
     if stderr.contains("Permission denied (publickey)") {
         return "SSH の公開鍵で認証できませんでした。鍵が登録されているか確認してください（パスフレーズ付きの鍵は、先に ssh-agent へ登録しておく必要があります）。".to_string();
@@ -255,8 +266,8 @@ fn explain(stderr: &str) -> String {
         .map(str::trim)
         .find(|line| !line.is_empty() && !line.starts_with("remote:"));
     match first {
-        Some(line) => format!("fetch に失敗しました: {}", redact(line)),
-        None => "fetch に失敗しました。".to_string(),
+        Some(line) => format!("{what} に失敗しました: {}", redact(line)),
+        None => format!("{what} に失敗しました。"),
     }
 }
 
@@ -537,6 +548,269 @@ fn first_line(stderr: &str) -> Option<&str> {
         .lines()
         .map(str::trim)
         .find(|line| !line.is_empty() && !line.starts_with("hint:"))
+}
+
+// ---------------------------------------------------------------------------
+// clone（T-19。docs/DESIGN.md §8.4）
+// ---------------------------------------------------------------------------
+
+/// `clone` の固定引数（docs/DESIGN.md §8.4）。URL と保存先はこの後ろへ足す。
+///
+/// - **`--progress` は必須。** stderr が端末でないと git は進捗を出さないので、
+///   外すとバーが一度も動かない
+/// - **`--depth` / `--single-branch` を付けない**（CLAUDE.md §1）。履歴グラフを見るための
+///   アプリなので、浅いクローンは目的そのものを損なう
+/// - **`--recurse-submodules` を付けない**（CLAUDE.md §1）
+/// - **`--branch` を付けない。** 1 本だけ持ってきてもグラフが欠ける
+pub const CLONE_ARGS: &[&str] = &["clone", "--progress"];
+
+/// 残骸を消せるまで待つ回数と間隔（[`clean_up`]）。
+///
+/// 合計 2 秒。**中止直後は消せないことがある**ので、一度で諦めない。
+const CLEANUP_ATTEMPTS: u32 = 20;
+const CLEANUP_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// git へ渡す引数。**ここだけが clone の引数を組み立てる。**
+pub fn clone_args<'a>(url: &'a str, directory: &'a str) -> Vec<&'a str> {
+    let mut args = CLONE_ARGS.to_vec();
+    args.push(url);
+    args.push(directory);
+    args
+}
+
+/// フロントから届く clone の依頼。
+///
+/// **保存先は「親フォルダ」と「作るフォルダ名」に分けて受け取り、繋ぐのはこちら側**
+/// （区切り文字の扱いを 2 か所に持たない）。画面のプレビューは目安であり、
+/// 実際に作った場所は [`CloneOutcome::path`] が正。
+///
+/// **`rename_all` を落とすとフロントの JSON を食えない**（T-18 でここに嵌まった）。
+/// 変種を持たない構造体なので `rename_all` だけでよいが、
+/// enum に変えるときは `rename_all_fields` も要る。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloneRequest {
+    /// HTTPS / SSH / ローカルパス。**git へそのまま渡す**（アプリは解釈しない）。
+    pub url: String,
+    /// clone 先の**親**フォルダ。ここに `folder_name` を作る。
+    pub parent_directory: String,
+    /// 作るフォルダの名前。
+    pub folder_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CloneStatus {
+    Success,
+    Failed,
+    /// 利用者が止めた。**fetch と違い、途中まで取り込んだものは残さない**（下記）。
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloneOutcome {
+    pub status: CloneStatus,
+    /// 画面に出す 1 行。
+    pub message: String,
+    /// 進捗ではなかった stderr の行。**`redact.rs` を通してある**（CLAUDE.md §4）。
+    pub lines: Vec<String>,
+    pub duration_ms: u64,
+    /// 成功したときの clone 先（絶対パス）。**登録にはこれを使う。**
+    pub path: Option<String>,
+    /// 消さずに残した残骸の場所。消せた場合と、そもそも作っていない場合は `None`。
+    pub leftover: Option<String>,
+}
+
+/// 依頼の形を確かめて clone 先の絶対パスにする。**git を起動する前に通す。**
+///
+/// ファイルシステムは見ない（存在の確認は [`clone`] の中で行う）。
+pub fn clone_target(request: &CloneRequest) -> Result<PathBuf, String> {
+    if request.url.trim().is_empty() {
+        return Err("URL を入力してください。".to_string());
+    }
+
+    let parent = request.parent_directory.trim();
+    if parent.is_empty() {
+        return Err("保存先の親フォルダを選んでください。".to_string());
+    }
+    let parent = Path::new(parent);
+    // **`-C` を使わずに絶対パスで渡す**ので、ここで相対パスを弾いておく。
+    // 相対のまま通すと、アプリの作業ディレクトリという利用者の知らない場所に作られる。
+    if !parent.is_absolute() {
+        return Err("保存先はフルパスで指定してください。".to_string());
+    }
+
+    let name = request.folder_name.trim();
+    if name.is_empty() {
+        return Err("作成するフォルダの名前を入力してください。".to_string());
+    }
+    // **区切り文字を弾くのが要。** 通すと親フォルダの外へ出られてしまい、
+    // 「自分が作ったフォルダだけ消す」という後始末の前提が崩れる。
+    if name == "." || name == ".." || name.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|'])
+    {
+        return Err(format!("フォルダ名に使えない文字が含まれています: {name}"));
+    }
+
+    Ok(parent.join(name))
+}
+
+/// clone する。**新しいフォルダを作る操作なので、`-C` は使わない**（まだ無い）。
+///
+/// 中止は `cancel` を立てる。**fetch と違い、中止したら残骸を消す。** clone は
+/// 「途中まで取り込まれた」に意味が無く（中途半端なリポジトリは開けない）、
+/// 残しても利用者が手で消すことになるため。
+///
+/// **消してよいのは自分が作ったフォルダだけ。** 実行前に存在しなかったことを
+/// 確かめられたときにしか消さない。確かめられなければ消さずに場所を返す。
+pub fn clone(
+    log: &dyn LogSink,
+    program: &str,
+    request: &CloneRequest,
+    cancel: &Cancel,
+    on_progress: &mut dyn FnMut(FetchProgress),
+) -> Result<CloneOutcome, String> {
+    let directory = match clone_target(request) {
+        Ok(directory) => directory,
+        Err(message) => return Ok(refused_clone(message)),
+    };
+
+    // 既にあるフォルダには clone しない。git も拒むが、**その前にこちらの言葉で言う**
+    // （git の英語 stderr より読みやすい）。
+    //
+    // 同時に、後始末で消してよいかもここで決まる。存在を確かめられなかった場合
+    // （権限など）は「無かった」と言い切れないので、消さない側に倒す。
+    let removable = match std::fs::symlink_metadata(&directory) {
+        Ok(_) => {
+            return Ok(refused_clone(format!(
+                "そのフォルダは既にあります: {}。別の名前にするか、既にあるほうを「追加」で登録してください。",
+                directory.display()
+            )))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+        Err(_) => false,
+    };
+
+    let mut splitter = LineSplitter::new();
+    let mut lines: Vec<String> = Vec::new();
+
+    // fetch と同じ振り分け。**本文が上限に達しても進捗は流し続ける。**
+    let mut take = |line: String| {
+        if lines.len() >= MAX_LINES {
+            if let Some(progress) = parse(&line) {
+                on_progress(progress);
+            }
+            return;
+        }
+        match classify(&line) {
+            Line::Progress(progress) => on_progress(progress),
+            Line::Body(body) => lines.push(body),
+        }
+    };
+
+    let url = request.url.trim();
+    let target = directory.display().to_string();
+    let args = clone_args(url, &target);
+
+    let started = std::time::Instant::now();
+    let output = exec::run_progress(log, program, None, &args, cancel, &mut |chunk| {
+        for line in splitter.push(chunk) {
+            take(line);
+        }
+    })?;
+    if let Some(line) = splitter.flush() {
+        take(line);
+    }
+
+    let duration_ms = started.elapsed().as_millis() as u64;
+    lines.retain(|line| !line.is_empty());
+
+    // **中止の判定を成否より先に見る。** 中止すると git は非ゼロで落ちるので、
+    // 順番を逆にすると利用者自身の操作を「失敗しました」と報告することになる。
+    if cancel.is_cancelled() {
+        let leftover = clean_up(&directory, removable);
+        return Ok(CloneOutcome {
+            status: CloneStatus::Cancelled,
+            message: match leftover.as_deref() {
+                None => {
+                    "clone を中止しました。途中まで取り込んだフォルダは削除しました。".to_string()
+                }
+                Some(path) => format!(
+                    "clone を中止しました。途中まで取り込んだフォルダが残っています: {path}"
+                ),
+            },
+            lines,
+            duration_ms,
+            path: None,
+            leftover,
+        });
+    }
+
+    if output.ok() {
+        return Ok(CloneOutcome {
+            status: CloneStatus::Success,
+            message: format!("{target} に clone しました。"),
+            lines,
+            duration_ms,
+            path: Some(target),
+            leftover: None,
+        });
+    }
+
+    let leftover = clean_up(&directory, removable);
+    let reason = explain_transport(&output.stderr, "clone");
+    Ok(CloneOutcome {
+        status: CloneStatus::Failed,
+        message: match leftover.as_deref() {
+            None => reason,
+            Some(path) => {
+                format!("{reason} 途中まで取り込んだフォルダが残っています: {path}")
+            }
+        },
+        lines,
+        duration_ms,
+        path: None,
+        leftover,
+    })
+}
+
+/// 走らせずに返す結果。**git は 1 度も起動していない。**
+fn refused_clone(message: String) -> CloneOutcome {
+    CloneOutcome {
+        status: CloneStatus::Failed,
+        message,
+        lines: Vec::new(),
+        duration_ms: 0,
+        path: None,
+        leftover: None,
+    }
+}
+
+/// 残骸の後始末。返すのは「残ってしまった場所」（消せた／作っていないなら `None`）。
+///
+/// **`removable` が false なら触らない。** 実行前に「無かった」と確かめられなかった
+/// フォルダなので、利用者の既存フォルダかもしれない。
+///
+/// 一度で諦めないのは、**中止直後は消せないことがある**ため。`exec::run_progress` が
+/// 落とせるのは git 本体だけで、`git-remote-https` のような子は少し遅れて終わる。
+/// その間 pack の一時ファイルを掴んでおり、Windows は掴まれたファイルを消せない。
+fn clean_up(directory: &Path, removable: bool) -> Option<String> {
+    if !directory.exists() {
+        return None;
+    }
+    if !removable {
+        return Some(directory.display().to_string());
+    }
+
+    for attempt in 0..CLEANUP_ATTEMPTS {
+        if std::fs::remove_dir_all(directory).is_ok() || !directory.exists() {
+            return None;
+        }
+        if attempt + 1 < CLEANUP_ATTEMPTS {
+            std::thread::sleep(CLEANUP_WAIT);
+        }
+    }
+    Some(directory.display().to_string())
 }
 
 #[cfg(test)]
@@ -900,4 +1174,122 @@ mod tests {
             ]
         );
     }
+
+    // --- clone（T-19）-----------------------------------------------------
+
+    use super::{clone_args, clone_target, CloneRequest, CLONE_ARGS};
+
+    fn request(url: &str, parent: &str, name: &str) -> CloneRequest {
+        CloneRequest {
+            url: url.to_string(),
+            parent_directory: parent.to_string(),
+            folder_name: name.to_string(),
+        }
+    }
+
+    /// **CLAUDE.md §1 の禁止事項が引数に紛れ込んでいないこと。**
+    ///
+    /// `--depth` を足すと履歴が欠け、このアプリの目的そのものが成立しない。
+    #[test]
+    fn clone_args_stay_within_what_we_allow() {
+        assert_eq!(CLONE_ARGS, &["clone", "--progress"]);
+
+        let args = clone_args("https://example.com/o/r.git", "C:\\ws\\r");
+        assert_eq!(
+            args,
+            ["clone", "--progress", "https://example.com/o/r.git", "C:\\ws\\r"],
+        );
+        for banned in [
+            "--depth",
+            "--shallow-since",
+            "--single-branch",
+            "--recurse-submodules",
+            "--branch",
+            "-b",
+            "--bare",
+            "--mirror",
+        ] {
+            assert!(!args.contains(&banned), "{banned} を付けてはいけない: {args:?}");
+        }
+    }
+
+    /// **URL と保存先は引数の最後**（オプションとして解釈されない位置）。
+    #[test]
+    fn the_url_and_the_target_come_last() {
+        let args = clone_args("git@host:o/r.git", "D:\\ws\\r");
+        assert_eq!(args[args.len() - 2], "git@host:o/r.git");
+        assert_eq!(args[args.len() - 1], "D:\\ws\\r");
+    }
+
+    #[test]
+    fn a_well_formed_request_becomes_an_absolute_path() {
+        let target = clone_target(&request("https://example.com/o/r.git", "C:\\ws", "r"))
+            .expect("受け付けること");
+        assert_eq!(target, std::path::Path::new("C:\\ws").join("r"));
+    }
+
+    /// 空欄は git へ渡さず、その場で言う。
+    #[test]
+    fn an_empty_field_is_refused_before_git_runs() {
+        assert!(clone_target(&request("  ", "C:\\ws", "r")).is_err());
+        assert!(clone_target(&request("https://example.com/o/r.git", " ", "r")).is_err());
+        assert!(clone_target(&request("https://example.com/o/r.git", "C:\\ws", " ")).is_err());
+    }
+
+    /// **相対パスを弾く。** `-C` を使わずに絶対パスで渡す設計なので、
+    /// 相対のまま通すとアプリの作業ディレクトリという知らない場所に作られる。
+    #[test]
+    fn a_relative_parent_is_refused() {
+        let error = clone_target(&request("https://example.com/o/r.git", "ws", "r"))
+            .expect_err("相対パスは受け付けない");
+        assert!(error.contains("フルパス"), "{error}");
+    }
+
+    /// **フォルダ名に区切り文字を通さない。** 通すと親フォルダの外へ出られてしまい、
+    /// 「自分が作ったフォルダだけ消す」という後始末の前提が崩れる。
+    #[test]
+    fn a_folder_name_can_not_escape_its_parent() {
+        for name in ["..", ".", "a/b", "a\\b", "C:", "a*b", "a?b", "a|b"] {
+            assert!(
+                clone_target(&request("https://example.com/o/r.git", "C:\\ws", name)).is_err(),
+                "{name} を通してはいけない",
+            );
+        }
+    }
+
+    /// **フロントが送る JSON をそのまま食えること**（T-18 の申し送り）。
+    ///
+    /// 引数の組み立てだけを固定しても、受け取りの形が違えばコマンドは 1 度も走らない。
+    #[test]
+    fn the_clone_wire_format_matches_what_the_front_end_sends() {
+        let parsed: CloneRequest = serde_json::from_str(
+            r#"{"url":"https://example.com/o/r.git","parentDirectory":"C:\\ws","folderName":"r"}"#,
+        )
+        .expect("フロントの JSON を食えること");
+
+        assert_eq!(parsed, request("https://example.com/o/r.git", "C:\\ws", "r"));
+    }
+
+    /// 失敗の言い換えは fetch と共用するが、**動詞は差し替わる**こと。
+    /// 「ターミナルで一度 `git fetch` を」と出しても、clone では何もできない。
+    #[test]
+    fn the_clone_headline_talks_about_clone() {
+        let auth = super::explain_transport("fatal: Authentication failed for 'https://x/'", "clone");
+        assert!(auth.contains("git clone"), "{auth}");
+        assert!(!auth.contains("git fetch"), "{auth}");
+
+        let other = super::explain_transport("fatal: repository 'https://x/' not found", "clone");
+        assert!(other.contains("clone に失敗しました"), "{other}");
+    }
+
+    /// 画面へ出す 1 行も伏せる。**URL 欄に資格情報を貼られる**ことがある。
+    #[test]
+    fn the_clone_headline_is_redacted_too() {
+        let message = super::explain_transport(
+            "fatal: repository 'https://u:tok3nvalue@example.com/x.git/' not found",
+            "clone",
+        );
+        assert!(!message.contains("tok3nvalue"), "{message}");
+    }
+
 }

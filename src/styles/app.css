@@ -146,11 +146,6 @@ body {
   white-space: nowrap;
 }
 
-.badge--muted {
-  margin-left: 6px;
-  color: var(--text-faint);
-}
-
 .badge--warning {
   border-color: var(--danger);
   color: var(--danger);
@@ -756,6 +751,44 @@ body {
   border-radius: 6px;
   color: var(--danger);
   background: var(--bg-inset);
+}
+
+/* 中身が縦に伸びるダイアログの本体（clone の入力。T-19）。
+   箱の高さは 80vh 止まりなので、溢れるのはここで受ける。
+   **`flex: 1 1 0` にしないこと** — 箱の高さは中身で決まるので、基準 0 では
+   配る余白が無く 0px に潰れる（`.fetchResults` と同じ理由）。 */
+.modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* clone の入力欄（T-19）。**ラベルと欄を縦に積む** — 横に並べると、
+   長いパスの欄が狭くなって全体が読めない。 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field__label {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* 欄と「参照…」を横に並べる。**欄が伸びる**（ボタンは中身の幅のまま）。 */
+.field__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field__row .input {
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .modal__actions {

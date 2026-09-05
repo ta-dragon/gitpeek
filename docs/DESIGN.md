@@ -1063,6 +1063,52 @@ detached / 判定できない）は確認画面に出す。無効なメニュー
 - `--progress` の stderr をパースして実バー表示
 - 失敗時は確認ダイアログの上で残骸ディレクトリを削除
 
+**保存先は「親フォルダ」と「フォルダ名」に分けて受け渡す**（T-19）。区切り文字を繋ぐのは
+Rust 側 1 か所だけにしてある。画面が出すパスはプレビューであり、**実際に作られた場所の正は
+`CloneOutcome.path`**。登録（`add_repository`）にはそちらを使う。
+
+**フォルダ名を決められないときは空にして、利用者に入力させる**（`src/lib/clonePath.ts`）。
+`https://github.com` のようにリポジトリを指していない入力から適当な名前を作ると、
+気付かないまま見当違いの場所へ数百 MB が落ちる。なお **SCP 形式（`git@host:owner/repo.git`）は
+URL としてパースできない**ので、`new URL()` に通す実装にしてはいけない（`:` が区切りになる）。
+
+**既にあるフォルダには clone しない。** git も拒むが、**その前に自分で見て自分の言葉で言う**
+（`fatal: destination path 'x' already exists and is not an empty directory.` より読みやすい）。
+実行前に見ることには、もう 1 つの役目がある — 下記の後始末の前提になる。
+
+#### 中止したら残骸を消す（fetch と扱いが違う）
+
+fetch は「中止しても、そこまでに取り込まれた ref は戻らない」と伝えて残す（§8.3）。
+clone は逆に**消す**。途中まで取り込まれたフォルダは開けるリポジトリになっておらず、
+残しても利用者が手で消すだけだからである。失敗時も同じ。
+
+**消してよいのは自分が作ったフォルダだけ。** 実行の直前に `symlink_metadata` で
+「無かった」ことを確かめられたときにしか消さない。確かめられなかった場合（権限など）は
+**消さずに場所を伝える**。利用者の既存フォルダを消す事故を、条件分岐ではなく
+「消してよいと分かっているときだけ消す」という構造で潰してある。
+
+#### Job Object は入れない（T-19 で決着）
+
+`exec::run_progress` が落とせるのは**起動した git 本体だけ**で、`git-remote-https` のような
+子プロセスは残りうる（§8.3 の割り切り）。clone は fetch より長く走るので T-19 で決着を
+付けることにしていた。**入れない**を選んだ。理由は 2 つ。
+
+1. **プロセスツリーごと落とすには Windows の Job Object が要り、`windows` crate への直接依存が
+   増える。** 得られるのは「子も即座に落ちる」ことだけで、**利用者から見える違いは
+   残骸フォルダを消せるかどうかに集約される**
+2. その残骸は**再試行で消せる**。中止直後に消せないのは、子がまだ pack の一時ファイルを
+   掴んでいる短い間だけで（Windows は掴まれたファイルを消せない）、親が死ねば子も追って
+   終わる。`clean_up` は 100ms × 20 回（最大 2 秒）まで `remove_dir_all` を試す
+
+2 秒待っても消せなければ、**消せなかったことと場所を結果に出す**。黙って残さない。
+
+#### 秘匿情報
+
+**URL 欄には `https://<user>:<token>@…` が貼られうる。** 引数はそのまま `git clone` へ渡るので、
+**コマンドログが平文の入口になる**。`commandlog.rs` の `redacted()` が `args` を通しているため
+ログ側は塞がっているが、結果の `message` / `lines` も `redact.rs` を通すこと（CLAUDE.md §4）。
+`tests/clone.rs` の `credentials_in_the_url_are_masked_everywhere` が両方を固定している。
+
 ### 8.5 書き込み後の再読込
 
 書き込み操作の実行後は**全コミットメタ情報を再取得してレーン再計算**する。
@@ -1671,14 +1717,15 @@ gitviewer/
 │   │   │                              useWorkingTree (T-16)
 │   │   ├── review/               AI レビュードロワー (T-23)
 │   │   ├── commandlog/           (済) git コマンドログパネル ＋ capacity（純関数）
-│   │   ├── setup/                (済) 空状態と git 未検出画面
+│   │   ├── setup/                (済) 空状態と git 未検出画面 ＋ CloneDialog (T-19)
 │   │   └── common/               (済) SplitPane / ContextMenu / CommandPalette /
 │   │                                  NoticeBar / LoadProgress / ErrorBoundary /
 │   │                                  ProgressDialog（fetch の確認と結果 — T-17）/
 │   │                                  ConfirmDialog / WriteOpsDialog (T-18)
 │   ├── hooks/                    (済) useTheme / useCommandLog /
 │   │                                  useCommitNavigation / useFileNavigation（§6.5）/
-│   │                                  useFetch (T-17) / useWriteOps (T-18)
+│   │                                  useFetch (T-17) / useWriteOps (T-18) /
+│   │                                  useClone (T-19)
 │   ├── lib/
 │   │   ├── graphPath.ts          (済) レーン配列 -> SVG パス（純関数・テスト対象）
 │   │   ├── relativeTime.ts       (済) 相対日時（純関数・テスト対象）
@@ -1691,6 +1738,7 @@ gitviewer/
 │   │   ├── workingTree.ts        (済) 作業ツリーの一覧整形（純関数・テスト対象 — T-16）
 │   │   ├── fetchState.ts         (済) 一括 fetch の進行と要約（純関数・テスト対象 — T-17）
 │   │   ├── writeOps.ts           (済) checkout の選択肢と FF 可否（純関数・テスト対象 — T-18）
+│   │   ├── clonePath.ts          (済) URL -> 既定のフォルダ名（純関数・テスト対象 — T-19）
 │   │   └── ipc.ts                (済) Tauri invoke ラッパ
 │   ├── store/                    (済) settings / uiState / repositories / snapshot
 │   └── styles/                   (済) theme.css（トークン）/ app.css / graph.css
@@ -1706,7 +1754,8 @@ gitviewer/
     │   ├── diff.rs               (済) コミット本文と変更ファイル一覧 (T-11)
     │   ├── status.rs             (済) 作業ツリーの状態 (T-16)
     │   ├── fetch.rs              (済) 生成した bare からの fetch (T-17)
-    │   └── writeops.rs           (済) 実物の git への checkout / merge (T-18)
+    │   ├── writeops.rs           (済) 実物の git への checkout / merge (T-18)
+    │   └── clone.rs              (済) 生成した bare からの clone (T-19)
     └── src/
         ├── main.rs               (済)
         ├── lib.rs                (済) Tauri コマンドの登録と AppState
@@ -1723,8 +1772,8 @@ gitviewer/
         │   ├── diff.rs           (済) コミット本文 / 変更ファイル一覧 (T-11)
         │   │                          ＋ unified diff の取得とパース (T-13)
         │   ├── fetchprogress.rs  (済) 進捗行のパース（純関数・テスト必須 — T-17）
-        │   └── ops.rs            (済) fetch (T-17) / checkout / merge --ff-only (T-18)。
-        │                              clone (T-19) もここへ足す
+        │   └── ops.rs            (済) fetch (T-17) / checkout / merge --ff-only (T-18) /
+        │                              clone (T-19)
         ├── graph/
         │   ├── mod.rs            (済) レーン確定の入口。可視 ref の絞り込みもここ
         │   ├── lane.rs           (済) レーン割り当て（最重要・テスト必須）
@@ -1778,7 +1827,7 @@ gitviewer/
 | checkout（それ以外）| `git -C <path> checkout --detach <完全な ref 名 または SHA>` |
 | checkout（追跡ブランチ作成）| `git -C <path> checkout -b <名前> --track <完全な ref 名>`（**確認画面で選ばれたときだけ** — §8.1） |
 | FF マージ | `git -C <path> merge --ff-only <ref>` |
-| clone | `git clone --progress <url> <dir>` |
+| clone | `git clone --progress <url> <dir>`（**`-C` を使わない** — まだ無いフォルダを作る操作なので、保存先は絶対パスで渡す。§8.4）|
 
 ahead/behind は git を呼ばずメモリ上のグラフから計算する（§4.5）。
 **追跡ファイルの内容は `git show <rev>:<path>` では読まない。** 差分は `git diff` の出力から

@@ -14,7 +14,6 @@ export const ja = {
     detail: "詳細",
     close: "閉じる",
     cancel: "キャンセル",
-    notImplemented: "未実装",
   },
 
   repositories: {
@@ -40,6 +39,8 @@ export const ja = {
     fetchHint: "リモートから取ってきます（取ってくるだけで、作業ツリーには触りません）。",
     fetchAll: "全て fetch",
     fetchAllHint: "登録済みのリポジトリを 1 つずつ順に fetch します。",
+    cloneShort: "clone",
+    cloneHint: "リモートの URL から新しく取り込みます（履歴は全部持ってきます）。",
     // 素性の表示。ahead/behind は T-17 で中身が入る。
     bare: "bare",
     shallow: "shallow",
@@ -116,8 +117,58 @@ export const ja = {
 
   emptyState: {
     title: "リポジトリを追加してください",
-    body: "ローカルの git リポジトリを登録すると、履歴の閲覧を始められます。",
-    cloneDisabled: "clone は未実装です（T-19 で実装）。",
+    body: "ローカルの git リポジトリを登録するか、URL から clone すると始められます。",
+  },
+
+  /**
+   * clone（T-19。docs/DESIGN.md §8.4）。
+   *
+   * **何が起きるかで書く。** 「clone」は git の用語だが、ここでは
+   * 「どこに何ができるのか」を毎回 1 行で見せることで補う（`preview`）。
+   */
+  clone: {
+    title: "URL から clone",
+    lead: "リモートの URL を入力すると、指定した場所にフォルダを作って取り込みます。",
+
+    urlLabel: "URL",
+    urlPlaceholder: "https://github.com/owner/repo.git  または  git@github.com:owner/repo.git",
+    parentLabel: "保存先の親フォルダ",
+    parentPlaceholder: "取り込み先のフォルダをフルパスで",
+    folderLabel: "作るフォルダの名前",
+    folderPlaceholder: "URL から決められないときは入力してください",
+    browse: "参照…",
+
+    // **どこに何ができるのかを 1 行で見せる。** 2 つの欄をどう繋ぐかは
+    // 利用者が気にすることではない。
+    preview: (path: string) => `${path} を新しく作って、そこへ取り込みます。`,
+    previewEmpty: "URL と保存先を入力すると、作られる場所がここに出ます。",
+
+    noWorkspaceRoot:
+      "既定の保存先が設定されていません（settings.json の workspaceRoot）。設定すると次回から埋まります。",
+    authNote:
+      "資格情報が必要なリモートでは、認証ウィンドウが前面に出ることがあります。Givsoner はパスワードもトークンも受け取らず、git に任せます。",
+    // 提供しないものを先に言う（CLAUDE.md §1）。
+    fullHistoryNote:
+      "履歴は全部取り込みます（浅い clone・ブランチの指定・サブモジュールの取り込みは行いません）。",
+
+    run: "clone する",
+    dismiss: "やめる",
+
+    running: "clone しています",
+    runningInto: (path: string) => `${path} に取り込んでいます。`,
+    connecting: "リモートに接続しています…",
+    cancel: "中止",
+    cancelling: "中止しています…",
+    // **中止したら残骸は消す**（fetch と扱いが違う）。
+    cancelNote: "中止すると、途中まで取り込んだフォルダは削除されます。",
+
+    close: "閉じる",
+    // **いちばんありそうな続きは「名前を変えてもう一度」。** 入力欄はそのまま残る。
+    back: "入力に戻る",
+    details: "詳細",
+    // 消せなかったときだけ出す。**黙って残さない。**
+    leftover: (path: string) =>
+      `途中まで取り込んだフォルダを削除できませんでした: ${path}（手で削除してください）`,
   },
 
   crash: {

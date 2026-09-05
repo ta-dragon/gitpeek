@@ -80,6 +80,11 @@ pub struct AppState {
     /// 「いま走っている 1 件」だけ。次のリポジトリへ進まないようにするのは
     /// フロント側の責務（docs/DESIGN.md §8.3）。
     pub fetch_cancel: Mutex<Option<git::exec::Cancel>>,
+    /// 実行中の clone を止めるための合図。実行していなければ `None`。
+    ///
+    /// **fetch と別に持つ。** 同じ枠を使い回すと、clone の最中に fetch を始めた
+    /// 瞬間に clone 側の合図が捨てられ、中止ボタンが効かなくなる。
+    pub clone_cancel: Mutex<Option<git::exec::Cancel>>,
 }
 
 /// git を検出する。`path` が指定されていればそのフルパスを、無ければ PATH 上の `git` を試す。
@@ -762,6 +767,85 @@ async fn cancel_fetch(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// clone の途中経過をフロントへ送るイベント名。
+///
+/// **fetch と分ける。** 同じ名前にすると、fetch の進行ダイアログと clone の
+/// 進行ダイアログのどちらが動いているのか区別できなくなる。
+const CLONE_PROGRESS_EVENT: &str = "clone-progress";
+
+/// clone の途中経過。**リポジトリ ID はまだ無い**（登録は成功したあと）ので添えない。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CloneProgressEvent {
+    #[serde(flatten)]
+    progress: git::fetchprogress::FetchProgress,
+    elapsed_ms: u64,
+}
+
+/// URL からリポジトリを clone する（docs/DESIGN.md §8.4）。
+///
+/// **登録はしない。** 成功したパスを返すだけで、`add_repository` はフロントが呼ぶ
+/// （登録して選ぶまでの流れが `store/repositories.ts` に 1 本で置いてあるため）。
+#[tauri::command]
+async fn clone_repository(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: git::ops::CloneRequest,
+) -> Result<git::ops::CloneOutcome, String> {
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    // 中止の合図を先に置く。**実行が終わったら必ず外す**（次の clone が
+    // 前回の「中止済み」を引き継いで即座に止まらないように）。
+    let cancel = git::exec::Cancel::new();
+    if let Ok(mut slot) = state.clone_cancel.lock() {
+        *slot = Some(cancel.clone());
+    }
+
+    let started = std::time::Instant::now();
+    let running = cancel.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        git::ops::clone(
+            &EmittingLog::new(&handle, &log),
+            &program,
+            &request,
+            &running,
+            &mut |progress| {
+                let _ = handle.emit(
+                    CLONE_PROGRESS_EVENT,
+                    CloneProgressEvent {
+                        progress,
+                        elapsed_ms: started.elapsed().as_millis() as u64,
+                    },
+                );
+            },
+        )
+    })
+    .await
+    .map_err(|error| error.to_string());
+
+    if let Ok(mut slot) = state.clone_cancel.lock() {
+        *slot = None;
+    }
+
+    outcome?
+}
+
+/// 実行中の clone を止める。走っていなければ何もしない。
+///
+/// **止めたら残骸を消す**（`git::ops::clone` の中で行う）。fetch と扱いが違うのは、
+/// 途中まで取り込まれたリポジトリには意味が無いため。
+#[tauri::command]
+async fn cancel_clone(state: State<'_, AppState>) -> Result<(), String> {
+    if let Ok(slot) = state.clone_cancel.lock() {
+        if let Some(cancel) = slot.as_ref() {
+            cancel.cancel();
+        }
+    }
+    Ok(())
+}
+
 /// 差分の出どころ。フロントの `DiffScope` と同じ形（`kind` で分かれる）。
 ///
 /// **真偽値を並べるのではなく種類で分ける。** `parent` / `sha` / `symmetric` /
@@ -932,6 +1016,7 @@ pub fn run() {
                 store,
                 snapshots: Arc::new(SnapshotCache::new()),
                 fetch_cancel: Mutex::new(None),
+                clone_cancel: Mutex::new(None),
             });
             Ok(())
         })
@@ -954,6 +1039,8 @@ pub fn run() {
             load_working_file,
             fetch_repository,
             cancel_fetch,
+            clone_repository,
+            cancel_clone,
             preflight_write,
             checkout,
             merge_ff,

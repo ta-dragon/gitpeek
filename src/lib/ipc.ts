@@ -257,6 +257,65 @@ export function cancelFetch(): Promise<void> {
   return invoke<void>("cancel_fetch");
 }
 
+/* ---------- clone（T-19。`src-tauri/src/git/ops.rs`）---------- */
+
+/**
+ * clone の依頼。**Rust 側の `git::ops::CloneRequest` と同じ形。**
+ *
+ * 保存先を「親フォルダ」と「フォルダ名」に分けて渡し、繋ぐのは Rust 側。
+ * 区切り文字の扱いを 2 か所に持たないため。**画面に出すパスはプレビューであり、
+ * 実際に作られた場所は `CloneOutcome.path` が正。**
+ */
+export type CloneRequest = {
+  /** HTTPS / SSH / ローカルパス。**git へそのまま渡る**（アプリは解釈しない）。 */
+  url: string;
+  /** clone 先の親フォルダ。**フルパスで渡すこと**（相対は Rust 側が弾く）。 */
+  parentDirectory: string;
+  /** そこへ作るフォルダの名前。 */
+  folderName: string;
+};
+
+/** `cancelled` は利用者が止めた場合。**残骸は消してある。** */
+export type CloneStatus = "success" | "failed" | "cancelled";
+
+export type CloneOutcome = {
+  status: CloneStatus;
+  /** 画面に出す 1 行。 */
+  message: string;
+  /** 進捗ではなかった stderr の行。**Rust 側で秘匿情報を伏せてある。** */
+  lines: string[];
+  durationMs: number;
+  /** 成功したときの clone 先（絶対パス）。**登録にはこれを使う。** */
+  path: string | null;
+  /** 消さずに残した残骸の場所。消せていれば null。 */
+  leftover: string | null;
+};
+
+/** `clone-progress` イベントの中身。**fetch とはイベント名を分けてある。** */
+export type CloneProgress = {
+  /** git が出した見出しそのまま。**翻訳されていることがある。** */
+  label: string;
+  done: number;
+  /** 分母が分からない段階は null（バーは不定表示になる）。 */
+  total: number | null;
+  elapsedMs: number;
+};
+
+/**
+ * URL から clone する（`clone --progress <url> <dir>`）。
+ *
+ * **登録はしない。** 成功したパスが返るので、登録と選択は呼び出し側が行う。
+ * **失敗・中止のときは Rust 側が残骸を消す**（自分が作ったフォルダだけ）。
+ */
+export function cloneRepository(request: CloneRequest): Promise<CloneOutcome> {
+  return invoke<CloneOutcome>("clone_repository", { request });
+}
+
+/** 実行中の clone を止める。走っていなければ何もしない。 */
+export function cancelClone(): Promise<void> {
+  return invoke<void>("cancel_clone");
+}
+
 
 /* ---------- checkout と FF マージ（T-18。`src-tauri/src/git/ops.rs`）---------- */
 
@@ -847,6 +906,14 @@ export function onFetchProgress(
   handler: (progress: FetchProgress) => void,
 ): Promise<UnlistenFn> {
   return listen<FetchProgress>(FETCH_PROGRESS_EVENT, (event) => handler(event.payload));
+}
+
+const CLONE_PROGRESS_EVENT = "clone-progress";
+
+export function onCloneProgress(
+  handler: (progress: CloneProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<CloneProgress>(CLONE_PROGRESS_EVENT, (event) => handler(event.payload));
 }
 
 const COMMAND_LOG_EVENT = "command-log";
