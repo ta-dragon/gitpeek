@@ -1790,7 +1790,8 @@ gitviewer/
 │   │   ├── workingTree.ts        (済) 作業ツリーの一覧整形（純関数・テスト対象 — T-16）
 │   │   ├── fetchState.ts         (済) 一括 fetch の進行と要約（純関数・テスト対象 — T-17）
 │   │   ├── writeOps.ts           (済) checkout の選択肢と FF 可否（純関数・テスト対象 — T-18）
-│   │   ├── clonePath.ts          (済) URL -> 既定のフォルダ名（純関数・テスト対象 — T-19）
+│   │   ├── clonePath.ts          (済) URL -> 既定のフォルダ名 ＋ 既定の保存先の状態
+│   │   │                              （純関数・テスト対象 — T-19）
 │   │   └── ipc.ts                (済) Tauri invoke ラッパ
 │   ├── store/                    (済) settings / uiState / repositories / snapshot
 │   └── styles/                   (済) theme.css（トークン）/ app.css / graph.css
