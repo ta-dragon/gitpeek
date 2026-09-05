@@ -21,7 +21,9 @@ use tauri::AppHandle;
 use uuid::Uuid;
 
 use paths::StorePaths;
-use settings::{LlmProfile, LoadError, RepositorySettings, Settings, SettingsRecovery};
+use settings::{
+    LlmProfile, LoadError, RepoSkillTrust, RepositorySettings, Settings, SettingsRecovery,
+};
 use state::{DebouncedWriter, UiState};
 
 /// フロントへ返す設定。退避が起きた場合はその記録を添える。
@@ -260,6 +262,31 @@ impl Store {
 
         settings::save(&ready.paths, settings)?;
         Ok(Some(removed))
+    }
+
+    /// リポジトリ内 skill の信頼状態を書き換える。
+    ///
+    /// **信頼するときは、そのときのファイル一覧とハッシュをまるごと置き換える。**
+    /// 足し込みにすると、消えたファイルの記録が残って「増えた」の判定が狂う。
+    pub fn set_repo_skill_trust(&self, id: &str, trust: RepoSkillTrust) -> Result<(), String> {
+        let ready = self.ready()?;
+        let mut slot = ready.settings.lock().expect("settings poisoned");
+        let settings = slot.loaded.as_mut().map_err(|error| error.clone())?;
+
+        let Some(repository) = settings
+            .repositories
+            .iter_mut()
+            .find(|repository| repository.id == id)
+        else {
+            return Err(format!("登録されていないリポジトリです: {id}"));
+        };
+        repository.repo_skills = trust;
+        settings::save(&ready.paths, settings)
+    }
+
+    /// データディレクトリのレイアウト。グローバル skill の置き場所を引くのに使う。
+    pub fn paths(&self) -> Result<&StorePaths, String> {
+        Ok(&self.ready()?.paths)
     }
 
     pub fn ui_state(&self) -> Result<UiState, String> {

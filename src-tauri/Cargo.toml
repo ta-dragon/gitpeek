@@ -35,6 +35,9 @@ encoding_rs = "0.8"
 keyring = "4"
 # LLM への HTTP。**ブロッキング**であることが要件（このコードベースは spawn_blocking で揃えてある）。
 ureq = "3"
+# skill の `globs` 照合（T-21）。自前で書くと `**` と `*` の境目で必ず間違える。
+# 増える木は `bstr` 1 つだけ（残りは `regex` 経由で既にある）。
+globset = "0.4"
 
 [dev-dependencies]
 tempfile = "3"

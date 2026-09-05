@@ -19,13 +19,16 @@ import {
   isLlmError,
   listLlmModels,
   llmCredentialKeys,
+  loadSkills,
   saveLlmProfile,
   testLlmConnection,
   type LlmError,
   type LlmProfile,
   type LlmTestOutcome,
+  type SkillCatalog,
 } from "../../lib/ipc";
 import { formatRawBody, headlineLines, SHORT_BODY_LINES } from "../../lib/llmMessage";
+import { RepoSkills } from "./RepoSkills";
 import {
   apiKeyUpdate,
   clearOption,
@@ -46,18 +49,29 @@ import {
 /** 編集中の対象。`null` は一覧を見ているだけ、`profile === null` は新規。 */
 type Editing = { profile: LlmProfile | null };
 
+/** 設定モーダルのタブ。**T-25 でこのまま設定画面へ移す。** */
+type Tab = "llm" | "skills";
+
 export function LlmProfilesDialog({
   profiles,
+  repositoryId,
+  globalSkillDir,
   onClose,
   onChanged,
 }: {
   profiles: LlmProfile[];
+  /** 開いているリポジトリ。リポジトリ内 skill を見るのに要る。 */
+  repositoryId: string | null;
+  /** グローバル skill の置き場所（`%APPDATA%\...\skills`）。文言に出す。 */
+  globalSkillDir: string;
   onClose: () => void;
   /** 保存・削除のあとに設定を読み直させる。 */
   onChanged: () => Promise<void>;
 }) {
+  const [tab, setTab] = useState<Tab>("llm");
   const [editing, setEditing] = useState<Editing | null>(null);
   const [credentialKeys, setCredentialKeys] = useState<string[]>([]);
+  const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
   const refreshKeys = async () => {
@@ -74,6 +88,18 @@ export function LlmProfilesDialog({
     void refreshKeys();
   }, []);
 
+  // skill はリポジトリごとに変わるので、開いているリポジトリが変わったら読み直す。
+  useEffect(() => {
+    void (async () => {
+      try {
+        setCatalog(await loadSkills(repositoryId));
+      } catch (error) {
+        setCatalog(null);
+        setFailure(messageOf(error));
+      }
+    })();
+  }, [repositoryId]);
+
   useEscape(onClose);
 
   const afterChange = async () => {
@@ -86,25 +112,53 @@ export function LlmProfilesDialog({
       <div className="modal__box modal__box--wide">
         <h2 className="modal__title">{ja.llm.title}</h2>
 
+        {/* **タブは押せないときも消さない。** 何がここにあるのか読めなくなる。 */}
+        <div className="tabs">
+          <button
+            type="button"
+            className={`tabs__tab${tab === "llm" ? " tabs__tab--active" : ""}`}
+            onClick={() => setTab("llm")}
+          >
+            {ja.llm.title}
+          </button>
+          <button
+            type="button"
+            className={`tabs__tab${tab === "skills" ? " tabs__tab--active" : ""}`}
+            onClick={() => setTab("skills")}
+          >
+            {ja.skills.tab}
+          </button>
+        </div>
+
         <div className="modal__body">
-          <p className="modal__lead">{ja.llm.lead}</p>
           {failure !== null && <p className="modal__blocker">{failure}</p>}
 
-          {editing === null ? (
-            <ProfileList
-              profiles={profiles}
-              credentialKeys={credentialKeys}
-              onEdit={(profile) => setEditing({ profile })}
-              onRemove={async (profile) => {
-                try {
-                  await deleteLlmProfile(profile.id);
-                  setFailure(null);
-                  await afterChange();
-                } catch (error) {
-                  setFailure(messageOf(error));
-                }
-              }}
+          {tab === "skills" ? (
+            <RepoSkills
+              catalog={catalog}
+              repositoryId={repositoryId}
+              globalDir={globalSkillDir}
+              onChanged={setCatalog}
+              onFailed={setFailure}
             />
+          ) : editing === null ? (
+            <>
+              <p className="modal__lead">{ja.llm.lead}</p>
+              <ProfileList
+                profiles={profiles}
+                credentialKeys={credentialKeys}
+                onEdit={(profile) => setEditing({ profile })}
+                onRemove={async (profile) => {
+                  try {
+                    await deleteLlmProfile(profile.id);
+                    setFailure(null);
+                    await afterChange();
+                  } catch (error) {
+                    setFailure(messageOf(error));
+                  }
+                }}
+              />
+            </>
           ) : (
             <ProfileEditor
               existing={editing.profile}
@@ -125,7 +179,7 @@ export function LlmProfilesDialog({
         </div>
 
         <div className="modal__actions">
-          {editing === null && (
+          {tab === "llm" && editing === null && (
             <button
               type="button"
               className="button"

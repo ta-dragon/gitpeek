@@ -1166,7 +1166,9 @@ pub fn run() {
             delete_llm_profile,
             llm_credential_keys,
             list_llm_models,
-            test_llm_connection
+            test_llm_connection,
+            load_skills,
+            set_repo_skill_trust
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -1179,6 +1181,64 @@ pub fn run() {
             }
         }
     });
+}
+
+/// レビュー skill を読む。`repository_id` が `None` ならリポジトリ内は見ない。
+///
+/// **リポジトリ内 skill は信頼されているときだけ本文が付く**（`llm/skill.rs`）。
+/// ここは読んで返すだけで、信頼の判定を書き足さないこと（CLAUDE.md §4）。
+#[tauri::command]
+async fn load_skills(
+    state: State<'_, AppState>,
+    repository_id: Option<String>,
+) -> Result<llm::skill::SkillCatalog, String> {
+    let global = state.store.paths()?.skills_dir();
+    let repository = match &repository_id {
+        Some(id) => {
+            let settings = state.store.repository(id)?;
+            Some((PathBuf::from(settings.path), settings.repo_skills))
+        }
+        None => None,
+    };
+
+    tauri::async_runtime::spawn_blocking(move || match repository {
+        Some((path, trust)) => llm::skill::load(&global, Some(&path), &trust),
+        None => llm::skill::load(&global, None, &Default::default()),
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
+/// リポジトリ内 skill を信頼する / 信頼を取り消す。
+///
+/// **信頼するときは、そのときのファイルのハッシュをまるごと記録する。**
+/// 次に開いたとき、内容が変わったか**ファイルが増えた**かをこれで見る。
+#[tauri::command]
+async fn set_repo_skill_trust(
+    state: State<'_, AppState>,
+    repository_id: String,
+    trusted: bool,
+) -> Result<llm::skill::SkillCatalog, String> {
+    let settings = state.store.repository(&repository_id)?;
+    let path = PathBuf::from(settings.path);
+
+    let trust = if trusted {
+        let hashes =
+            tauri::async_runtime::spawn_blocking(move || llm::skill::current_hashes(&path))
+                .await
+                .map_err(|error| error.to_string())?;
+        store::settings::RepoSkillTrust {
+            trusted: true,
+            hashes,
+        }
+    } else {
+        // 取り消すときは記録も捨てる。残すと、次に信頼したとき古い記録と混ざる。
+        store::settings::RepoSkillTrust::default()
+    };
+    state.store.set_repo_skill_trust(&repository_id, trust)?;
+
+    // 書き換えた状態で読み直して返す。フロントで組み直させない。
+    load_skills(state, Some(repository_id)).await
 }
 
 #[cfg(test)]

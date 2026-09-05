@@ -982,6 +982,76 @@ export function testLlmConnection(id: string): Promise<LlmTestOutcome> {
   return invoke<LlmTestOutcome>("test_llm_connection", { id });
 }
 
+/* ---------- レビュー skill（`src-tauri/src/llm/skill.rs`）---------- */
+
+/** skill の出どころ。**画面に必ず出す** — どれが効いているのか読めなくなるため。 */
+export type SkillOrigin = "builtIn" | "global" | "repository";
+
+/**
+ * skill が使える状態か。**使えない理由まで持つ**（消さずに理由を出すため）。
+ *
+ * - `untrusted` … リポジトリ内で、まだ信頼していない
+ * - `recheck`   … 信頼済みだが、内容が変わったか**ファイルが増えた**
+ */
+export type SkillState =
+  | { kind: "ready" }
+  | { kind: "untrusted" }
+  | { kind: "recheck" }
+  | { kind: "unreadable"; reason: string };
+
+/**
+ * 一覧の 1 件。
+ *
+ * **プロンプトへ渡す本文はここに来ない**（Rust 側の `usable_body` にしかない）。
+ * `preview` は**信頼の確認画面で読ませるためだけ**のもの。
+ */
+export type SkillEntry = {
+  name: string;
+  description: string;
+  globs: string[];
+  /** frontmatter の `enabled`。**「既定 ON か」であって「使えるか」ではない。** */
+  enabled: boolean;
+  origin: SkillOrigin;
+  /** ファイル名。内蔵は空。 */
+  file: string;
+  state: SkillState;
+  /** 同名で押しのけた側の出どころ。押しのけられていなければ null。 */
+  shadowedBy: SkillOrigin | null;
+  /** 確認画面で読ませる本文。 */
+  preview: string;
+};
+
+/** リポジトリ内 skill の信頼状態。 */
+export type RepoTrustStatus = {
+  /** リポジトリ内に skill が 1 つでもあるか。 */
+  present: boolean;
+  trusted: boolean;
+  /** 信頼済みだが確認し直しが要る。 */
+  needsRecheck: boolean;
+  /** 記録したときから内容が変わったファイル。 */
+  changed: string[];
+  /** 記録に無かったファイル。 */
+  added: string[];
+};
+
+export type SkillCatalog = { entries: SkillEntry[]; trust: RepoTrustStatus };
+
+/** skill を読む。`repositoryId` が null ならリポジトリ内は見ない。 */
+export function loadSkills(repositoryId: string | null): Promise<SkillCatalog> {
+  return invoke<SkillCatalog>("load_skills", { repositoryId });
+}
+
+/**
+ * リポジトリ内 skill を信頼する / 信頼を取り消す。
+ * **書き換えた状態で読み直したものが返る**（フロントで組み直さない）。
+ */
+export function setRepoSkillTrust(
+  repositoryId: string,
+  trusted: boolean,
+): Promise<SkillCatalog> {
+  return invoke<SkillCatalog>("set_repo_skill_trust", { repositoryId, trusted });
+}
+
 const SNAPSHOT_PROGRESS_EVENT = "snapshot-progress";
 
 export function onSnapshotProgress(

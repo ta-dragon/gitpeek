@@ -44,6 +44,7 @@ import { useTheme, type ThemePreference } from "./hooks/useTheme";
 import { ja } from "./i18n/ja";
 import { clearCompare, selectCommit, swapEnds } from "./lib/compareSelection";
 import {
+  appDataDir,
   detectGit,
   isGitUsable,
   loadCommitMessage,
@@ -103,6 +104,11 @@ export default function App() {
    * いまは入口をヘッダのボタン 1 つに留めておく。
    */
   const [llmOpen, setLlmOpen] = useState(false);
+  /**
+   * 設定と skill の置き場所（`%APPDATA%\com.tatsu.givsoner`）。
+   * skill をどこへ置けばよいのか、画面から読めるようにするため。
+   */
+  const [dataDir, setDataDir] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   /**
    * ブランチツリーから「先頭コミットへジャンプ」したときの要求。
@@ -135,6 +141,13 @@ export default function App() {
     } finally {
       setDetecting(false);
     }
+  }, []);
+
+  // 置き場所は起動中に変わらないので 1 度だけ読む。失敗しても画面は成立する。
+  useEffect(() => {
+    void appDataDir()
+      .then(setDataDir)
+      .catch(() => setDataDir(""));
   }, []);
 
   // StrictMode の二重実行で git を 2 回起動しないようにする。
@@ -429,6 +442,8 @@ export default function App() {
       {llmOpen && (
         <LlmProfilesDialog
           profiles={settings.settings.llmProfiles}
+          repositoryId={repos.selectedId}
+          globalSkillDir={dataDir === "" ? "skills" : `${dataDir}\\skills`}
           onChanged={refreshSettings}
           onClose={() => setLlmOpen(false)}
         />

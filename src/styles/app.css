@@ -995,6 +995,97 @@ body {
   line-height: 1.45;
 }
 
+/* ---------- 設定モーダルのタブ（T-21）---------- */
+
+.tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs__tab {
+  padding: 6px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font: inherit;
+}
+
+.tabs__tab:hover {
+  color: var(--text);
+}
+
+/* **選ばれているタブは色だけでなく線でも示す。** 色だけだと、
+   ダークとライトで見え方が変わりすぎる。 */
+.tabs__tab--active {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+/* ---------- レビュー観点の一覧（T-21）---------- */
+
+.skills {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 名前・出どころ・状態を 1 行目に並べ、説明と理由を下に積む。
+   **理由が必ず入る**ので、1 行に押し込まない。 */
+.skills__row {
+  display: grid;
+  grid-template-columns: max-content max-content max-content 1fr;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+/* 効いていないもの。**消さずに、効いていないと分かる見た目にする**（CLAUDE.md §6）。 */
+.skills__row--held .skills__name {
+  color: var(--text-dim);
+}
+
+.skills__name {
+  font-weight: 600;
+}
+
+.skills__description {
+  color: var(--text-dim);
+}
+
+/* いつ効くのか / 効かない理由 / 置き場所。**どれも行いっぱいに広げる。** */
+.skills__when,
+.skills__reason,
+.skills__where {
+  grid-column: 1 / -1;
+  color: var(--text-dim);
+}
+
+/* 効かない理由は補足と色を分ける。片付ければ使えるものと、ただの説明を混ぜない。 */
+.skills__reason {
+  color: var(--warning);
+}
+
+.skills__row .llmRaw {
+  grid-column: 1 / -1;
+}
+
+/* 信頼を取り消す前の確認。**戻せる操作なので `.modal__blocker` ほど強くしない。** */
+.skills__confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-inset);
+}
+
 /* 放置警告は**アイコンとツールチップだけ**（docs/DESIGN.md §8.3）。
    モーダルもバナーも出さない。 */
 .repo__stale {
