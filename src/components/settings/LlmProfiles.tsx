@@ -28,7 +28,8 @@ import {
   type SkillCatalog,
 } from "../../lib/ipc";
 import { formatRawBody, headlineLines, SHORT_BODY_LINES } from "../../lib/llmMessage";
-import { RepoSkills } from "./RepoSkills";
+import { skillsFrom } from "../../lib/skillTrust";
+import { SkillList } from "./SkillList";
 import {
   apiKeyUpdate,
   clearOption,
@@ -54,14 +55,11 @@ type Tab = "llm" | "skills";
 
 export function LlmProfilesDialog({
   profiles,
-  repositoryId,
   globalSkillDir,
   onClose,
   onChanged,
 }: {
   profiles: LlmProfile[];
-  /** 開いているリポジトリ。リポジトリ内 skill を見るのに要る。 */
-  repositoryId: string | null;
   /** グローバル skill の置き場所（`%APPDATA%\...\skills`）。文言に出す。 */
   globalSkillDir: string;
   onClose: () => void;
@@ -88,17 +86,18 @@ export function LlmProfilesDialog({
     void refreshKeys();
   }, []);
 
-  // skill はリポジトリごとに変わるので、開いているリポジトリが変わったら読み直す。
+  // **リポジトリを渡さない。** ここに出すのは内蔵とグローバルだけで、
+  // リポジトリの中の観点は「このリポジトリの設定」が受け持つ。
   useEffect(() => {
     void (async () => {
       try {
-        setCatalog(await loadSkills(repositoryId));
+        setCatalog(await loadSkills(null));
       } catch (error) {
         setCatalog(null);
         setFailure(messageOf(error));
       }
     })();
-  }, [repositoryId]);
+  }, []);
 
   useEscape(onClose);
 
@@ -134,13 +133,21 @@ export function LlmProfilesDialog({
           {failure !== null && <p className="modal__blocker">{failure}</p>}
 
           {tab === "skills" ? (
-            <RepoSkills
-              catalog={catalog}
-              repositoryId={repositoryId}
-              globalDir={globalSkillDir}
-              onChanged={setCatalog}
-              onFailed={setFailure}
-            />
+            <>
+              <p className="modal__lead">{ja.skills.globalLead(globalSkillDir)}</p>
+              {/* **リポジトリの中の観点はここに出さない。** どのリポジトリの話か
+                  読めなくなるので、リポジトリ一覧の右クリックから開く。 */}
+              <p className="modal__note">{ja.skills.repositoryElsewhere}</p>
+              {catalog !== null && (
+                <SkillList
+                  entries={skillsFrom(catalog.entries, ["builtIn", "global"])}
+                  repositoryId={null}
+                  emptyNote={ja.skills.empty}
+                  onChanged={setCatalog}
+                  onFailed={setFailure}
+                />
+              )}
+            </>
           ) : editing === null ? (
             <>
               <p className="modal__lead">{ja.llm.lead}</p>

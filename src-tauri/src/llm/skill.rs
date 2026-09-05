@@ -14,14 +14,24 @@
 //! - 画面で読ませるための本文は [`SkillEntry::preview`] に分けてある。
 //!   **こちらを LLM へ渡してはいけない**（名前でそう分かるようにしてある）
 //!
-//! # 再確認が要る条件
+//! # 信頼はファイル単位
 //!
-//! 信頼したあと、**内容が変わったときだけでなく、ファイルが増えたときも**再確認する。
-//! 無害な skill 1 つで信頼させておいて、あとから 2 つ目を置くのが一番素直な攻撃で、
-//! 内容の変化だけを見ていると素通りする。削除は危険が減る方向なので再確認しない。
+//! 「このリポジトリを信頼する」ではなく「**このスキルを使う**」で、ファイル 1 つずつ決める
+//! （2026-09-05 に利用者の判断で絞った。DESIGN.md §11.2.1）。おかげで、
+//! **「あとから増えたファイル」に特別扱いが要らない** — 記録が無いので未信頼のまま。
+//! 内容が変わったファイルは**そのファイルだけ**が未信頼へ戻る（`Recheck`）。
+//! 消えたファイルは記録から落ちるだけ。
 //!
-//! 再確認が要る状態では、**そのリポジトリの skill を全部止める。** どのファイルの
-//! どの変化が効くのかは中身を読まないと分からないので、選り分けない。
+//! **押した時点で読んでいた内容だけを信頼する。** 使うと決めるときは、画面が見せていた
+//! ハッシュを一緒に受け取り、実物と食い違ったら記録しない
+//! （表示してから押すまでの間に書き換えられる隙を残さない）。
+//!
+//! # 追加の指示
+//!
+//! skill ごとに、本文の後ろへ足す一言を設定に持てる（`settings.json`）。
+//! **skill ファイルは書き換えない**ので、他人のリポジトリの skill にも足せるし、
+//! 信頼のハッシュも壊れない。利用者が書いたものなので信頼判定の対象ではないが、
+//! **未信頼の skill には付かない**（本文ごと出てこないため）。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -30,7 +40,7 @@ use globset::{Glob, GlobSetBuilder};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::store::settings::RepoSkillTrust;
+use crate::store::settings::{RepoSkillTrust, SkillSettings};
 
 /// リポジトリ内 skill の置き場所。**直下だけを見る。**
 pub const REPO_SKILL_DIR: &str = ".gitviewer/skills";
@@ -63,9 +73,9 @@ pub enum SkillOrigin {
 pub enum SkillState {
     /// 使える。
     Ready,
-    /// リポジトリ内で、まだ信頼されていない。
+    /// リポジトリ内で、まだ「使う」と決めていない。**増えたファイルもここ。**
     Untrusted,
-    /// 信頼済みだが、内容が変わったか増えたので確認し直しが要る。
+    /// 一度は使うと決めたが、**そのファイルの内容が変わった**ので決め直しが要る。
     Recheck,
     /// 読めない。`reason` をそのまま画面へ出す。
     Unreadable { reason: String },
@@ -90,8 +100,17 @@ pub struct SkillEntry {
     pub state: SkillState,
     /// 同名の別の skill に隠されている場合、隠したほうの出どころ。
     pub shadowed_by: Option<SkillOrigin>,
-    /// **信頼の確認画面で読ませるための本文。LLM へ渡してはいけない。**
-    /// 読ませずに信頼させないために、未信頼でもここには入る。
+    /// いま使うことになっているか。**ファイルの `enabled` ＋ 利用者の指定 ＋ 信頼**の結果。
+    pub in_use: bool,
+    /// `in_use` を**利用者が明示的に決めたか**。`false` ならファイルの既定のまま。
+    pub decided_by_user: bool,
+    /// 本文の後ろへ足す一言（`settings.json`）。無ければ空。
+    pub extra: String,
+    /// いまのファイル内容のハッシュ。内蔵は空。
+    /// **「使う」と決めるときにこれを一緒に送る**（読んだ内容と食い違ったら記録しない）。
+    pub hash: String,
+    /// **信頼を決める前に読ませるための本文。LLM へ渡してはいけない。**
+    /// 読ませずに使わせないために、未信頼でもここには入る。
     pub preview: String,
     /// **プロンプトへ渡してよい本文。** 信頼していないものはここへ入らない。
     /// フロントへは送らない（画面は `preview` を使う）。
@@ -101,34 +120,45 @@ pub struct SkillEntry {
 
 impl SkillEntry {
     /// **プロンプトへ渡してよい本文。** T-22 はここからしか本文を取れない。
-    pub fn usable_body(&self) -> Option<&str> {
-        self.body.as_deref()
+    ///
+    /// 「追加の指示」は本文の後ろに付いた形で返る。利用者が書いたものなので信頼判定の
+    /// 対象ではないが、**未信頼の skill には付かない**（本文ごと `None` になるため）。
+    pub fn usable_body(&self) -> Option<String> {
+        let body = self.body.as_deref()?;
+        if self.extra.trim().is_empty() {
+            return Some(body.to_string());
+        }
+        Some(format!("{body}
+
+{}", self.extra.trim()))
     }
 
-    /// 一覧のうち**実際に使えるもの**だけ。
+    /// 一覧のうち**実際に使うもの**だけ。
     ///
-    /// 隠された（同名で負けた）ものと、信頼していないものは出てこない。
+    /// 隠された（同名で負けた）もの、信頼していないもの、使わないと決めたものは出てこない。
     pub fn active(entries: &[Self]) -> Vec<&Self> {
         entries
             .iter()
-            .filter(|entry| entry.shadowed_by.is_none() && entry.usable_body().is_some())
+            .filter(|entry| entry.shadowed_by.is_none() && entry.in_use && entry.body.is_some())
             .collect()
     }
 }
 
-/// リポジトリ内 skill の信頼状態。**画面はこれで文言と押せる操作を出し分ける。**
+/// リポジトリ内 skill の様子。**画面はこれで見出しを出す。**
+///
+/// 信頼はファイル単位なので、ここにあるのは**数え上げだけ**。
+/// 使う／使わないの判断は各 [`SkillEntry`] が持つ。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepoTrustStatus {
     /// リポジトリ内に skill が 1 つでもあるか。
     pub present: bool,
-    pub trusted: bool,
-    /// 信頼済みだが確認し直しが要る。
-    pub needs_recheck: bool,
-    /// 記録したときから**内容が変わった**ファイル。
+    /// 使うと決めてあるファイル数。
+    pub in_use: usize,
+    /// まだ決めていないファイル（**あとから増えたものもここ**）。
+    pub undecided: Vec<String>,
+    /// 一度は使うと決めたが、**内容が変わった**ファイル。
     pub changed: Vec<String>,
-    /// 記録に**無かった**ファイル。**これを見落とさないこと。**
-    pub added: Vec<String>,
 }
 
 /// 読み込み結果一式。
@@ -147,32 +177,50 @@ pub fn load(
     global_dir: &Path,
     repository: Option<&Path>,
     trust: &RepoSkillTrust,
+    settings: &SkillSettings,
 ) -> SkillCatalog {
     let mut entries = vec![built_in()];
-    entries.extend(read_dir(global_dir, SkillOrigin::Global, true));
+    entries.extend(read_dir(global_dir, SkillOrigin::Global));
 
-    let repo_files = repository.map(|root| read_dir(&repo_skill_dir(root), SkillOrigin::Repository, false));
-    let status = match &repo_files {
-        Some(files) => trust_status(&hashes_of(files), trust),
-        None => RepoTrustStatus::default(),
-    };
+    // 内蔵とグローバルは自分で置いたものなので、信頼は要らない。使うかどうかだけ。
+    for entry in &mut entries {
+        let decided = settings.use_skill.get(&entry.name).copied();
+        entry.decided_by_user = decided.is_some();
+        entry.in_use = decided.unwrap_or(entry.enabled);
+        entry.extra = settings.extra.get(&entry.name).cloned().unwrap_or_default();
+        entry.body = Some(entry.preview.clone());
+    }
 
-    if let Some(files) = repo_files {
-        // **既定は「本文を配らない」。** リポジトリ内は `read_dir` の時点で `body` が
-        // 入っておらず、ここで信頼を確かめたときだけ渡す。配るのを足し忘れれば
-        // 動かないだけで済むが、止めるのを足し忘れると漏れる。
-        let usable = status.trusted && !status.needs_recheck;
-        for mut entry in files {
+    let mut status = RepoTrustStatus::default();
+    if let Some(root) = repository {
+        for mut entry in read_dir(&repo_skill_dir(root), SkillOrigin::Repository) {
+            status.present = true;
+            entry.extra = trust.extra.get(&entry.file).cloned().unwrap_or_default();
+
             if matches!(entry.state, SkillState::Ready) {
-                if usable {
-                    entry.body = Some(entry.preview.clone());
-                } else {
-                    entry.state = if status.trusted {
-                        SkillState::Recheck
-                    } else {
-                        SkillState::Untrusted
-                    };
+                // **既定は「配らない」。** 記録と一致したときだけ本文を渡す。
+                // 配り忘れは動かないだけで済むが、止め忘れは漏れる。
+                match trust.hashes.get(&entry.file) {
+                    Some(recorded) if *recorded == entry.hash => {
+                        entry.in_use = true;
+                        entry.decided_by_user = true;
+                        entry.body = Some(entry.preview.clone());
+                        status.in_use += 1;
+                    }
+                    // 一度は使うと決めたが、内容が変わった。**そのファイルだけ**戻す。
+                    Some(_) => {
+                        entry.state = SkillState::Recheck;
+                        status.changed.push(entry.file.clone());
+                    }
+                    // 記録が無い。**増えたファイルもここへ来る**（特別扱いが要らない）。
+                    None => {
+                        entry.state = SkillState::Untrusted;
+                        status.undecided.push(entry.file.clone());
+                    }
                 }
+            } else {
+                // 読めないファイルも「決めていない」として数える。**見せずに済ませない。**
+                status.undecided.push(entry.file.clone());
             }
             entries.push(entry);
         }
@@ -194,64 +242,27 @@ pub fn repo_skill_dir(repository: &Path) -> PathBuf {
     dir
 }
 
-/// 信頼したときに記録する内容（ファイル名 → 内容の SHA-256）。
-pub fn current_hashes(repository: &Path) -> BTreeMap<String, String> {
-    hashes_of(&read_dir(
-        &repo_skill_dir(repository),
-        SkillOrigin::Repository,
-        false,
-    ))
+/// 1 ファイルのいまのハッシュ。「使う」と決めるときの照合に使う。
+///
+/// **画面が見せていたハッシュと突き合わせてから記録する。** 表示してから押すまでの間に
+/// 書き換えられると、読んでいない内容を信頼したことになる。
+pub fn file_hash(repository: &Path, file: &str) -> Option<String> {
+    // ディレクトリを一覧し直して、**直下の通常ファイルであること**をもう一度確かめる。
+    // パスを直接組み立てると `..` や symlink をここだけ素通しさせてしまう。
+    read_dir(&repo_skill_dir(repository), SkillOrigin::Repository)
+        .into_iter()
+        .find(|entry| entry.file == file)
+        .map(|entry| entry.hash)
 }
 
-/// 記録と実物を突き合わせる。
+/// `globs` が**この変更に当てはまるか**。
 ///
-/// **増えたファイルも再確認の理由にする。** 消えたファイルは危険が減る方向なので、
-/// 理由にしない（記録から落とすだけ）。
-pub fn trust_status(
-    current: &BTreeMap<String, String>,
-    trust: &RepoSkillTrust,
-) -> RepoTrustStatus {
-    let present = !current.is_empty();
-    if !trust.trusted {
-        return RepoTrustStatus {
-            present,
-            trusted: false,
-            needs_recheck: false,
-            changed: Vec::new(),
-            added: Vec::new(),
-        };
-    }
-
-    let mut changed = Vec::new();
-    let mut added = Vec::new();
-    for (file, hash) in current {
-        match trust.hashes.get(file) {
-            Some(recorded) if recorded == hash => {}
-            Some(_) => changed.push(file.clone()),
-            None => added.push(file.clone()),
-        }
-    }
-
-    RepoTrustStatus {
-        present,
-        trusted: true,
-        needs_recheck: !changed.is_empty() || !added.is_empty(),
-        changed,
-        added,
-    }
-}
-
-/// `globs` と `enabled` から**既定で ON か**を決める。
-///
-/// 「使えるか」とは別の話。使えない skill をここへ通してはいけない
-/// （呼び出し側が [`SkillEntry::active`] で絞ってから使う）。
+/// **使うかどうか（`in_use`）とは別の話。** 使うと決めた skill のうち、
+/// この変更に関係するものだけを T-22 が実際に渡す。
 ///
 /// パスは `/` 区切りへ均す。**Windows の `\` のまま当てると `**\/*.ts` が 1 件も当たらない。**
-pub fn default_on(entry: &SkillEntry, changed_paths: &[String]) -> bool {
-    if !entry.enabled {
-        return false;
-    }
-    // 観点を絞らない skill は常に既定 ON。
+pub fn matches_changes(entry: &SkillEntry, changed_paths: &[String]) -> bool {
+    // 観点を絞らない skill はどの変更にも当てはまる。
     if entry.globs.is_empty() {
         return true;
     }
@@ -278,14 +289,14 @@ pub fn default_on(entry: &SkillEntry, changed_paths: &[String]) -> bool {
 fn built_in() -> SkillEntry {
     // 同梱物なので読めないことはない。読めなければビルドの間違い。
     let parsed = parse(BUILT_IN).expect("内蔵 skill が読めない");
-    entry_from(parsed, SkillOrigin::BuiltIn, String::new(), true)
+    entry_from(parsed, SkillOrigin::BuiltIn, String::new(), String::new())
 }
 
 /// ディレクトリ直下の `*.md` を読む。
 ///
 /// **サブディレクトリと symlink を辿らない。** `.md` の名前で秘密鍵を指されると、
 /// その中身がプロンプトへ入る。
-fn read_dir(dir: &Path, origin: SkillOrigin, usable: bool) -> Vec<SkillEntry> {
+fn read_dir(dir: &Path, origin: SkillOrigin) -> Vec<SkillEntry> {
     let Ok(listing) = std::fs::read_dir(dir) else {
         // 無いのは異常ではない（skill を置いていないリポジトリのほうが多い）。
         return Vec::new();
@@ -315,6 +326,7 @@ fn read_dir(dir: &Path, origin: SkillOrigin, usable: bool) -> Vec<SkillEntry> {
                 &name,
                 origin,
                 format!("1 か所に置ける skill は {MAX_FILES} 個までです。"),
+                String::new(),
             ));
             continue;
         }
@@ -327,6 +339,7 @@ fn read_dir(dir: &Path, origin: SkillOrigin, usable: bool) -> Vec<SkillEntry> {
                     size / 1024,
                     MAX_FILE_BYTES / 1024
                 ),
+                String::new(),
             ));
             continue;
         }
@@ -335,23 +348,16 @@ fn read_dir(dir: &Path, origin: SkillOrigin, usable: bool) -> Vec<SkillEntry> {
                 &name,
                 origin,
                 "テキストとして読めません（UTF-8 で保存してください）。".to_string(),
+                String::new(),
             ));
             continue;
         };
         match parse_named(&text, &name) {
-            Ok(parsed) => entries.push(entry_from(parsed, origin, name, usable)),
-            Err(reason) => entries.push(unreadable(&name, origin, reason)),
+            Ok(parsed) => entries.push(entry_from(parsed, origin, name, sha256(&text))),
+            Err(reason) => entries.push(unreadable(&name, origin, reason, sha256(&text))),
         }
     }
     entries
-}
-
-fn hashes_of(entries: &[SkillEntry]) -> BTreeMap<String, String> {
-    // **読めなかったものも数える。** 読めないファイルを足して信頼を素通りさせない。
-    entries
-        .iter()
-        .map(|entry| (entry.file.clone(), sha256(&entry.preview)))
-        .collect()
 }
 
 /// 同名なら**リポジトリ内 → グローバル → 内蔵**の順に勝つ。
@@ -361,7 +367,9 @@ fn hashes_of(entries: &[SkillEntry]) -> BTreeMap<String, String> {
 fn mark_shadowed(entries: &mut [SkillEntry]) {
     let mut winners: BTreeMap<String, usize> = BTreeMap::new();
     for index in 0..entries.len() {
-        if entries[index].usable_body().is_none() {
+        // **勝てるのは実際に使うものだけ。** 使わないものが同名を押しのけると、
+        // 決めていないだけで何も使えなくなる。
+        if !entries[index].in_use || entries[index].body.is_none() {
             continue;
         }
         let name = entries[index].name.clone();
@@ -391,7 +399,8 @@ fn rank(origin: SkillOrigin) -> u8 {
     }
 }
 
-fn entry_from(parsed: Parsed, origin: SkillOrigin, file: String, usable: bool) -> SkillEntry {
+/// 読めた 1 件。**`body` はここでは入れない** — 使うと決まってから `load` が渡す。
+fn entry_from(parsed: Parsed, origin: SkillOrigin, file: String, hash: String) -> SkillEntry {
     SkillEntry {
         name: parsed.name,
         description: parsed.description,
@@ -401,12 +410,16 @@ fn entry_from(parsed: Parsed, origin: SkillOrigin, file: String, usable: bool) -
         file,
         state: SkillState::Ready,
         shadowed_by: None,
-        body: usable.then(|| parsed.body.clone()),
+        in_use: false,
+        decided_by_user: false,
+        extra: String::new(),
+        hash,
+        body: None,
         preview: parsed.body,
     }
 }
 
-fn unreadable(file: &str, origin: SkillOrigin, reason: String) -> SkillEntry {
+fn unreadable(file: &str, origin: SkillOrigin, reason: String, hash: String) -> SkillEntry {
     SkillEntry {
         name: file.to_string(),
         description: String::new(),
@@ -416,6 +429,10 @@ fn unreadable(file: &str, origin: SkillOrigin, reason: String) -> SkillEntry {
         file: file.to_string(),
         state: SkillState::Unreadable { reason },
         shadowed_by: None,
+        in_use: false,
+        decided_by_user: false,
+        extra: String::new(),
+        hash,
         body: None,
         preview: String::new(),
     }
@@ -573,8 +590,9 @@ fn default_name(file: &str) -> String {
 mod tests {
     use super::*;
 
+    /// 「使うと決めてある」1 件。
     fn ready(name: &str, origin: SkillOrigin, body: &str) -> SkillEntry {
-        entry_from(
+        let mut entry = entry_from(
             Parsed {
                 name: name.to_string(),
                 description: String::new(),
@@ -584,8 +602,11 @@ mod tests {
             },
             origin,
             format!("{name}.md"),
-            true,
-        )
+            sha256(body),
+        );
+        entry.in_use = true;
+        entry.body = Some(entry.preview.clone());
+        entry
     }
 
     #[test]
@@ -596,7 +617,9 @@ mod tests {
         assert_eq!(entry.state, SkillState::Ready);
         assert!(entry.enabled);
         assert!(entry.globs.is_empty(), "観点を絞らないので常に既定 ON");
-        assert!(entry.usable_body().is_some_and(|body| body.contains("日本語")));
+        // `load` を通す前は本文を配らない（配るのは信頼と選択を見てから）。
+        assert_eq!(entry.usable_body(), None);
+        assert!(entry.preview.contains("日本語"));
     }
 
     // ---- frontmatter --------------------------------------------------
@@ -719,10 +742,9 @@ mod tests {
             entries: vec![ready("review", SkillOrigin::BuiltIn, "本文")],
             trust: RepoTrustStatus {
                 present: true,
-                trusted: true,
-                needs_recheck: true,
+                in_use: 1,
+                undecided: vec!["b.md".to_string()],
                 changed: vec!["a.md".to_string()],
-                added: vec!["b.md".to_string()],
             },
         };
         let json = serde_json::to_value(&catalog).unwrap();
@@ -738,88 +760,70 @@ mod tests {
         // **プロンプトへ渡す本文を webview へ送らない。** 画面は `preview` を使う。
         assert!(entry.get("body").is_none(), "{entry}");
 
+        assert_eq!(entry["inUse"], true);
+        assert!(entry["decidedByUser"].is_boolean());
+        assert!(entry["extra"].is_string());
+        assert!(entry["hash"].is_string());
+
         let trust = &json["trust"];
-        assert_eq!(trust["needsRecheck"], true);
+        assert_eq!(trust["inUse"], 1);
         assert_eq!(trust["changed"][0], "a.md");
-        assert_eq!(trust["added"][0], "b.md");
+        assert_eq!(trust["undecided"][0], "b.md");
 
         // 読めないものは理由まで届くこと。
-        let broken = unreadable("x.md", SkillOrigin::Repository, "本文がありません".to_string());
+        let broken = unreadable(
+            "x.md",
+            SkillOrigin::Repository,
+            "本文がありません".to_string(),
+            String::new(),
+        );
         let json = serde_json::to_value(&broken).unwrap();
         assert_eq!(json["state"]["kind"], "unreadable");
         assert_eq!(json["state"]["reason"], "本文がありません");
     }
 
-    // ---- 信頼 ---------------------------------------------------------
+    // ---- 追加の指示 -----------------------------------------------------
 
-    fn recorded(pairs: &[(&str, &str)]) -> RepoSkillTrust {
-        RepoSkillTrust {
-            trusted: true,
-            hashes: pairs
-                .iter()
-                .map(|(file, hash)| ((*file).to_string(), (*hash).to_string()))
-                .collect(),
-        }
-    }
-
-    fn current(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
-        pairs
-            .iter()
-            .map(|(file, hash)| ((*file).to_string(), (*hash).to_string()))
-            .collect()
-    }
-
+    /// **追加の指示は本文の後ろへ付く。** skill ファイルは書き換えない。
     #[test]
-    fn an_untrusted_repository_never_needs_a_recheck() {
-        let status = trust_status(&current(&[("a.md", "h1")]), &RepoSkillTrust::default());
-        assert!(status.present);
-        assert!(!status.trusted);
-        assert!(!status.needs_recheck, "そもそも信頼していない");
-    }
+    fn the_extra_instruction_rides_along_with_the_body() {
+        let mut entry = ready("x", SkillOrigin::Global, "もとの観点");
+        assert_eq!(entry.usable_body().as_deref(), Some("もとの観点"));
 
-    #[test]
-    fn an_unchanged_repository_stays_trusted() {
-        let status = trust_status(&current(&[("a.md", "h1")]), &recorded(&[("a.md", "h1")]));
-        assert!(status.trusted);
-        assert!(!status.needs_recheck);
-    }
+        entry.extra = "  日本語で書いてください。  ".to_string();
+        assert_eq!(
+            entry.usable_body().as_deref(),
+            Some("もとの観点
 
-    #[test]
-    fn changing_a_file_asks_again() {
-        let status = trust_status(&current(&[("a.md", "h2")]), &recorded(&[("a.md", "h1")]));
-        assert!(status.needs_recheck);
-        assert_eq!(status.changed, vec!["a.md"]);
-        assert!(status.added.is_empty());
-    }
-
-    /// **これを見落とさないこと。** 無害な 1 つで信頼させてから足すのが一番素直な攻撃。
-    #[test]
-    fn adding_a_file_asks_again() {
-        let status = trust_status(
-            &current(&[("a.md", "h1"), ("evil.md", "h9")]),
-            &recorded(&[("a.md", "h1")]),
+日本語で書いてください。"),
+            "前後の空白は落とす",
         );
-        assert!(status.needs_recheck);
-        assert_eq!(status.added, vec!["evil.md"]);
-        assert!(status.changed.is_empty());
+
+        // 空白だけなら何も付けない（空行が 2 つ増えるだけになる）。
+        entry.extra = "   
+ ".to_string();
+        assert_eq!(entry.usable_body().as_deref(), Some("もとの観点"));
     }
 
-    /// 消えるのは危険が減る方向なので、確認し直しは要らない。
+    /// **信頼していない skill には追加の指示も付かない。** 本文ごと出てこない。
     #[test]
-    fn removing_a_file_does_not_ask_again() {
-        let status = trust_status(
-            &current(&[("a.md", "h1")]),
-            &recorded(&[("a.md", "h1"), ("gone.md", "h2")]),
-        );
-        assert!(status.trusted);
-        assert!(!status.needs_recheck);
+    fn the_extra_instruction_does_not_leak_an_untrusted_skill() {
+        let mut entry = ready("x", SkillOrigin::Repository, "未信頼の本文");
+        entry.body = None;
+        entry.in_use = false;
+        entry.state = SkillState::Untrusted;
+        entry.extra = "追加の指示".to_string();
+
+        assert_eq!(entry.usable_body(), None);
+        assert!(SkillEntry::active(&[entry]).is_empty());
     }
 
+    /// 使わないと決めたものは `active` に出ない。**本文は持っていても出さない。**
     #[test]
-    fn a_repository_without_skills_is_not_present() {
-        let status = trust_status(&BTreeMap::new(), &RepoSkillTrust::default());
-        assert!(!status.present);
-        assert!(!status.needs_recheck);
+    fn a_skill_that_is_not_in_use_is_not_active() {
+        let mut entry = ready("x", SkillOrigin::Global, "本文");
+        entry.in_use = false;
+        assert!(SkillEntry::active(&[entry]).is_empty());
     }
 
     // ---- 同名の勝ち負け -------------------------------------------------
@@ -836,7 +840,7 @@ mod tests {
         assert_eq!(entries[1].shadowed_by, None);
         let active = SkillEntry::active(&entries);
         assert_eq!(active.len(), 1);
-        assert_eq!(active[0].usable_body(), Some("リポジトリ"));
+        assert_eq!(active[0].usable_body().as_deref(), Some("リポジトリ"));
     }
 
     /// **未信頼のリポジトリ内 skill が、同名のグローバルを押しのけてはいけない。**
@@ -845,6 +849,7 @@ mod tests {
     fn an_untrusted_repository_skill_shadows_nothing() {
         let mut untrusted = ready("review", SkillOrigin::Repository, "リポジトリ");
         untrusted.body = None;
+        untrusted.in_use = false;
         untrusted.state = SkillState::Untrusted;
 
         let mut entries = vec![ready("review", SkillOrigin::Global, "グローバル"), untrusted];
@@ -853,20 +858,20 @@ mod tests {
         assert_eq!(entries[0].shadowed_by, None);
         let active = SkillEntry::active(&entries);
         assert_eq!(active.len(), 1);
-        assert_eq!(active[0].usable_body(), Some("グローバル"));
+        assert_eq!(active[0].usable_body().as_deref(), Some("グローバル"));
     }
 
     // ---- globs ---------------------------------------------------------
 
     #[test]
-    fn globs_decide_the_default() {
+    fn globs_narrow_by_changed_path() {
         let mut entry = ready("x", SkillOrigin::Global, "本文");
         entry.globs = vec!["**/*.ts".to_string()];
 
-        assert!(default_on(&entry, &["src/app.ts".to_string()]));
-        assert!(!default_on(&entry, &["src/app.rs".to_string()]));
+        assert!(matches_changes(&entry, &["src/app.ts".to_string()]));
+        assert!(!matches_changes(&entry, &["src/app.rs".to_string()]));
         // 1 つでも当たれば ON。
-        assert!(default_on(
+        assert!(matches_changes(
             &entry,
             &["a.rs".to_string(), "b/c/d.ts".to_string()]
         ));
@@ -877,21 +882,24 @@ mod tests {
     fn globs_match_windows_separators_too() {
         let mut entry = ready("x", SkillOrigin::Global, "本文");
         entry.globs = vec!["**/*.rs".to_string()];
-        assert!(default_on(&entry, &["src-tauri\\src\\llm\\skill.rs".to_string()]));
+        assert!(matches_changes(&entry, &["src-tauri\\src\\llm\\skill.rs".to_string()]));
     }
 
     #[test]
-    fn a_skill_without_globs_is_on_by_default() {
+    fn a_skill_without_globs_matches_anything() {
         let entry = ready("x", SkillOrigin::Global, "本文");
-        assert!(default_on(&entry, &[]));
-        assert!(default_on(&entry, &["anything".to_string()]));
+        assert!(matches_changes(&entry, &[]));
+        assert!(matches_changes(&entry, &["anything".to_string()]));
     }
 
-    /// `enabled: false` は「既定 OFF」。手動で ON にする道は塞がない。
+    /// **`globs` は「使うか」とは別。** `enabled: false` の skill でも、
+    /// 利用者が使うと決めたなら当たり判定は当たる（使うかどうかは `in_use` が決める）。
     #[test]
-    fn enabled_false_is_off_by_default() {
+    fn globs_do_not_care_whether_the_skill_is_in_use() {
         let mut entry = ready("x", SkillOrigin::Global, "本文");
         entry.enabled = false;
-        assert!(!default_on(&entry, &["a.ts".to_string()]));
+        entry.globs = vec!["**/*.ts".to_string()];
+        assert!(matches_changes(&entry, &["a.ts".to_string()]));
+        assert!(!matches_changes(&entry, &["a.rs".to_string()]));
     }
 }

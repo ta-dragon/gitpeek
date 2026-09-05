@@ -1168,7 +1168,8 @@ pub fn run() {
             list_llm_models,
             test_llm_connection,
             load_skills,
-            set_repo_skill_trust
+            set_skill_use,
+            set_skill_extra
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -1185,15 +1186,26 @@ pub fn run() {
 
 /// レビュー skill を読む。`repository_id` が `None` ならリポジトリ内は見ない。
 ///
-/// **リポジトリ内 skill は信頼されているときだけ本文が付く**（`llm/skill.rs`）。
+/// **リポジトリ内 skill は「使う」と決めたファイルだけ本文が付く**（`llm/skill.rs`）。
 /// ここは読んで返すだけで、信頼の判定を書き足さないこと（CLAUDE.md §4）。
 #[tauri::command]
 async fn load_skills(
     state: State<'_, AppState>,
     repository_id: Option<String>,
 ) -> Result<llm::skill::SkillCatalog, String> {
+    read_skills(&state, repository_id.as_deref()).await
+}
+
+/// 読み込みの実体。書き換えたあとも必ずここを通して返す（フロントで組み直させない）。
+async fn read_skills(
+    state: &State<'_, AppState>,
+    repository_id: Option<&str>,
+) -> Result<llm::skill::SkillCatalog, String> {
+    let payload = state.store.settings()?;
     let global = state.store.paths()?.skills_dir();
-    let repository = match &repository_id {
+    let skills = payload.settings.skills.clone();
+
+    let repository = match repository_id {
         Some(id) => {
             let settings = state.store.repository(id)?;
             Some((PathBuf::from(settings.path), settings.repo_skills))
@@ -1202,48 +1214,106 @@ async fn load_skills(
     };
 
     tauri::async_runtime::spawn_blocking(move || match repository {
-        Some((path, trust)) => llm::skill::load(&global, Some(&path), &trust),
-        None => llm::skill::load(&global, None, &Default::default()),
+        Some((path, trust)) => llm::skill::load(&global, Some(&path), &trust, &skills),
+        None => llm::skill::load(&global, None, &Default::default(), &skills),
     })
     .await
     .map_err(|error| error.to_string())
 }
 
-/// リポジトリ内 skill を信頼する / 信頼を取り消す。
+/// どの skill を指しているか。
 ///
-/// **信頼するときは、そのときのファイルのハッシュをまるごと記録する。**
-/// 次に開いたとき、内容が変わったか**ファイルが増えた**かをこれで見る。
+/// **内蔵とグローバルは名前で、リポジトリ内はファイル名で指す。**
+/// リポジトリ内は「どのファイルの内容を信頼したか」が要点なので、
+/// frontmatter の `name` を書き換えても記録が付いて回らないようにファイル名を鍵にする。
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "scope", rename_all = "camelCase", rename_all_fields = "camelCase")]
+enum SkillTarget {
+    /// 内蔵とグローバル。
+    Global { name: String },
+    /// リポジトリ内。
+    Repository { repository_id: String, file: String },
+}
+
+/// skill を使う / 使わないを決める。
+///
+/// **リポジトリ内 skill では「使う」＝ その内容を信頼すること。** `seen_hash` は
+/// 画面が見せていた内容のハッシュで、実物と食い違ったら記録しない
+/// （表示してから押すまでの間に書き換えられる隙を残さない）。
 #[tauri::command]
-async fn set_repo_skill_trust(
+async fn set_skill_use(
     state: State<'_, AppState>,
-    repository_id: String,
-    trusted: bool,
+    target: SkillTarget,
+    use_skill: bool,
+    seen_hash: Option<String>,
 ) -> Result<llm::skill::SkillCatalog, String> {
-    let settings = state.store.repository(&repository_id)?;
-    let path = PathBuf::from(settings.path);
-
-    let trust = if trusted {
-        let hashes =
-            tauri::async_runtime::spawn_blocking(move || llm::skill::current_hashes(&path))
-                .await
-                .map_err(|error| error.to_string())?;
-        store::settings::RepoSkillTrust {
-            trusted: true,
-            hashes,
+    match &target {
+        SkillTarget::Global { name } => {
+            state.store.set_skill_use(name, use_skill)?;
+            read_skills(&state, None).await
         }
-    } else {
-        // 取り消すときは記録も捨てる。残すと、次に信頼したとき古い記録と混ざる。
-        store::settings::RepoSkillTrust::default()
-    };
-    state.store.set_repo_skill_trust(&repository_id, trust)?;
+        SkillTarget::Repository {
+            repository_id,
+            file,
+        } => {
+            let hash = if use_skill {
+                let root = PathBuf::from(state.store.repository(repository_id)?.path);
+                let file = file.clone();
+                let current =
+                    tauri::async_runtime::spawn_blocking(move || llm::skill::file_hash(&root, &file))
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .ok_or("ファイルが見つかりません。一覧を開き直してください。")?;
+                // **読んでいない内容を信頼しない。**
+                if seen_hash.as_deref() != Some(current.as_str()) {
+                    return Err(
+                        "表示していた内容とファイルが違います。中身を読み直してから決めてください。"
+                            .to_string(),
+                    );
+                }
+                Some(current)
+            } else {
+                None
+            };
 
-    // 書き換えた状態で読み直して返す。フロントで組み直させない。
-    load_skills(state, Some(repository_id)).await
+            state
+                .store
+                .set_repo_skill_use(repository_id, file, hash)?;
+            read_skills(&state, Some(repository_id)).await
+        }
+    }
+}
+
+/// skill の本文の後ろへ足す一言を保存する。
+///
+/// **skill ファイルは書き換えない。** 他人のリポジトリの skill にも足せるし、
+/// 信頼のハッシュも壊れない。
+#[tauri::command]
+async fn set_skill_extra(
+    state: State<'_, AppState>,
+    target: SkillTarget,
+    extra: String,
+) -> Result<llm::skill::SkillCatalog, String> {
+    match &target {
+        SkillTarget::Global { name } => {
+            state.store.set_skill_extra(name, &extra)?;
+            read_skills(&state, None).await
+        }
+        SkillTarget::Repository {
+            repository_id,
+            file,
+        } => {
+            state
+                .store
+                .set_repo_skill_extra(repository_id, file, &extra)?;
+            read_skills(&state, Some(repository_id)).await
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ApiKeyUpdate;
+    use super::{ApiKeyUpdate, SkillTarget};
     use crate::store::settings::LlmProfile;
 
     /// **フロントが送る JSON をそのまま食えること**（T-18 / T-19 の申し送り）。
@@ -1264,6 +1334,45 @@ mod tests {
         assert_eq!(parsed.base_url, "http://localhost:11434/v1");
         assert_eq!(parsed.context_window, 32_768);
         assert_eq!(parsed.max_tokens, 4_096);
+    }
+
+    /// **フロントが送る skill の宛先をそのまま食えること**（T-18 / T-19 の申し送り）。
+    ///
+    /// `rename_all` は変種の名前しか変えないので、フィールドは `rename_all_fields` が要る。
+    #[test]
+    fn the_skill_target_wire_format_matches_what_the_front_end_sends() {
+        let global = serde_json::from_str::<SkillTarget>(
+            r#"{"scope":"global","name":"general-review"}"#,
+        )
+        .expect("global を食えること");
+        match global {
+            SkillTarget::Global { name } => assert_eq!(name, "general-review"),
+            other => panic!("global として読めていない: {other:?}"),
+        }
+
+        let repository = serde_json::from_str::<SkillTarget>(
+            r#"{"scope":"repository","repositoryId":"r1","file":"repo-review.md"}"#,
+        )
+        .expect("repository を食えること");
+        match repository {
+            SkillTarget::Repository {
+                repository_id,
+                file,
+            } => {
+                assert_eq!(repository_id, "r1");
+                assert_eq!(file, "repo-review.md");
+            }
+            other => panic!("repository として読めていない: {other:?}"),
+        }
+
+        // **知らない scope を黙って握り潰さない。** グローバルの設定を書き換えるつもりが
+        // リポジトリのものを書き換える、といった取り違えを型で止める。
+        assert!(serde_json::from_str::<SkillTarget>(r#"{"scope":"whatever"}"#).is_err());
+        // スネークケースで送っても通してはいけない（通すと片方だけ直して気付けない）。
+        assert!(serde_json::from_str::<SkillTarget>(
+            r#"{"scope":"repository","repository_id":"r1","file":"a.md"}"#
+        )
+        .is_err());
     }
 
     /// API キーの扱いは 3 通りある。**`value` のキー名まで食えること。**

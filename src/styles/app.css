@@ -1072,6 +1072,42 @@ body {
 
 .skills__row .llmRaw {
   grid-column: 1 / -1;
+  /* 一覧の中に並ぶので、1 件ぶんは低めに抑える。 */
+  max-height: 22vh;
+}
+
+/* 決める前に読む本文。**未決・変更ありのときは開いた状態で出す**（`open` 属性）。 */
+.skills__body {
+  grid-column: 1 / -1;
+}
+
+.skills__body > summary {
+  cursor: pointer;
+  color: var(--text-dim);
+}
+
+.skills__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+}
+
+/* 「この観点に足す一言」。**skill ファイルは書き換えない**ので、
+   他人のリポジトリの観点にも足せる。 */
+.skills__extra {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.skills__extraInput {
+  width: 100%;
+  /* 2 行ぶんから、書いた量に応じて縦へ伸ばせる。横へは広げない
+     （親の幅を超えると一覧全体に横スクロールが生える）。 */
+  resize: vertical;
+  font: inherit;
 }
 
 /* 信頼を取り消す前の確認。**戻せる操作なので `.modal__blocker` ほど強くしない。** */

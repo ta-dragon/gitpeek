@@ -990,8 +990,8 @@ export type SkillOrigin = "builtIn" | "global" | "repository";
 /**
  * skill が使える状態か。**使えない理由まで持つ**（消さずに理由を出すため）。
  *
- * - `untrusted` … リポジトリ内で、まだ信頼していない
- * - `recheck`   … 信頼済みだが、内容が変わったか**ファイルが増えた**
+ * - `untrusted` … リポジトリ内で、まだ「使う」と決めていない（**増えたファイルもここ**）
+ * - `recheck`   … 一度は使うと決めたが、**そのファイルの内容が変わった**
  */
 export type SkillState =
   | { kind: "ready" }
@@ -1003,13 +1003,13 @@ export type SkillState =
  * 一覧の 1 件。
  *
  * **プロンプトへ渡す本文はここに来ない**（Rust 側の `usable_body` にしかない）。
- * `preview` は**信頼の確認画面で読ませるためだけ**のもの。
+ * `preview` は**決める前に読ませるためだけ**のもの。
  */
 export type SkillEntry = {
   name: string;
   description: string;
   globs: string[];
-  /** frontmatter の `enabled`。**「既定 ON か」であって「使えるか」ではない。** */
+  /** frontmatter の `enabled`。**ファイルの既定**であって、いまの値ではない。 */
   enabled: boolean;
   origin: SkillOrigin;
   /** ファイル名。内蔵は空。 */
@@ -1017,21 +1017,28 @@ export type SkillEntry = {
   state: SkillState;
   /** 同名で押しのけた側の出どころ。押しのけられていなければ null。 */
   shadowedBy: SkillOrigin | null;
-  /** 確認画面で読ませる本文。 */
+  /** いま使うことになっているか。 */
+  inUse: boolean;
+  /** `inUse` を利用者が明示的に決めたか。false ならファイルの既定のまま。 */
+  decidedByUser: boolean;
+  /** 本文の後ろへ足す一言。無ければ空。 */
+  extra: string;
+  /** いまのファイル内容のハッシュ。内蔵は空。**「使う」と決めるときに送り返す。** */
+  hash: string;
+  /** 決める前に読ませる本文。 */
   preview: string;
 };
 
-/** リポジトリ内 skill の信頼状態。 */
+/** リポジトリ内 skill の数え上げ。**判断は各 `SkillEntry` が持つ。** */
 export type RepoTrustStatus = {
   /** リポジトリ内に skill が 1 つでもあるか。 */
   present: boolean;
-  trusted: boolean;
-  /** 信頼済みだが確認し直しが要る。 */
-  needsRecheck: boolean;
-  /** 記録したときから内容が変わったファイル。 */
+  /** 使うと決めてあるファイル数。 */
+  inUse: number;
+  /** まだ決めていないファイル（**あとから増えたものもここ**）。 */
+  undecided: string[];
+  /** 一度は決めたが内容が変わったファイル。 */
   changed: string[];
-  /** 記録に無かったファイル。 */
-  added: string[];
 };
 
 export type SkillCatalog = { entries: SkillEntry[]; trust: RepoTrustStatus };
@@ -1042,14 +1049,36 @@ export function loadSkills(repositoryId: string | null): Promise<SkillCatalog> {
 }
 
 /**
- * リポジトリ内 skill を信頼する / 信頼を取り消す。
+ * どの skill を指すか。
+ * **内蔵とグローバルは名前で、リポジトリ内はファイル名で指す**（Rust 側と同じ規則）。
+ */
+export type SkillTarget =
+  | { scope: "global"; name: string }
+  | { scope: "repository"; repositoryId: string; file: string };
+
+/**
+ * skill を使う / 使わない。
+ *
+ * **リポジトリ内では「使う」＝ その内容を信頼すること。** `seenHash` に画面が見せていた
+ * 内容のハッシュを渡す。実物と食い違えば Rust 側が断る（表示してから押すまでの間に
+ * 書き換えられる隙を残さない）。
+ *
  * **書き換えた状態で読み直したものが返る**（フロントで組み直さない）。
  */
-export function setRepoSkillTrust(
-  repositoryId: string,
-  trusted: boolean,
+export function setSkillUse(
+  target: SkillTarget,
+  useSkill: boolean,
+  seenHash: string | null,
 ): Promise<SkillCatalog> {
-  return invoke<SkillCatalog>("set_repo_skill_trust", { repositoryId, trusted });
+  return invoke<SkillCatalog>("set_skill_use", { target, useSkill, seenHash });
+}
+
+/**
+ * skill の本文の後ろへ足す一言を保存する。
+ * **skill ファイルは書き換えない**ので、信頼のハッシュも壊れない。
+ */
+export function setSkillExtra(target: SkillTarget, extra: string): Promise<SkillCatalog> {
+  return invoke<SkillCatalog>("set_skill_extra", { target, extra });
 }
 
 const SNAPSHOT_PROGRESS_EVENT = "snapshot-progress";

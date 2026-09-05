@@ -21,9 +21,7 @@ use tauri::AppHandle;
 use uuid::Uuid;
 
 use paths::StorePaths;
-use settings::{
-    LlmProfile, LoadError, RepoSkillTrust, RepositorySettings, Settings, SettingsRecovery,
-};
+use settings::{LlmProfile, LoadError, RepositorySettings, Settings, SettingsRecovery};
 use state::{DebouncedWriter, UiState};
 
 /// フロントへ返す設定。退避が起きた場合はその記録を添える。
@@ -264,15 +262,83 @@ impl Store {
         Ok(Some(removed))
     }
 
-    /// リポジトリ内 skill の信頼状態を書き換える。
+    /// 内蔵・グローバル skill を使う / 使わない。**キーは skill の名前。**
+    pub fn set_skill_use(&self, name: &str, use_skill: bool) -> Result<(), String> {
+        self.edit(|settings| {
+            settings.skills.use_skill.insert(name.to_string(), use_skill);
+        })
+    }
+
+    /// 内蔵・グローバル skill の「追加の指示」。**空なら記録ごと落とす**
+    /// （手編集する `settings.json` に空文字を積み上げない）。
+    pub fn set_skill_extra(&self, name: &str, extra: &str) -> Result<(), String> {
+        self.edit(|settings| {
+            if extra.trim().is_empty() {
+                settings.skills.extra.remove(name);
+            } else {
+                settings.skills.extra.insert(name.to_string(), extra.to_string());
+            }
+        })
+    }
+
+    /// リポジトリ内 skill を使う / 使わない。
     ///
-    /// **信頼するときは、そのときのファイル一覧とハッシュをまるごと置き換える。**
-    /// 足し込みにすると、消えたファイルの記録が残って「増えた」の判定が狂う。
-    pub fn set_repo_skill_trust(&self, id: &str, trust: RepoSkillTrust) -> Result<(), String> {
+    /// **`hash` が `Some` なら「その内容を信頼した」という記録**になる。
+    /// `None` は使わない指定で、記録ごと落とす（残すと、置き直したファイルが
+    /// 前の記録で即座に効いてしまう）。
+    pub fn set_repo_skill_use(
+        &self,
+        repository_id: &str,
+        file: &str,
+        hash: Option<String>,
+    ) -> Result<(), String> {
+        self.edit_repository(repository_id, |repository| match hash {
+            Some(hash) => {
+                repository.repo_skills.hashes.insert(file.to_string(), hash);
+            }
+            None => {
+                repository.repo_skills.hashes.remove(file);
+            }
+        })
+    }
+
+    /// リポジトリ内 skill の「追加の指示」。
+    pub fn set_repo_skill_extra(
+        &self,
+        repository_id: &str,
+        file: &str,
+        extra: &str,
+    ) -> Result<(), String> {
+        self.edit_repository(repository_id, |repository| {
+            if extra.trim().is_empty() {
+                repository.repo_skills.extra.remove(file);
+            } else {
+                repository
+                    .repo_skills
+                    .extra
+                    .insert(file.to_string(), extra.to_string());
+            }
+        })
+    }
+
+    /// 設定をその場で書き換えて保存する。**読めない設定は上書きしない。**
+    fn edit(&self, change: impl FnOnce(&mut Settings)) -> Result<(), String> {
         let ready = self.ready()?;
         let mut slot = ready.settings.lock().expect("settings poisoned");
         let settings = slot.loaded.as_mut().map_err(|error| error.clone())?;
+        change(settings);
+        settings::save(&ready.paths, settings)
+    }
 
+    /// 登録 1 件を書き換えて保存する。
+    fn edit_repository(
+        &self,
+        id: &str,
+        change: impl FnOnce(&mut RepositorySettings),
+    ) -> Result<(), String> {
+        let ready = self.ready()?;
+        let mut slot = ready.settings.lock().expect("settings poisoned");
+        let settings = slot.loaded.as_mut().map_err(|error| error.clone())?;
         let Some(repository) = settings
             .repositories
             .iter_mut()
@@ -280,7 +346,7 @@ impl Store {
         else {
             return Err(format!("登録されていないリポジトリです: {id}"));
         };
-        repository.repo_skills = trust;
+        change(repository);
         settings::save(&ready.paths, settings)
     }
 

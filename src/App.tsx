@@ -32,6 +32,7 @@ import { RefTree } from "./components/sidebar/RefTree";
 import { RepositoryList, type SortMode } from "./components/sidebar/RepositoryList";
 import { Sidebar } from "./components/sidebar/Sidebar";
 import { LlmProfilesDialog } from "./components/settings/LlmProfiles";
+import { RepositorySettingsDialog } from "./components/settings/RepositorySettingsDialog";
 import { CloneDialog } from "./components/setup/CloneDialog";
 import { EmptyState } from "./components/setup/EmptyState";
 import { GitSetupScreen } from "./components/setup/GitSetupScreen";
@@ -109,6 +110,11 @@ export default function App() {
    * skill をどこへ置けばよいのか、画面から読めるようにするため。
    */
   const [dataDir, setDataDir] = useState("");
+  /**
+   * リポジトリ 1 つぶんの設定（T-21）。**アプリ全体の「設定」とは別の入口。**
+   * リポジトリに紐づくものを全体の設定へ混ぜると、どのリポジトリの話か読めなくなる。
+   */
+  const [repoSettingsId, setRepoSettingsId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   /**
    * ブランチツリーから「先頭コミットへジャンプ」したときの要求。
@@ -355,6 +361,7 @@ export default function App() {
                     onScan={() => void handleScan()}
                     onRemove={(id) => void repositories.remove(id)}
                     onRelocate={(id) => void handleRelocate(id)}
+                    onOpenSettings={setRepoSettingsId}
                     onSortModeChange={(mode: SortMode) =>
                       updateUiState((current) => ({ ...current, repositoryListSort: mode }))
                     }
@@ -442,10 +449,20 @@ export default function App() {
       {llmOpen && (
         <LlmProfilesDialog
           profiles={settings.settings.llmProfiles}
-          repositoryId={repos.selectedId}
           globalSkillDir={dataDir === "" ? "skills" : `${dataDir}\\skills`}
           onChanged={refreshSettings}
           onClose={() => setLlmOpen(false)}
+        />
+      )}
+
+      {/* リポジトリ 1 つぶんの設定（T-21）。右クリックから開く。 */}
+      {repoSettingsId !== null && (
+        <RepositorySettingsDialog
+          repositoryId={repoSettingsId}
+          repositoryName={
+            repos.entries.find((entry) => entry.id === repoSettingsId)?.name ?? ""
+          }
+          onClose={() => setRepoSettingsId(null)}
         />
       )}
 

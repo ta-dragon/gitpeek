@@ -25,6 +25,7 @@ export function RepositoryList({
   onScan,
   onRemove,
   onRelocate,
+  onOpenSettings,
   onSortModeChange,
   onReorder,
   onFetch,
@@ -40,6 +41,8 @@ export function RepositoryList({
   onScan: () => void;
   onRemove: (id: string) => void;
   onRelocate: (id: string) => void;
+  /** リポジトリ 1 つぶんの設定を開く（T-21）。**アプリ全体の設定とは別。** */
+  onOpenSettings: (id: string) => void;
   onSortModeChange: (mode: SortMode) => void;
   onReorder: (orderedIds: string[]) => void;
   onFetch: (id: string) => void;
@@ -198,6 +201,14 @@ export function RepositoryList({
               // リモートが無いリポジトリでは意味が無いので出さない。
               disabled: busy || !hasRemotes(entries, menu.id),
               onSelect: () => onFetch(menu.id),
+            },
+            {
+              // **リポジトリに紐づく設定はここから。** アプリ全体の「設定」に
+              // 混ぜると、どのリポジトリの話をしているのか読めなくなる。
+              label: ja.repositorySettings.open,
+              title: ja.repositorySettings.openHint,
+              disabled: busy,
+              onSelect: () => onOpenSettings(menu.id),
             },
             {
               label: ja.repositories.relocate,

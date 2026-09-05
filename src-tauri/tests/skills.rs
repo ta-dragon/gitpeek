@@ -4,14 +4,13 @@
 //! 「サブディレクトリを辿らない」「symlink を辿らない」「大きすぎるものを読まない」は
 //! ファイルシステムを通さないと確かめられない。
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use givsoner_lib::llm::skill::{
     self, RepoTrustStatus, SkillEntry, SkillOrigin, SkillState, MAX_FILE_BYTES, MAX_FILES,
 };
-use givsoner_lib::store::settings::RepoSkillTrust;
+use givsoner_lib::store::settings::{RepoSkillTrust, SkillSettings};
 
 /// 信頼していない skill に埋める目印。**これがプロンプト側へ出たら負け。**
 const LEAK_MARKER: &str = "MARKER-UNTRUSTED-BODY-MUST-NEVER-LEAK";
@@ -49,15 +48,23 @@ impl Fixture {
     }
 
     fn load(&self, trust: &RepoSkillTrust) -> skill::SkillCatalog {
-        skill::load(&self.global, Some(&self.repository), trust)
+        skill::load(
+            &self.global,
+            Some(&self.repository),
+            trust,
+            &SkillSettings::default(),
+        )
     }
 
-    /// いまのファイルを記録して「信頼した」状態を作る。
-    fn trusted(&self) -> RepoSkillTrust {
-        RepoSkillTrust {
-            trusted: true,
-            hashes: skill::current_hashes(&self.repository),
+    /// 一覧のファイルを全部「使う」と決めた状態を作る。
+    fn using(&self, files: &[&str]) -> RepoSkillTrust {
+        let mut trust = RepoSkillTrust::default();
+        for file in files {
+            let hash = skill::file_hash(&self.repository, file)
+                .unwrap_or_else(|| panic!("{file} が読めない"));
+            trust.hashes.insert((*file).to_string(), hash);
         }
+        trust
     }
 }
 
@@ -101,89 +108,120 @@ fn an_untrusted_repository_skill_never_reaches_the_prompt() {
     );
 
     // **一覧からは消さない。** 存在と、信頼すれば読めることが分かること（CLAUDE.md §6）。
-    assert!(entry.preview.contains(LEAK_MARKER), "確認画面では読ませる");
+    assert!(entry.preview.contains(LEAK_MARKER), "決める前に読ませる");
     assert!(catalog.trust.present);
-    assert!(!catalog.trust.trusted);
+    assert_eq!(catalog.trust.in_use, 0);
+    assert_eq!(catalog.trust.undecided, vec!["evil.md"]);
 }
 
+/// **ファイル単位で決める。** 使うと決めた 1 つだけ本文が付く。
 #[test]
-fn trusting_the_repository_hands_the_body_over() {
+fn deciding_to_use_one_file_hands_over_only_that_body() {
     let fixture = Fixture::new();
-    fixture.write_repo("ok.md", &skill_text("ok", "リポジトリの観点"));
+    fixture.write_repo("ok.md", &skill_text("ok", "使うほうの観点"));
+    fixture.write_repo("other.md", &skill_text("other", LEAK_MARKER));
 
-    let catalog = fixture.load(&fixture.trusted());
-    let entry = find(&catalog.entries, "ok");
+    let catalog = fixture.load(&fixture.using(&["ok.md"]));
 
-    assert_eq!(entry.state, SkillState::Ready);
-    assert_eq!(entry.usable_body(), Some("リポジトリの観点"));
-    assert!(catalog.trust.trusted);
-    assert!(!catalog.trust.needs_recheck);
+    let used = find(&catalog.entries, "ok");
+    assert_eq!(used.state, SkillState::Ready);
+    assert!(used.in_use);
+    assert_eq!(used.usable_body().as_deref(), Some("使うほうの観点"));
+
+    // **隣のファイルは巻き込まれない。**
+    let other = find(&catalog.entries, "other");
+    assert_eq!(other.state, SkillState::Untrusted);
+    assert!(!other.in_use);
+    assert_eq!(other.usable_body(), None);
+    assert!(!everything_the_prompt_could_see(&catalog.entries).contains(LEAK_MARKER));
+
+    assert_eq!(catalog.trust.in_use, 1);
+    assert_eq!(catalog.trust.undecided, vec!["other.md"]);
 }
 
 // ---- 再確認 -------------------------------------------------------------
 
+/// 内容が変わったら**そのファイルだけ**が決め直しへ戻る。
 #[test]
-fn changing_a_trusted_file_withholds_it_again() {
+fn changing_a_file_withholds_only_that_file() {
     let fixture = Fixture::new();
     fixture.write_repo("ok.md", &skill_text("ok", "もとの観点"));
-    let trust = fixture.trusted();
+    fixture.write_repo("stable.md", &skill_text("stable", "変えないほう"));
+    let trust = fixture.using(&["ok.md", "stable.md"]);
 
     fixture.write_repo("ok.md", &skill_text("ok", LEAK_MARKER));
     let catalog = fixture.load(&trust);
 
-    assert!(catalog.trust.needs_recheck);
     assert_eq!(catalog.trust.changed, vec!["ok.md"]);
     assert_eq!(find(&catalog.entries, "ok").state, SkillState::Recheck);
     assert!(!everything_the_prompt_could_see(&catalog.entries).contains(LEAK_MARKER));
+
+    // **隣は止めない。** 止める範囲を最小にできるのがファイル単位にした利点。
+    let stable = find(&catalog.entries, "stable");
+    assert_eq!(stable.state, SkillState::Ready);
+    assert_eq!(stable.usable_body().as_deref(), Some("変えないほう"));
 }
 
-/// **信頼させてから 2 つ目を置く**のが一番素直な攻撃。内容の変化だけを見ると素通りする。
+/// **無害な 1 つを使わせてから 2 つ目を置く**のが一番素直な攻撃。
+/// ファイル単位なら、増えたものは記録が無いので**特別扱いを足さずに**未決のまま。
 #[test]
-fn adding_a_file_after_trusting_withholds_everything() {
+fn a_file_added_afterwards_is_simply_undecided() {
     let fixture = Fixture::new();
     fixture.write_repo("ok.md", &skill_text("ok", "無害な観点"));
-    let trust = fixture.trusted();
+    let trust = fixture.using(&["ok.md"]);
 
     fixture.write_repo("evil.md", &skill_text("evil", LEAK_MARKER));
     let catalog = fixture.load(&trust);
 
-    assert!(catalog.trust.needs_recheck);
-    assert_eq!(catalog.trust.added, vec!["evil.md"]);
+    assert_eq!(find(&catalog.entries, "evil").state, SkillState::Untrusted);
+    assert_eq!(catalog.trust.undecided, vec!["evil.md"]);
     assert!(catalog.trust.changed.is_empty());
-
-    // **元から信頼していたほうも止める。** どの変化が効くかは読まないと分からない。
-    assert_eq!(find(&catalog.entries, "ok").state, SkillState::Recheck);
-    assert_eq!(find(&catalog.entries, "ok").usable_body(), None);
     assert!(!everything_the_prompt_could_see(&catalog.entries).contains(LEAK_MARKER));
+
+    // **元から使っていたほうは巻き込まれない。**
+    assert_eq!(
+        find(&catalog.entries, "ok").usable_body().as_deref(),
+        Some("無害な観点")
+    );
 }
 
-/// 消えるのは危険が減る方向。**確認し直しを求めない。**
+/// 消えたファイルは記録が残るだけ。**残ったほうは動き続ける。**
 #[test]
-fn removing_a_file_after_trusting_keeps_working() {
+fn removing_a_file_does_not_disturb_the_others() {
     let fixture = Fixture::new();
     fixture.write_repo("ok.md", &skill_text("ok", "残るほう"));
     fixture.write_repo("gone.md", &skill_text("gone", "消えるほう"));
-    let trust = fixture.trusted();
+    let trust = fixture.using(&["ok.md", "gone.md"]);
 
     fs::remove_file(fixture.repo_dir().join("gone.md")).unwrap();
     let catalog = fixture.load(&trust);
 
-    assert!(!catalog.trust.needs_recheck);
-    assert_eq!(find(&catalog.entries, "ok").usable_body(), Some("残るほう"));
+    assert!(catalog.trust.changed.is_empty());
+    assert!(catalog.trust.undecided.is_empty());
+    assert_eq!(
+        find(&catalog.entries, "ok").usable_body().as_deref(),
+        Some("残るほう")
+    );
 }
 
-/// **読めないファイルを足しても再確認になる。** 読めないものを足せば素通り、では困る。
+/// **読めないファイルも「決めていない」に数える。** 見せずに済ませない。
 #[test]
-fn adding_an_unreadable_file_after_trusting_still_asks_again() {
+fn an_unreadable_file_is_counted_as_undecided() {
     let fixture = Fixture::new();
     fixture.write_repo("ok.md", &skill_text("ok", "無害な観点"));
-    let trust = fixture.trusted();
+    let trust = fixture.using(&["ok.md"]);
 
-    fixture.write_repo("broken.md", "---\nname: x\n本文が壊れている\n");
+    fixture.write_repo("broken.md", "---
+name: x
+本文が壊れている
+");
     let catalog = fixture.load(&trust);
 
-    assert!(catalog.trust.needs_recheck, "{:#?}", catalog.trust);
-    assert_eq!(catalog.trust.added, vec!["broken.md"]);
+    assert_eq!(catalog.trust.undecided, vec!["broken.md"]);
+    assert!(matches!(
+        find(&catalog.entries, "broken.md").state,
+        SkillState::Unreadable { .. }
+    ));
 }
 
 // ---- 読む範囲 -----------------------------------------------------------
@@ -196,7 +234,7 @@ fn does_not_descend_into_subdirectories() {
     fs::create_dir_all(&nested).unwrap();
     fs::write(nested.join("deep.md"), skill_text("deep", LEAK_MARKER)).unwrap();
 
-    let catalog = fixture.load(&fixture.trusted());
+    let catalog = fixture.load(&fixture.using(&[]));
 
     assert!(
         !catalog.entries.iter().any(|entry| entry.name == "deep"),
@@ -231,7 +269,7 @@ fn does_not_follow_symlinks() {
         );
     }
 
-    let catalog = fixture.load(&fixture.trusted());
+    let catalog = fixture.load(&fixture.using(&[]));
 
     assert!(
         !catalog
@@ -260,7 +298,7 @@ fn does_not_read_a_file_that_is_too_large() {
     let padding = "あ".repeat(MAX_FILE_BYTES as usize); // UTF-8 で 3 倍になるので確実に超える
     fixture.write_repo("huge.md", &skill_text("huge", &format!("{LEAK_MARKER}{padding}")));
 
-    let catalog = fixture.load(&fixture.trusted());
+    let catalog = fixture.load(&fixture.using(&[]));
     let entry = find(&catalog.entries, "huge.md");
 
     assert!(matches!(entry.state, SkillState::Unreadable { .. }), "{entry:#?}");
@@ -283,7 +321,9 @@ fn stops_after_the_file_limit() {
         );
     }
 
-    let catalog = fixture.load(&fixture.trusted());
+    let files: Vec<String> = (0..=MAX_FILES).map(|i| format!("s{i:03}.md")).collect();
+    let names: Vec<&str> = files.iter().map(String::as_str).collect();
+    let catalog = fixture.load(&fixture.using(&names));
     let readable = catalog
         .entries
         .iter()
@@ -309,7 +349,7 @@ fn ignores_files_that_are_not_markdown() {
     )
     .unwrap();
 
-    let catalog = fixture.load(&fixture.trusted());
+    let catalog = fixture.load(&fixture.using(&[]));
     assert!(!catalog.trust.present);
     assert!(!everything_the_prompt_could_see(&catalog.entries).contains(LEAK_MARKER));
 }
@@ -334,7 +374,7 @@ fn without_a_repository_only_global_and_built_in_are_read() {
     fixture.write_global("team.md", &skill_text("team", "チームの観点"));
     fixture.write_repo("evil.md", &skill_text("evil", LEAK_MARKER));
 
-    let catalog = skill::load(&fixture.global, None, &fixture.trusted());
+    let catalog = skill::load(&fixture.global, None, &fixture.using(&[]), &SkillSettings::default());
 
     assert_eq!(SkillEntry::active(&catalog.entries).len(), 2);
     assert!(!everything_the_prompt_could_see(&catalog.entries).contains(LEAK_MARKER));
@@ -358,7 +398,7 @@ fn the_same_name_resolves_by_trust() {
         "未信頼のものに押しのけさせない"
     );
 
-    let trusted = fixture.load(&fixture.trusted());
+    let trusted = fixture.load(&fixture.using(&["review.md"]));
     let bodies = everything_the_prompt_could_see(&trusted.entries);
     assert!(bodies.contains("リポジトリの観点"), "信頼済みならリポジトリ内が勝つ");
     assert!(!bodies.contains("グローバルの観点"));
@@ -379,20 +419,27 @@ fn global_skills_need_no_trust() {
 
     let catalog = fixture.load(&RepoSkillTrust::default());
     assert_eq!(
-        find(&catalog.entries, "team").usable_body(),
+        find(&catalog.entries, "team").usable_body().as_deref(),
         Some("チームの観点")
     );
 }
 
-/// 記録するハッシュは**ファイル名 → 内容**。同じ内容でも名前が違えば別物として数える。
+/// ハッシュは**ファイルごと**。同じ内容でも別のファイルなら別々に決める。
 #[test]
-fn hashes_are_recorded_per_file() {
+fn hashes_are_taken_per_file() {
     let fixture = Fixture::new();
     fixture.write_repo("a.md", &skill_text("a", "同じ本文"));
     fixture.write_repo("b.md", &skill_text("b", "同じ本文"));
 
-    let hashes: BTreeMap<String, String> = skill::current_hashes(&fixture.repository);
-    assert_eq!(hashes.len(), 2);
-    assert!(hashes.contains_key("a.md"));
-    assert!(hashes.contains_key("b.md"));
+    let a = skill::file_hash(&fixture.repository, "a.md").expect("読めること");
+    let b = skill::file_hash(&fixture.repository, "b.md").expect("読めること");
+    assert_ne!(a, "", "ハッシュが空では照合にならない");
+    // `name` が違うのでファイル内容も違う。
+    assert_ne!(a, b);
+
+    // **無いファイルは None。** ここで `Some("")` を返すと、
+    // 消えたファイルを「一致した」と読んでしまう。
+    assert_eq!(skill::file_hash(&fixture.repository, "missing.md"), None);
+    // **ディレクトリの外は見に行かない。**
+    assert_eq!(skill::file_hash(&fixture.repository, "../../secret.md"), None);
 }

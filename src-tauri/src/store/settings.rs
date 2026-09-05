@@ -44,6 +44,9 @@ pub struct Settings {
     pub fetch: FetchSettings,
     #[serde(default)]
     pub review: ReviewSettings,
+    /// 内蔵とグローバル skill の使い方（T-21）。
+    #[serde(default)]
+    pub skills: SkillSettings,
 }
 
 impl Default for Settings {
@@ -57,6 +60,7 @@ impl Default for Settings {
             ui: UiSettings::default(),
             fetch: FetchSettings::default(),
             review: ReviewSettings::default(),
+            skills: SkillSettings::default(),
         }
     }
 }
@@ -146,13 +150,36 @@ impl Default for VisibleRefs {
     }
 }
 
-/// リポジトリ内 skill の信頼状態。**既定は無効**（CLAUDE.md §4）。
-/// `hashes` はファイル内容のハッシュで、変わったら再確認する。
+/// リポジトリ内 skill の**ファイルごとの**信頼（T-21。CLAUDE.md §4）。
+///
+/// **記録があること＝そのファイルを使うこと。** 記録に無いファイルは未信頼なので、
+/// 「あとから増えたファイル」は特別扱いを足さなくても自動的に未信頼になる。
+/// 記録したハッシュと内容が食い違えば、**そのファイルだけ**が未信頼へ戻る。
+///
+/// もともとはリポジトリ単位の `trusted: bool` だったが、2026-09-05 に利用者の判断で
+/// ファイル単位へ絞った（DESIGN.md §11.2.1）。**緩めたのではなく絞ったので**、
+/// 古い `trusted: true` ＋ `hashes` はそのまま「この一覧を使う」と読める。
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RepoSkillTrust {
-    pub trusted: bool,
+    /// ファイル名 → 使うと決めたときの内容の SHA-256。
     pub hashes: BTreeMap<String, String>,
+    /// ファイル名 → 本文の後ろへ足す一言。**skill ファイルは書き換えない。**
+    pub extra: BTreeMap<String, String>,
+}
+
+/// 内蔵とグローバル skill の使い方（T-21）。**キーは skill の名前。**
+///
+/// リポジトリ内 skill は [`RepoSkillTrust`] が持つ（あちらは信頼が絡むのでファイル名が鍵）。
+///
+/// **手編集を想定して、素直な 2 つの表にしてある**（DESIGN.md §12.2）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SkillSettings {
+    /// skill 名 → 使うかどうか。**記録が無ければ skill ファイルの `enabled` に従う。**
+    pub use_skill: BTreeMap<String, bool>,
+    /// skill 名 → 本文の後ろへ足す一言。
+    pub extra: BTreeMap<String, String>,
 }
 
 /// T-20 で中身を使う。**`api_key` フィールドを作ってはいけない**（CLAUDE.md §4）。
