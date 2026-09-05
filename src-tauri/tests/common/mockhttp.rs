@@ -2,15 +2,22 @@
 //!
 //! 必要なのは固定の応答を返して要求を記録することだけなので、dev-dependency を増やさない。
 //!
+//! T-22 で 3 つ足した。
+//!
+//! - **少しずつ返す**（SSE のチャンク）。ストリーミングと中止を実際に流して見るため
+//! - **接続ごとにスレッドを起こす**。並列度 3 で本当に 3 本走ることを見るため
+//! - **同時接続数の記録**。上と同じ理由
+//!
 //! ここは `src-tauri/src` の外なので好きにプロセスやソケットを扱ってよい。
 
 #![allow(dead_code)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 /// サーバが受け取った要求。**ヘッダも本文も残す** —
 /// `Authorization` が付いたか / どのパスへ行ったかを、組み立てではなく
@@ -40,6 +47,10 @@ pub struct Canned {
     pub status: u16,
     pub content_type: &'static str,
     pub body: String,
+    /// 本文を分けて書き出す 1 回ぶんのバイト数。`None` なら一度に書く。
+    pub chunk_bytes: Option<usize>,
+    /// チャンクとチャンクの間隔。中止を割り込ませる隙を作るために使う。
+    pub chunk_delay: Duration,
 }
 
 impl Canned {
@@ -48,6 +59,8 @@ impl Canned {
             status,
             content_type: "application/json",
             body: body.into(),
+            chunk_bytes: None,
+            chunk_delay: Duration::ZERO,
         }
     }
 
@@ -56,9 +69,52 @@ impl Canned {
             status,
             content_type: "text/html; charset=utf-8",
             body: body.into(),
+            chunk_bytes: None,
+            chunk_delay: Duration::ZERO,
         }
     }
+
+    /// SSE の本文をそのまま返す。**行の組み立ては呼び出し側**（壊れた行も流したいので）。
+    pub fn sse(body: impl Into<String>) -> Self {
+        Self {
+            status: 200,
+            content_type: "text/event-stream",
+            body: body.into(),
+            chunk_bytes: None,
+            chunk_delay: Duration::ZERO,
+        }
+    }
+
+    /// `content` を 1 つの `data:` 行にした SSE。終わりに `[DONE]` を付ける。
+    pub fn sse_content(content: &str) -> Self {
+        Self::sse(format!("{}{}", sse_delta(content), SSE_DONE))
+    }
+
+    /// 少しずつ返す。**中止とチャンクまたぎを見るため。**
+    pub fn in_chunks(mut self, bytes: usize, delay: Duration) -> Self {
+        self.chunk_bytes = Some(bytes);
+        self.chunk_delay = delay;
+        self
+    }
 }
+
+/// `data: {...}` を 1 行作る。
+pub fn sse_delta(content: &str) -> String {
+    let payload = serde_json::json!({
+        "choices": [{ "index": 0, "delta": { "content": content } }]
+    });
+    format!("data: {payload}\n\n")
+}
+
+/// `finish_reason` を伝える 1 行。
+pub fn sse_finish(reason: &str) -> String {
+    let payload = serde_json::json!({
+        "choices": [{ "index": 0, "delta": {}, "finish_reason": reason }]
+    });
+    format!("data: {payload}\n\n")
+}
+
+pub const SSE_DONE: &str = "data: [DONE]\n\n";
 
 type Handler = Box<dyn Fn(&Recorded) -> Canned + Send + Sync>;
 
@@ -66,32 +122,57 @@ pub struct MockServer {
     port: u16,
     requests: Arc<Mutex<Vec<Recorded>>>,
     stop: Arc<AtomicBool>,
+    /// 同時に開いていた接続の最大数。**並列度の確認に使う。**
+    peak: Arc<AtomicUsize>,
     worker: Option<JoinHandle<()>>,
 }
 
 impl MockServer {
     /// 受け取った要求ごとに `handler` の応答を返すサーバを起こす。
+    ///
+    /// **接続ごとにスレッドを起こす。** 1 本ずつ捌くと、並列に投げても
+    /// 直列にしか見えない（並列度のテストが通ってしまう）。
     pub fn start(handler: impl Fn(&Recorded) -> Canned + Send + Sync + 'static) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("ローカルに bind できること");
         let port = listener.local_addr().unwrap().port();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let stop = Arc::new(AtomicBool::new(false));
+        let peak = Arc::new(AtomicUsize::new(0));
 
         let handler: Handler = Box::new(handler);
+        let handler = Arc::new(handler);
         let worker = {
             let requests = requests.clone();
             let stop = stop.clone();
+            let peak = peak.clone();
             std::thread::spawn(move || {
+                let live = Arc::new(AtomicUsize::new(0));
+                let mut connections: Vec<JoinHandle<()>> = Vec::new();
                 for stream in listener.incoming() {
                     if stop.load(Ordering::SeqCst) {
                         break;
                     }
                     let Ok(stream) = stream else { continue };
-                    if let Some(request) = read_request(&stream) {
+                    let handler = handler.clone();
+                    let requests = requests.clone();
+                    let live = live.clone();
+                    let peak = peak.clone();
+                    connections.push(std::thread::spawn(move || {
+                        let Some(request) = read_request(&stream) else {
+                            return;
+                        };
+                        let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(now, Ordering::SeqCst);
+
                         let response = handler(&request);
                         requests.lock().unwrap().push(request);
                         write_response(stream, &response);
-                    }
+
+                        live.fetch_sub(1, Ordering::SeqCst);
+                    }));
+                }
+                for connection in connections {
+                    let _ = connection.join();
                 }
             })
         };
@@ -100,6 +181,7 @@ impl MockServer {
             port,
             requests,
             stop,
+            peak,
             worker: Some(worker),
         }
     }
@@ -123,6 +205,11 @@ impl MockServer {
         self.requests()
             .pop()
             .expect("サーバへ要求が 1 件も届いていない")
+    }
+
+    /// 同時に開いていた接続の最大数。
+    pub fn peak_concurrency(&self) -> usize {
+        self.peak.load(Ordering::SeqCst)
     }
 }
 
@@ -195,6 +282,7 @@ fn read_request(stream: &TcpStream) -> Option<Recorded> {
 fn write_response(mut stream: TcpStream, response: &Canned) {
     let reason = match response.status {
         200 => "OK",
+        400 => "Bad Request",
         401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
@@ -202,13 +290,40 @@ fn write_response(mut stream: TcpStream, response: &Canned) {
         500 => "Internal Server Error",
         _ => "Status",
     };
+    // **少しずつ返すときも Content-Length は付ける。** 長さは分かっているので
+    // chunked にする必要が無く、受け側は先に長さを知っていても
+    // 「届いた分から読む」ことに変わりはない。
     let head = format!(
         "HTTP/1.1 {} {reason}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         response.status,
         response.content_type,
         response.body.len(),
     );
-    let _ = stream.write_all(head.as_bytes());
-    let _ = stream.write_all(response.body.as_bytes());
+    if stream.write_all(head.as_bytes()).is_err() {
+        return;
+    }
     let _ = stream.flush();
+
+    let bytes = response.body.as_bytes();
+    match response.chunk_bytes {
+        None => {
+            let _ = stream.write_all(bytes);
+            let _ = stream.flush();
+        }
+        Some(size) => {
+            let size = size.max(1);
+            for (index, piece) in bytes.chunks(size).enumerate() {
+                // **待つのは書く前。** 最後のチャンクの後に眠ると、
+                // 相手はもう読み終えているのに接続だけが残り、
+                // 次の要求と重なって「同時に 2 本」に見える。
+                if index > 0 && !response.chunk_delay.is_zero() {
+                    std::thread::sleep(response.chunk_delay);
+                }
+                // 相手が中止して接続を切ったら、そこでやめる。
+                if stream.write_all(piece).is_err() || stream.flush().is_err() {
+                    return;
+                }
+            }
+        }
+    }
 }

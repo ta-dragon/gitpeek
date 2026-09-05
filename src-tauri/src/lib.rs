@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, State};
 use commandlog::{CommandLog, CommandLogEntry, EmittingLog};
 use git::detect::GitStatus;
 use encoding::TextEncoding;
-use git::diff::{CommitDetail, DiffOptions, DiffTarget, FileChange, FileDiff};
+use git::diff::{CommitDetail, DiffOptions, DiffSource, DiffTarget, FileChange, FileDiff};
 use git::ops::FetchOutcome;
 use git::status::{WorkingFile, WorkingTree};
 use git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
@@ -87,6 +87,11 @@ pub struct AppState {
     /// **fetch と別に持つ。** 同じ枠を使い回すと、clone の最中に fetch を始めた
     /// 瞬間に clone 側の合図が捨てられ、中止ボタンが効かなくなる。
     pub clone_cancel: Mutex<Option<git::exec::Cancel>>,
+    /// 実行中の AI レビューを止めるための合図（T-22）。
+    ///
+    /// fetch / clone と**別に持つ**のは同じ理由。レビューは分単位で走るので、
+    /// 途中で fetch を始めても中止ボタンが効かなくならないようにする。
+    pub review_cancel: Mutex<Option<git::exec::Cancel>>,
 }
 
 /// git を検出する。`path` が指定されていればそのフルパスを、無ければ PATH 上の `git` を試す。
@@ -848,40 +853,6 @@ async fn cancel_clone(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
-/// 差分の出どころ。フロントの `DiffScope` と同じ形（`kind` で分かれる）。
-///
-/// **真偽値を並べるのではなく種類で分ける。** `parent` / `sha` / `symmetric` /
-/// 「作業ツリーか」を平らに並べると、成り立たない組み合わせが表現できてしまう。
-#[derive(Debug, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
-enum DiffSource {
-    /// リビジョン 2 点。`parent` が `None` はルートコミット。
-    Range {
-        parent: Option<String>,
-        sha: String,
-        symmetric: bool,
-    },
-    /// 作業ツリー。`staged` なら HEAD と index、そうでなければ index と作業ツリー。
-    WorkingTree { staged: bool },
-}
-
-impl DiffSource {
-    fn revisions(&self) -> git::diff::Revisions<'_> {
-        match self {
-            Self::Range {
-                parent,
-                sha,
-                symmetric,
-            } => git::diff::Revisions::Range {
-                from: parent.as_deref(),
-                to: sha,
-                symmetric: *symmetric,
-            },
-            Self::WorkingTree { staged } => git::diff::Revisions::WorkingTree { staged: *staged },
-        }
-    }
-}
-
 /// ファイル 1 つ分の差分（docs/DESIGN.md §7.2, §9）。
 ///
 /// **`old_path` はリネームのときに必ず渡す。** pathspec に新しいパスだけを渡すと、
@@ -1113,6 +1084,199 @@ async fn test_llm_connection(
         .map_err(|error| llm::client::LlmError::config(error.to_string()))?
 }
 
+/// レビューの途中経過をフロントへ送るイベント名。
+///
+/// **fetch / clone と分ける**（どれが動いているのか区別できなくなるため）。
+const REVIEW_PROGRESS_EVENT: &str = "review-progress";
+
+/// 途中経過に**どの走りのものか**を添えて送る。
+///
+/// 中止してすぐ次を始めると、前の走りの残りが後から届く。`runId` が無いと
+/// 画面が別の走りの本文を混ぜてしまう。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewProgressEvent<'a> {
+    run_id: &'a str,
+    #[serde(flatten)]
+    event: llm::review::ReviewEvent,
+}
+
+/// 途中経過を webview へ流す [`llm::review::ReviewSink`]。
+///
+/// review 側のコードを `AppHandle` に依存させないため、Tauri に触るのはここだけ
+/// （`EmittingProgress` と同じ形）。
+struct EmittingReview<'a, R: Runtime> {
+    app: &'a AppHandle<R>,
+    run_id: &'a str,
+}
+
+impl<R: Runtime> llm::review::ReviewSink for EmittingReview<'_, R> {
+    fn report(&self, event: llm::review::ReviewEvent) {
+        let _ = self.app.emit(
+            REVIEW_PROGRESS_EVENT,
+            ReviewProgressEvent {
+                run_id: self.run_id,
+                event,
+            },
+        );
+    }
+}
+
+/// レビューに要るものを揃える。**プロファイルと skill の読み込みはここ 1 箇所。**
+///
+/// `plan_review` と `start_review` で作り方が違うと、
+/// 画面に出した計画と実際に投げるものがずれる。
+struct ReviewSetup {
+    program: String,
+    repo: PathBuf,
+    profile: store::settings::LlmProfile,
+    api_key: String,
+    skills: Vec<llm::skill::SkillEntry>,
+    context_lines: u32,
+    concurrency: u8,
+}
+
+async fn review_setup(
+    state: &State<'_, AppState>,
+    repository_id: &str,
+    profile_id: &str,
+) -> Result<ReviewSetup, llm::client::LlmError> {
+    let repository = state
+        .store
+        .repository(repository_id)
+        .map_err(llm::client::LlmError::config)?;
+    let repo = PathBuf::from(&repository.path);
+    if !repo.is_dir() {
+        return Err(llm::client::LlmError::config(format!(
+            "フォルダが見つかりません: {}",
+            repo.display()
+        )));
+    }
+    let (profile, api_key) = saved_endpoint(state, profile_id)?;
+    let payload = state
+        .store
+        .settings()
+        .map_err(llm::client::LlmError::config)?;
+    let catalog = read_skills(state, Some(repository_id))
+        .await
+        .map_err(llm::client::LlmError::config)?;
+
+    Ok(ReviewSetup {
+        program: git_program(state),
+        repo,
+        profile,
+        api_key,
+        skills: catalog.entries,
+        context_lines: u32::from(payload.settings.review.context_lines),
+        concurrency: payload.settings.review.concurrency,
+    })
+}
+
+/// 実行前パネルの中身（DESIGN.md §10.4）。
+///
+/// **見積もりも分割数もここで決める。** フロントに同じ計算を置くと必ずずれる。
+#[tauri::command]
+async fn plan_review(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    source: DiffSource,
+    profile_id: String,
+) -> Result<llm::review::ReviewPlan, llm::client::LlmError> {
+    let setup = review_setup(&state, &repository_id, &profile_id).await?;
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        llm::review::plan(&llm::review::ReviewContext {
+            log: &EmittingLog::new(&handle, &log),
+            program: &setup.program,
+            repo: &setup.repo,
+            source: &source,
+            profile: &setup.profile,
+            api_key: &setup.api_key,
+            skills: &setup.skills,
+            context_lines: setup.context_lines,
+            concurrency: setup.concurrency,
+        })
+        .map_err(llm::client::LlmError::config)
+    })
+    .await
+    .map_err(|error| llm::client::LlmError::config(error.to_string()))?
+}
+
+/// レビューを走らせる（DESIGN.md §10.5〜§10.7）。
+///
+/// `paths` は実行前パネルで**残された**ファイル。計画そのものは Rust 側で組み直す
+/// （古い計画で走らせない）。`run_id` はフロントが採番して渡す —
+/// **走り始める前にイベントの受け口を用意できる**ようにするため。
+#[tauri::command]
+async fn start_review(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    run_id: String,
+    repository_id: String,
+    source: DiffSource,
+    profile_id: String,
+    paths: Vec<String>,
+) -> Result<llm::review::ReviewRun, llm::client::LlmError> {
+    let setup = review_setup(&state, &repository_id, &profile_id).await?;
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    // 中止の合図を先に置く。**終わったら必ず外す**（次の走りが「中止済み」を
+    // 引き継いで即座に止まらないように）。
+    let cancel = git::exec::Cancel::new();
+    if let Ok(mut slot) = state.review_cancel.lock() {
+        *slot = Some(cancel.clone());
+    }
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        llm::review::run(
+            &llm::review::ReviewContext {
+                log: &EmittingLog::new(&handle, &log),
+                program: &setup.program,
+                repo: &setup.repo,
+                source: &source,
+                profile: &setup.profile,
+                api_key: &setup.api_key,
+                skills: &setup.skills,
+                context_lines: setup.context_lines,
+                concurrency: setup.concurrency,
+            },
+            &paths,
+            &cancel,
+            &EmittingReview {
+                app: &handle,
+                run_id: &run_id,
+            },
+        )
+        .map_err(llm::client::LlmError::config)
+    })
+    .await
+    .map_err(|error| llm::client::LlmError::config(error.to_string()));
+
+    if let Ok(mut slot) = state.review_cancel.lock() {
+        *slot = None;
+    }
+
+    outcome?
+}
+
+/// 実行中のレビューを止める。走っていなければ何もしない。
+///
+/// **チャンクが届いた時点で効く。** 黙り込んだ接続先を相手にしているときだけ、
+/// 読み取りが返るまで畳まれない（fetch と同じ割り切り。DESIGN.md §8.3）。
+#[tauri::command]
+async fn cancel_review(state: State<'_, AppState>) -> Result<(), String> {
+    if let Ok(slot) = state.review_cancel.lock() {
+        if let Some(cancel) = slot.as_ref() {
+            cancel.cancel();
+        }
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -1129,6 +1293,7 @@ pub fn run() {
                 snapshots: Arc::new(SnapshotCache::new()),
                 fetch_cancel: Mutex::new(None),
                 clone_cancel: Mutex::new(None),
+                review_cancel: Mutex::new(None),
             });
             Ok(())
         })
@@ -1169,7 +1334,10 @@ pub fn run() {
             test_llm_connection,
             load_skills,
             set_skill_use,
-            set_skill_extra
+            set_skill_extra,
+            plan_review,
+            start_review,
+            cancel_review
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -1400,5 +1568,191 @@ mod tests {
         // 操作が「触らない」に化ける。
         assert!(serde_json::from_str::<ApiKeyUpdate>(r#"{"kind":"whatever"}"#).is_err());
         assert!(serde_json::from_str::<ApiKeyUpdate>(r#"{"kind":"replace"}"#).is_err());
+    }
+
+    /// **フロントが送るレビューの依頼をそのまま食えること**（T-18 / T-21 の申し送り）。
+    ///
+    /// `DiffSource` は差分ペインとレビューで**共用している**ので、
+    /// ここが通れば `load_file_diff` 側も同じ形で通る。
+    #[test]
+    fn the_review_request_wire_format_matches_what_the_front_end_sends() {
+        use crate::git::diff::DiffSource;
+
+        let range = serde_json::from_str::<DiffSource>(
+            r#"{"kind":"range","parent":"aaa","sha":"bbb","symmetric":false}"#,
+        )
+        .expect("range を食えること");
+        match &range {
+            DiffSource::Range {
+                parent,
+                sha,
+                symmetric,
+            } => {
+                assert_eq!(parent.as_deref(), Some("aaa"));
+                assert_eq!(sha, "bbb");
+                assert!(!symmetric);
+            }
+            other => panic!("range として読めていない: {other:?}"),
+        }
+
+        // ルートコミットは `parent` が null。
+        let root = serde_json::from_str::<DiffSource>(
+            r#"{"kind":"range","parent":null,"sha":"bbb","symmetric":false}"#,
+        )
+        .expect("ルートコミットを食えること");
+        assert!(matches!(root, DiffSource::Range { parent: None, .. }));
+
+        let working = serde_json::from_str::<DiffSource>(
+            r#"{"kind":"workingTree","staged":true}"#,
+        )
+        .expect("workingTree を食えること");
+        assert!(matches!(
+            working,
+            DiffSource::WorkingTree { staged: true }
+        ));
+
+        // **知らない kind を黙って握り潰さない。**
+        assert!(serde_json::from_str::<DiffSource>(r#"{"kind":"whatever"}"#).is_err());
+        // スネークケースで送っても通してはいけない（片方だけ直して気付けなくなる）。
+        assert!(serde_json::from_str::<DiffSource>(
+            r#"{"kind":"working_tree","staged":true}"#
+        )
+        .is_err());
+    }
+
+    /// **フロントが読む形を固定する**（T-21 の申し送り）。
+    ///
+    /// 形が違えば画面は黙って空になる。あわせて
+    /// **skill の本文がフロントへ渡らないこと**もここで押さえる。
+    #[test]
+    fn the_review_wire_format_matches_what_the_front_end_reads() {
+        use crate::git::diff::{ChangeStatus, DiffSource};
+        use crate::llm::review::{
+            Finding, PlannedFile, PlannedSkill, ReviewEvent, ReviewFileResult, ReviewPlan,
+            ReviewRun, ReviewText, Severity,
+        };
+        use crate::llm::skill::SkillOrigin;
+
+        let plan = ReviewPlan {
+            files: vec![PlannedFile {
+                path: "a.txt".to_string(),
+                old_path: Some("b.txt".to_string()),
+                status: ChangeStatus::Renamed,
+                tokens_estimate: 12,
+                parts: 2,
+                skipped: None,
+            }],
+            skills: vec![PlannedSkill {
+                name: "general-review".to_string(),
+                origin: SkillOrigin::BuiltIn,
+            }],
+            tokens_estimate: 12,
+            blocked: Some("観点がありません".to_string()),
+        };
+        let json = serde_json::to_value(&plan).unwrap();
+        assert_eq!(json["files"][0]["oldPath"], "b.txt");
+        assert_eq!(json["files"][0]["status"], "renamed");
+        assert_eq!(json["files"][0]["tokensEstimate"], 12);
+        assert_eq!(json["files"][0]["parts"], 2);
+        assert_eq!(json["files"][0]["skipped"], serde_json::Value::Null);
+        assert_eq!(json["skills"][0]["origin"], "builtIn");
+        assert_eq!(json["tokensEstimate"], 12);
+        assert_eq!(json["blocked"], "観点がありません");
+
+        let text = ReviewText {
+            summary: "要約".to_string(),
+            findings: vec![Finding {
+                file: "a.txt".to_string(),
+                line: Some(3),
+                severity: Severity::Critical,
+                title: "見出し".to_string(),
+                message: "本文".to_string(),
+            }],
+            markdown: Some("生出力".to_string()),
+            fallback_reason: Some("構造化に失敗しました".to_string()),
+        };
+        let run = ReviewRun {
+            run_id: "r1".to_string(),
+            profile_id: "p1".to_string(),
+            model: "m".to_string(),
+            source: DiffSource::WorkingTree { staged: false },
+            skills: plan.skills.clone(),
+            files: vec![ReviewFileResult {
+                path: "a.txt".to_string(),
+                old_path: None,
+                parts: 1,
+                text: Some(text.clone()),
+                error: Some(crate::llm::client::LlmError::config("だめでした")),
+                tokens_estimate: 4,
+                elapsed_ms: 5,
+            }],
+            summary: Some(text.clone()),
+            failed: 1,
+            cancelled: true,
+            started_at: 1_700_000_000_000,
+            elapsed_ms: 9,
+        };
+        let json = serde_json::to_value(&run).unwrap();
+        assert_eq!(json["runId"], "r1");
+        assert_eq!(json["profileId"], "p1");
+        assert_eq!(json["source"]["kind"], "workingTree");
+        assert_eq!(json["source"]["staged"], false);
+        assert_eq!(json["failed"], 1);
+        assert_eq!(json["cancelled"], true);
+        assert_eq!(json["startedAt"], 1_700_000_000_000i64);
+        assert_eq!(json["elapsedMs"], 9);
+
+        let file = &json["files"][0];
+        assert_eq!(file["tokensEstimate"], 4);
+        assert_eq!(file["text"]["findings"][0]["severity"], "critical");
+        assert_eq!(file["text"]["findings"][0]["line"], 3);
+        assert_eq!(file["text"]["markdown"], "生出力");
+        assert_eq!(file["text"]["fallbackReason"], "構造化に失敗しました");
+        // 失敗は接続テストと同じ形で出せること（画面が文言を出し分けられる）。
+        assert_eq!(file["error"]["kind"], "config");
+        assert!(file["error"]["message"].is_string());
+
+        // **skill は名前と出どころだけ。本文を webview へ送らない**（CLAUDE.md §4）。
+        let skill = &json["skills"][0];
+        assert!(skill.get("body").is_none(), "{skill}");
+        assert!(skill.get("preview").is_none(), "{skill}");
+
+        // イベントは `kind` で分かれ、**どのファイルのものか**が付いてくる。
+        let started = serde_json::to_value(ReviewEvent::Started { total: 3 }).unwrap();
+        assert_eq!(started["kind"], "started");
+        assert_eq!(started["total"], 3);
+
+        let delta = serde_json::to_value(ReviewEvent::Delta {
+            index: 2,
+            text: "少しずつ".to_string(),
+        })
+        .unwrap();
+        assert_eq!(delta["kind"], "delta");
+        assert_eq!(delta["index"], 2);
+        assert_eq!(delta["text"], "少しずつ");
+
+        let done = serde_json::to_value(ReviewEvent::FileDone {
+            index: 0,
+            result: Box::new(run.files[0].clone()),
+        })
+        .unwrap();
+        assert_eq!(done["kind"], "fileDone");
+        assert_eq!(done["result"]["path"], "a.txt");
+
+        let summary = serde_json::to_value(ReviewEvent::SummaryDone {
+            summary: Some(text),
+        })
+        .unwrap();
+        assert_eq!(summary["kind"], "summaryDone");
+        assert_eq!(summary["summary"]["summary"], "要約");
+
+        // **走りの ID がすべてのイベントに乗る**（中止して次を始めたとき取り違えない）。
+        let wrapped = serde_json::to_value(super::ReviewProgressEvent {
+            run_id: "r1",
+            event: ReviewEvent::SummaryStarted,
+        })
+        .unwrap();
+        assert_eq!(wrapped["runId"], "r1");
+        assert_eq!(wrapped["kind"], "summaryStarted");
     }
 }

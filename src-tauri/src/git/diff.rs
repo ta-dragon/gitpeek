@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::commandlog::LogSink;
 use crate::encoding::{self, LineEnding, LineEndingCounts, TextEncoding};
@@ -215,6 +215,94 @@ impl Revisions<'_> {
     fn cached(&self) -> bool {
         matches!(self, Self::WorkingTree { staged: true })
     }
+}
+
+/// フロントから届く「何と何を比べるか」。[`Revisions`] の**持ち主付きの姿**。
+///
+/// **真偽値を並べるのではなく種類で分ける。** `parent` / `sha` / `symmetric` /
+/// 「作業ツリーか」を平らに並べると、成り立たない組み合わせが表現できてしまう。
+///
+/// **差分ペインとレビューが同じものを指す**ので、型を 2 つ作らない（T-22）。
+/// 片方だけワイヤ形式を直すと、もう片方が黙って動かなくなる。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum DiffSource {
+    /// リビジョン 2 点。`parent` が `None` はルートコミット。
+    Range {
+        parent: Option<String>,
+        sha: String,
+        symmetric: bool,
+    },
+    /// 作業ツリー。`staged` なら HEAD と index、そうでなければ index と作業ツリー。
+    WorkingTree { staged: bool },
+}
+
+impl DiffSource {
+    pub fn revisions(&self) -> Revisions<'_> {
+        match self {
+            Self::Range {
+                parent,
+                sha,
+                symmetric,
+            } => Revisions::Range {
+                from: parent.as_deref(),
+                to: sha,
+                symmetric: *symmetric,
+            },
+            Self::WorkingTree { staged } => Revisions::WorkingTree { staged: *staged },
+        }
+    }
+
+    /// 「この 2 点は 1 つのコミットとその親かもしれない」候補（T-22）。
+    ///
+    /// **ここでは決まらない。** `Range { parent: Some(a), sha: b }` は
+    /// 「コミット `b` を親 `a` と比べている」と「無関係な 2 点 `a` `b` を比べている」の
+    /// **どちらでも同じ形**なので、実際に親子かどうかは git に聞くしかない
+    /// （[`is_parent_of`]）。`parent` が `None` はルートコミットなので、ここで決まる。
+    ///
+    /// 作業ツリーと `A...B` は候補にもならない。
+    pub fn commit_message_candidate(&self) -> Option<(&str, Option<&str>)> {
+        match self {
+            Self::Range {
+                parent,
+                sha,
+                symmetric: false,
+            } => Some((sha, parent.as_deref())),
+            _ => None,
+        }
+    }
+}
+
+/// `parent` が `sha` の親のどれかか。**片方でも解決できなければ `false`。**
+///
+/// 「コミットとその親」と「無関係な 2 点」を言い分けるためだけに使う（T-22）。
+/// `rev-list --parents -n 1` は 1 行で `<sha> <親…>` を出すので、これ 1 回で足りる。
+pub fn is_parent_of(
+    log: &dyn LogSink,
+    program: &str,
+    repo: &Path,
+    parent: &str,
+    sha: &str,
+) -> bool {
+    let Ok(resolved) = exec::run(log, program, Some(repo), &["rev-parse", "--verify", &format!("{parent}^{{commit}}")])
+    else {
+        return false;
+    };
+    if !resolved.ok() {
+        return false;
+    }
+    let parent_sha = resolved.stdout_lossy().trim().to_string();
+
+    let Ok(output) = exec::run(log, program, Some(repo), &["rev-list", "--parents", "-n", "1", sha])
+    else {
+        return false;
+    };
+    if !output.ok() {
+        return false;
+    }
+    let line = output.stdout_lossy();
+    // 先頭は自分自身。2 つ目以降が親。
+    line.split_whitespace().skip(1).any(|it| it == parent_sha)
 }
 
 /// 変更ファイル一覧を取る。

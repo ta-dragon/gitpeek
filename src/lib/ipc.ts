@@ -1081,6 +1081,148 @@ export function setSkillExtra(target: SkillTarget, extra: string): Promise<Skill
   return invoke<SkillCatalog>("set_skill_extra", { target, extra });
 }
 
+/* ---------- AI レビュー（`src-tauri/src/llm/review.rs`）---------- */
+
+/** 指摘の重さ。**4 つ以外は Rust 側で `info` へ寄せてある。** */
+export type Severity = "critical" | "major" | "minor" | "info";
+
+export type Finding = {
+  file: string;
+  /** 差分の中の行。モデルが書かなければ null。 */
+  line: number | null;
+  severity: Severity;
+  title: string;
+  message: string;
+};
+
+/**
+ * モデルの応答 1 つ分。**構造化できたかどうかの両方が入る。**
+ *
+ * `markdown` が入っているときは構造化に失敗している（DESIGN.md §10.6）。
+ * **そのときも本文は捨てられていない。** `fallbackReason` を添えて出すこと。
+ */
+export type ReviewText = {
+  summary: string;
+  findings: Finding[];
+  markdown: string | null;
+  fallbackReason: string | null;
+};
+
+/** 使う観点。**本文は届かない** — 画面に出すのは名前と出どころだけ（CLAUDE.md §4）。 */
+export type PlannedSkill = { name: string; origin: SkillOrigin };
+
+/** 実行前に見せる 1 ファイル。**投げないものも消さずに理由付きで並ぶ。** */
+export type PlannedFile = {
+  path: string;
+  oldPath: string | null;
+  status: ChangeStatus;
+  tokensEstimate: number;
+  /** 分けて投げる回数。**2 以上なら「hunk 分割されます」。** */
+  parts: number;
+  /** 投げない理由。null なら投げる。 */
+  skipped: string | null;
+};
+
+/**
+ * 実行前パネルの中身（DESIGN.md §10.4）。
+ *
+ * **見積もりも分割数も Rust 側が決める。** 同じ計算をこちらに書かないこと
+ * （必ずずれる）。`blocked` はそのまま画面へ出す押せない理由。
+ */
+export type ReviewPlan = {
+  files: PlannedFile[];
+  skills: PlannedSkill[];
+  tokensEstimate: number;
+  blocked: string | null;
+};
+
+export type ReviewFileResult = {
+  path: string;
+  oldPath: string | null;
+  parts: number;
+  text: ReviewText | null;
+  /** **このファイルだけの失敗。** 全体は止まっていない。 */
+  error: LlmError | null;
+  tokensEstimate: number;
+  elapsedMs: number;
+};
+
+/** レビュー 1 回分。**T-23 はこれをそのまま履歴へ積む。** */
+export type ReviewRun = {
+  runId: string;
+  profileId: string;
+  model: string;
+  source: DiffSource;
+  skills: PlannedSkill[];
+  files: ReviewFileResult[];
+  summary: ReviewText | null;
+  /** 失敗したファイル数。**「N 件失敗」の正はこちら**（本文ではない）。 */
+  failed: number;
+  cancelled: boolean;
+  startedAt: number;
+  elapsedMs: number;
+};
+
+/**
+ * 途中経過。**`runId` で走りを見分ける** — 中止してすぐ次を始めると、
+ * 前の走りの残りが後から届く。
+ *
+ * `index` は `ReviewPlan` の並びではなく**投げたものの通し番号**。
+ * 並列度 2 以上では `delta` が混ざるので、必ずこれで振り分けること。
+ */
+export type ReviewProgress = { runId: string } & (
+  | { kind: "started"; total: number }
+  | { kind: "fileStarted"; index: number; path: string }
+  | { kind: "delta"; index: number; text: string }
+  | { kind: "fileDone"; index: number; result: ReviewFileResult }
+  | { kind: "summaryStarted" }
+  | { kind: "summaryDelta"; text: string }
+  | { kind: "summaryDone"; summary: ReviewText | null }
+);
+
+/** 実行前パネルの中身を作る。**git を呼ぶので少し時間がかかる。** */
+export function planReview(options: {
+  repositoryId: string;
+  source: DiffSource;
+  profileId: string;
+}): Promise<ReviewPlan> {
+  return invoke<ReviewPlan>("plan_review", options);
+}
+
+/**
+ * レビューを走らせる。
+ *
+ * `runId` は**呼ぶ側が採番する** — 走り始める前にイベントの受け口を用意できるように。
+ * `paths` は実行前パネルで**残された**ファイル。計画そのものは Rust 側が組み直す。
+ */
+export function startReview(options: {
+  runId: string;
+  repositoryId: string;
+  source: DiffSource;
+  profileId: string;
+  paths: string[];
+}): Promise<ReviewRun> {
+  return invoke<ReviewRun>("start_review", options);
+}
+
+/**
+ * 実行中のレビューを止める。
+ *
+ * **チャンクが届いた時点で効く。** 黙り込んだ接続先が相手のときだけ、
+ * 読み取りが返るまで畳まれない（fetch と同じ割り切り）。
+ */
+export function cancelReview(): Promise<void> {
+  return invoke<void>("cancel_review");
+}
+
+const REVIEW_PROGRESS_EVENT = "review-progress";
+
+export function onReviewProgress(
+  handler: (progress: ReviewProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<ReviewProgress>(REVIEW_PROGRESS_EVENT, (event) => handler(event.payload));
+}
+
 const SNAPSHOT_PROGRESS_EVENT = "snapshot-progress";
 
 export function onSnapshotProgress(
