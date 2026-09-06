@@ -407,13 +407,17 @@ grep -ho '\[[^]]*\]' gitpeek-*.log | grep -v '^\[-\]$' | sort -u
 
 **実装内容**
 
-1. `npm run package:zip` を実際に走らせる。**`tauri build` は初回なので通らない可能性がある**
-   （リリースビルドを一度も試していない）。落ちたら直す
+1. `npm run package:zip` を実際に走らせる。**済（2026-09-06）** — 通った。
+   ただし **exe の実体が `gitpeek.exe`（小文字）になっていた**。cargo のパッケージ名が
+   そのまま出ており、zip が `GitPeek.exe` で通っていたのは
+   **Windows が大文字小文字を区別しないおかげの偶然**だった。
+   `tauri.conf.json` に **`mainBinaryName: "GitPeek"`** を足して実体を揃えた
 2. zip を**別のフォルダへ展開して起動**する。開発ビルドとの差異を見る —
    `%APPDATA%` の解決 ／ アイコン ／ ウィンドウの初期サイズ ／ WebView2
-3. `README.md` を書く。**何ができて何を「しないと決めた」か**（CLAUDE.md §1）／
-   起動方法 ／ 設定とログの置き場所（`%APPDATA%\com.tatsu.gitpeek\`）／
-   git と WebView2 が要ること
+3. `README.md` を書く。**済（2026-09-06）** — 何ができて何を「しないと決めた」か
+   （CLAUDE.md §1）／ 起動方法 ／ 設定とログの置き場所
+   （`%APPDATA%\com.tatsu.gitpeek\`）／ git と WebView2 が要ること ／
+   リポジトリ内 skill が既定で無効なこと ／ AdGuard で白くなる話
 4. 1 週間使う。**終わりに上のコマンドを打ち、目視 1 問に答えてもらう**
 
 **制約**
