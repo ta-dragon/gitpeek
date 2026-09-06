@@ -12,9 +12,9 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use givsoner_lib::git::exec::{self, Cancel};
-use givsoner_lib::git::ops::{self, FetchStatus};
-use givsoner_lib::git::repo;
+use gitpeek_lib::git::exec::{self, Cancel};
+use gitpeek_lib::git::ops::{self, FetchStatus};
+use gitpeek_lib::git::repo;
 
 use common::{fixtures, log};
 
@@ -31,7 +31,7 @@ fn working_copy(name: &str) -> (tempfile::TempDir, PathBuf) {
 /// 上流を共有したままにしてはいけない。中止の試験は git を kill するので、
 /// **落とし損ねた子プロセスが上流のファイルを掴んだまま残る**ことがある。
 /// Windows では掴まれたファイルを消せないので、次のテストバイナリが
-/// `%TEMP%\givsoner-test-repos` を作り直せずに落ちる（実際に一度落ちた）。
+/// `%TEMP%\gitpeek-test-repos` を作り直せずに落ちる（実際に一度落ちた）。
 fn client_with_origin() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("一時ディレクトリ");
     let origin = dir.path().join("fetch-origin.git");

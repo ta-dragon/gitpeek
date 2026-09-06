@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    givsoner_lib::run()
+    gitpeek_lib::run()
 }

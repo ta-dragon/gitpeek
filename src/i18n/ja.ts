@@ -6,7 +6,7 @@
  */
 export const ja = {
   app: {
-    name: "Givsoner",
+    name: "GitPeek",
     tagline: "個人用 Git ビューワー",
   },
 
@@ -48,7 +48,7 @@ export const ja = {
     unborn: "コミットなし",
     indexLock: "index.lock 残留",
     indexLockDetail:
-      "他の git プロセスが動作中の可能性があります。Givsoner はこのファイルを削除しません。",
+      "他の git プロセスが動作中の可能性があります。GitPeek はこのファイルを削除しません。",
     notRepository: "git リポジトリではありません",
     selectFolder: "リポジトリのフォルダを選択",
     selectScanRoot: "スキャンするフォルダを選択",
@@ -86,7 +86,7 @@ export const ja = {
       `前回は ${commits.toLocaleString()} コミットありました。読み込みに数十秒かかり、` +
       `メモリを数 GB 使います。その間このウィンドウは操作できません。`,
     oversizedNote:
-      "Givsoner が想定しているのは数万コミットまでです（docs/DESIGN.md §4.1）。" +
+      "GitPeek が想定しているのは数万コミットまでです（docs/DESIGN.md §4.1）。" +
       "この規模の正式対応は v1.1 以降で行います。" +
       "リリースビルド（npm run start:release）の方が大幅に速く終わります。",
     oversizedLoad: "それでも読み込む",
@@ -177,7 +177,7 @@ export const ja = {
       `いまの既定（${current}）を、この場所に置き換えます。`,
 
     authNote:
-      "資格情報が必要なリモートでは、認証ウィンドウが前面に出ることがあります。Givsoner はパスワードもトークンも受け取らず、git に任せます。",
+      "資格情報が必要なリモートでは、認証ウィンドウが前面に出ることがあります。GitPeek はパスワードもトークンも受け取らず、git に任せます。",
     // 提供しないものを先に言う（CLAUDE.md §1）。
     fullHistoryNote:
       "履歴は全部取り込みます（浅い clone とブランチの指定は行いません）。",
@@ -204,7 +204,7 @@ export const ja = {
 
   crash: {
     title: "画面の描画で問題が起きました",
-    body: "この画面は Givsoner の不具合です。下の内容を添えて報告してください。",
+    body: "この画面は GitPeek の不具合です。下の内容を添えて報告してください。",
     stack: "発生箇所",
     reload: "再読込",
 
@@ -229,7 +229,7 @@ export const ja = {
     // どうすればよいかを出す。
     panicTitle: "内部で問題が起きました",
     panicBody:
-      "この後の操作は正しく動かないことがあります。Givsoner を再起動してください。",
+      "この後の操作は正しく動かないことがあります。GitPeek を再起動してください。",
     panicDetail: "発生内容",
     close: "閉じる",
   },
@@ -245,10 +245,10 @@ export const ja = {
     detecting: "git を確認しています…",
     notFoundTitle: "git が見つかりません",
     notFoundBody:
-      "Givsoner は git がインストールされている環境でのみ動作します。git をインストールするか、実行ファイルのフルパスを指定してください。",
+      "GitPeek は git がインストールされている環境でのみ動作します。git をインストールするか、実行ファイルのフルパスを指定してください。",
     tooOldTitle: "git のバージョンが古すぎます",
     tooOldBody: (found: string, min: string) =>
-      `検出されたバージョンは ${found} ですが、Givsoner は ${min} 以上を必要とします。git を更新してください。`,
+      `検出されたバージョンは ${found} ですが、GitPeek は ${min} 以上を必要とします。git を更新してください。`,
     unreadableTitle: "git のバージョンを判定できません",
     installLabel: "Git for Windows をダウンロード",
     installUrl: "https://git-scm.com/download/win",
@@ -495,7 +495,7 @@ export const ja = {
       "早送り（fast-forward）は、手元のブランチを相手の位置まで進めるだけの取り込みです。マージコミットは作らず、手元にあるコミットを書き換えたり消したりしません。そのため、手元にだけあるコミットが 1 件でもあると実行できません。",
     mergeRun: "取り込む",
     mergeAhead: (n: number) =>
-      `手元にだけあるコミットが ${n} 件あるので、早送りになりません。Givsoner は早送り以外の取り込み方を持っていないので、この操作はできません（ターミナルで merge / rebase を選んでください）。`,
+      `手元にだけあるコミットが ${n} 件あるので、早送りになりません。GitPeek は早送り以外の取り込み方を持っていないので、この操作はできません（ターミナルで merge / rebase を選んでください）。`,
     mergeUpToDate: "取り込むものがありません。相手のコミットはすべて手元にあります。",
     mergeDetached:
       "いまブランチから外れた状態（detached HEAD）なので、取り込む先のブランチがありません。先にブランチへ切り替えてください。",
@@ -505,9 +505,9 @@ export const ja = {
     // --- 止める理由（docs/DESIGN.md §8.1）-----------------------------
     blockerBare: "bare リポジトリには作業ツリーがないので切り替えられません。",
     blockerDirty: (n: number) =>
-      `作業ツリーに ${n} 件の変更があります。Givsoner は stash も --force も行わないので、片付けてからもう一度実行してください。`,
+      `作業ツリーに ${n} 件の変更があります。GitPeek は stash も --force も行わないので、片付けてからもう一度実行してください。`,
     blockerIndexLock:
-      "index.lock が残っています。別の git が動いているかもしれません（Givsoner は消しません）。",
+      "index.lock が残っています。別の git が動いているかもしれません（GitPeek は消しません）。",
     blockerUnborn: "コミットが 1 件もありません。",
 
     // --- 結果 ---------------------------------------------------------

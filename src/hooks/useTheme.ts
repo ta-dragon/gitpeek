@@ -11,7 +11,7 @@ export type { ThemePreference };
  * 保存先は `settings.json` の `ui.theme`。Phase 0 で暫定的に使っていた
  * localStorage の値は、初回だけ設定へ引き継いでからキーを消す。
  */
-const LEGACY_STORAGE_KEY = "givsoner.theme";
+const LEGACY_STORAGE_KEY = "gitpeek.theme";
 
 function takeLegacyTheme(): ThemePreference | null {
   try {

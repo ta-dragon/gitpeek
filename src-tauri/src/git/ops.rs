@@ -145,7 +145,7 @@ pub fn fetch(
 /// ```
 ///
 /// **上流はタグを付け替えることがある。** 同じ名前が手元と上流で別のコミットを指すと、
-/// git は `--force` なしでは上書きしない。Givsoner はタグを書き換えないので
+/// git は `--force` なしでは上書きしない。GitPeek はタグを書き換えないので
 /// （CLAUDE.md §1）、**何が起きたかと、自分で直す方法**までを伝える。
 fn clobbered_tags(lines: &[String]) -> Vec<String> {
     lines
@@ -179,7 +179,7 @@ fn explain_clobbered_tags(tags: &[String]) -> String {
     };
 
     format!(
-        "タグ {} 件を更新できませんでした（{names}）。上流が同じ名前のタグを別のコミットへ付け替えています。Givsoner はタグを書き換えないので、手元を上流に合わせるならターミナルで `git fetch --tags --force` を実行してください（同じ名前のタグを手元で付け直していた場合は、そちらが上書きされます）。",
+        "タグ {} 件を更新できませんでした（{names}）。上流が同じ名前のタグを別のコミットへ付け替えています。GitPeek はタグを書き換えないので、手元を上流に合わせるならターミナルで `git fetch --tags --force` を実行してください（同じ名前のタグを手元で付け直していた場合は、そちらが上書きされます）。",
         tags.len(),
     )
 }
@@ -504,7 +504,7 @@ fn explain_checkout(stderr: &str) -> String {
     if stderr.contains("would be overwritten by checkout")
         || stderr.contains("Your local changes to the following files would be overwritten")
     {
-        return "手元の変更が上書きされるため切り替えられません。変更を片付けてからもう一度実行してください（Givsoner は stash も --force も行いません）。".to_string();
+        return "手元の変更が上書きされるため切り替えられません。変更を片付けてからもう一度実行してください（GitPeek は stash も --force も行いません）。".to_string();
     }
     // **未追跡ファイルは止めていない**ので、同じ名前のものがあるとここに来る。
     if stderr.contains("untracked working tree files would be overwritten") {
@@ -528,7 +528,7 @@ fn explain_checkout(stderr: &str) -> String {
 fn explain_merge(stderr: &str) -> String {
     let lower = stderr.to_ascii_lowercase();
     if lower.contains("not possible to fast-forward") {
-        return "fast-forward できないので取り込みませんでした。手元にだけあるコミットがあります（Givsoner は fast-forward 以外のマージを行いません）。".to_string();
+        return "fast-forward できないので取り込みませんでした。手元にだけあるコミットがあります（GitPeek は fast-forward 以外のマージを行いません）。".to_string();
     }
     if lower.contains("refusing to merge unrelated histories") {
         return "共通の祖先が無いので取り込めません。".to_string();

@@ -6,7 +6,7 @@ import { NO_CONTEXT, type TargetContext } from "./reviewTarget";
 
 /** 書き出しの文脈。**リポジトリ名と要約が引ける場合**。 */
 const CONTEXT: TargetContext = {
-  repositoryName: "givsoner",
+  repositoryName: "gitpeek",
   subjectOf: (sha) => (sha === "bbbbbbbbbb" ? "fix: 直す" : null),
 };
 
@@ -175,7 +175,7 @@ describe("toMarkdown", () => {
   // **どのリポジトリの何を見たのか**が書き出しに残ること。
   it("リポジトリと対象を書く", () => {
     const text = toMarkdown(stored(), CONTEXT);
-    expect(text).toContain("- リポジトリ: givsoner");
+    expect(text).toContain("- リポジトリ: gitpeek");
     expect(text).toContain("bbbbbbbb「fix: 直す」");
   });
 

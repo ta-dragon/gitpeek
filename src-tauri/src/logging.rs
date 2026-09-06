@@ -1,6 +1,6 @@
 //! ログファイル（T-24。docs/DESIGN.md §13.3, §13.4）。
 //!
-//! `%APPDATA%\com.tatsu.givsoner\logs\givsoner-YYYY-MM-DD.log` に 1 行 1 イベントで書く。
+//! `%APPDATA%\com.tatsu.gitpeek\logs\gitpeek-YYYY-MM-DD.log` に 1 行 1 イベントで書く。
 //! Phase 6 以降の認証・checkout まわりは再現が難しく、後から追える記録が要る。
 //!
 //! ここが守っていること:
@@ -31,7 +31,7 @@ use tauri_plugin_log::{Target, TargetKind};
 use crate::redact::redact;
 
 /// ファイル名の頭。**掃除の対象を見分ける鍵**でもある。
-const PREFIX: &str = "givsoner-";
+const PREFIX: &str = "gitpeek-";
 
 /// 何日ぶん残すか（DESIGN.md §13.3）。**ちょうど 7 日は残す。**
 pub const KEEP_DAYS: i64 = 7;
@@ -103,7 +103,7 @@ fn panic_text(payload: &str, at: Option<String>) -> String {
 /// ログ用のプラグイン。**書き出し先はこのアプリのデータフォルダに固定する。**
 ///
 /// プラグイン既定の `LogDir` は Windows では `%LOCALAPPDATA%` を指すので使わない
-/// （置き場所は `%APPDATA%\com.tatsu.givsoner\logs\` と決めてある。CLAUDE.md §5）。
+/// （置き場所は `%APPDATA%\com.tatsu.gitpeek\logs\` と決めてある。CLAUDE.md §5）。
 pub fn plugin<R: Runtime>(logs_dir: &Path, today: NaiveDate) -> tauri::plugin::TauriPlugin<R> {
     tauri_plugin_log::Builder::new()
         .target(Target::new(TargetKind::Folder {
@@ -130,7 +130,7 @@ pub fn plugin<R: Runtime>(logs_dir: &Path, today: NaiveDate) -> tauri::plugin::T
 
 /// 古いログを消す。**消した数**を返す。
 ///
-/// **自分が作った形のファイルだけを見る**（`givsoner-YYYY-MM-DD` で始まり `.log` で
+/// **自分が作った形のファイルだけを見る**（`gitpeek-YYYY-MM-DD` で始まり `.log` で
 /// 終わるもの。プラグインが分けた `_<日時>` 付きと `.bak` も同じ頭を持つ）。
 /// フォルダに置かれた他のものには触らない。
 ///
@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn names_the_file_by_the_day() {
-        assert_eq!(file_stem(day("2026-09-06")), "givsoner-2026-09-06");
+        assert_eq!(file_stem(day("2026-09-06")), "gitpeek-2026-09-06");
     }
 
     /// **平文の資格情報が 1 文字も出ない。** 書き出しの口はここだけなので、
@@ -236,14 +236,14 @@ mod tests {
 
     #[test]
     fn reads_the_date_from_our_own_names() {
-        assert_eq!(dated("givsoner-2026-09-06.log"), Some(day("2026-09-06")));
+        assert_eq!(dated("gitpeek-2026-09-06.log"), Some(day("2026-09-06")));
         // プラグインが大きさで分けたもの。
         assert_eq!(
-            dated("givsoner-2026-09-06_2026-09-06_15-32-10.log"),
+            dated("gitpeek-2026-09-06_2026-09-06_15-32-10.log"),
             Some(day("2026-09-06"))
         );
         assert_eq!(
-            dated("givsoner-2026-09-06_2026-09-06_15-32-10.log.bak"),
+            dated("gitpeek-2026-09-06_2026-09-06_15-32-10.log.bak"),
             Some(day("2026-09-06"))
         );
     }
@@ -251,10 +251,10 @@ mod tests {
     /// **形が違うものは見ない。** ＝ 掃除の対象にならない。
     #[test]
     fn ignores_other_names() {
-        assert_eq!(dated("givsoner.log"), None);
-        assert_eq!(dated("givsoner-2026-09-06.txt"), None);
+        assert_eq!(dated("gitpeek.log"), None);
+        assert_eq!(dated("gitpeek-2026-09-06.txt"), None);
         assert_eq!(dated("メモ.log"), None);
-        assert_eq!(dated("givsoner-いつか.log"), None);
+        assert_eq!(dated("gitpeek-いつか.log"), None);
         assert_eq!(dated(""), None);
     }
 
@@ -264,19 +264,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let today = day("2026-09-10");
         for name in [
-            "givsoner-2026-09-10.log", // 今日
-            "givsoner-2026-09-03.log", // ちょうど 7 日
-            "givsoner-2026-09-02.log", // 8 日 → 消える
-            "givsoner-2026-08-01.log", // ずっと前 → 消える
+            "gitpeek-2026-09-10.log", // 今日
+            "gitpeek-2026-09-03.log", // ちょうど 7 日
+            "gitpeek-2026-09-02.log", // 8 日 → 消える
+            "gitpeek-2026-08-01.log", // ずっと前 → 消える
         ] {
             fs::write(dir.path().join(name), "x").unwrap();
         }
 
         assert_eq!(sweep(dir.path(), today, KEEP_DAYS), 2);
-        assert!(dir.path().join("givsoner-2026-09-10.log").exists());
-        assert!(dir.path().join("givsoner-2026-09-03.log").exists());
-        assert!(!dir.path().join("givsoner-2026-09-02.log").exists());
-        assert!(!dir.path().join("givsoner-2026-08-01.log").exists());
+        assert!(dir.path().join("gitpeek-2026-09-10.log").exists());
+        assert!(dir.path().join("gitpeek-2026-09-03.log").exists());
+        assert!(!dir.path().join("gitpeek-2026-09-02.log").exists());
+        assert!(!dir.path().join("gitpeek-2026-08-01.log").exists());
     }
 
     /// **自分が置いていないファイルには触らない。**
@@ -285,16 +285,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let today = day("2026-09-10");
         fs::write(dir.path().join("たいせつなメモ.txt"), "x").unwrap();
-        fs::write(dir.path().join("givsoner.log"), "x").unwrap();
+        fs::write(dir.path().join("gitpeek.log"), "x").unwrap();
         fs::write(dir.path().join("other-2020-01-01.log"), "x").unwrap();
-        fs::create_dir(dir.path().join("givsoner-2020-01-01.log")).unwrap();
+        fs::create_dir(dir.path().join("gitpeek-2020-01-01.log")).unwrap();
 
         assert_eq!(sweep(dir.path(), today, KEEP_DAYS), 0);
         assert!(dir.path().join("たいせつなメモ.txt").exists());
-        assert!(dir.path().join("givsoner.log").exists());
+        assert!(dir.path().join("gitpeek.log").exists());
         assert!(dir.path().join("other-2020-01-01.log").exists());
         // 同じ名前のディレクトリも消さない（ファイルだけを見る）。
-        assert!(dir.path().join("givsoner-2020-01-01.log").is_dir());
+        assert!(dir.path().join("gitpeek-2020-01-01.log").is_dir());
     }
 
     /// **フォルダが無くても落ちない。** ログのために起動を止めない。

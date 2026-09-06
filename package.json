@@ -1,5 +1,5 @@
 {
-  "name": "givsoner",
+  "name": "gitpeek",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -14,7 +14,7 @@
     "test": "vitest run",
     "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
     "check:rust": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
-    "package:zip": "npm run tauri build && powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path dist-zip | Out-Null; Compress-Archive -Path 'src-tauri/target/release/Givsoner.exe' -DestinationPath 'dist-zip/Givsoner-portable.zip' -Force\""
+    "package:zip": "npm run tauri build && powershell -NoProfile -Command \"New-Item -ItemType Directory -Force -Path dist-zip | Out-Null; Compress-Archive -Path 'src-tauri/target/release/GitPeek.exe' -DestinationPath 'dist-zip/GitPeek-portable.zip' -Force\""
   },
   "dependencies": {
     "@shikijs/langs": "^4.4.3",

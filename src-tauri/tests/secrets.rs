@@ -6,12 +6,12 @@
 //! 本番の項目を汚さないよう、サービス名は [`TEST_SERVICE`] を使い、
 //! キーはテストごとに採番して**必ず後始末する**。
 
-use givsoner_lib::secret::{new_credential_key, Secrets, SERVICE};
-use givsoner_lib::store::paths::StorePaths;
-use givsoner_lib::store::settings::{self, LlmProfile, Settings};
+use gitpeek_lib::secret::{new_credential_key, Secrets, SERVICE};
+use gitpeek_lib::store::paths::StorePaths;
+use gitpeek_lib::store::settings::{self, LlmProfile, Settings};
 
 /// 本番と別のサービス名。ここを本番と同じにしてはいけない。
-const TEST_SERVICE: &str = "com.tatsu.givsoner.test";
+const TEST_SERVICE: &str = "com.tatsu.gitpeek.test";
 
 fn vault() -> Secrets {
     assert_ne!(TEST_SERVICE, SERVICE, "テストが本番の項目を触ってはいけない");

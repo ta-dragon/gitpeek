@@ -7,10 +7,10 @@ mod common;
 
 use std::collections::{HashMap, HashSet};
 
-use givsoner_lib::graph::{self, GraphOrder, LaneLayout};
-use givsoner_lib::git::snapshot;
-use givsoner_lib::model::RepositorySnapshot;
-use givsoner_lib::store::settings::VisibleRefs;
+use gitpeek_lib::graph::{self, GraphOrder, LaneLayout};
+use gitpeek_lib::git::snapshot;
+use gitpeek_lib::model::RepositorySnapshot;
+use gitpeek_lib::store::settings::VisibleRefs;
 
 use common::{fixtures, log};
 

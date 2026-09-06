@@ -1,4 +1,4 @@
-//! `%APPDATA%\com.tatsu.givsoner\` のレイアウト解決。
+//! `%APPDATA%\com.tatsu.gitpeek\` のレイアウト解決。
 //!
 //! パスは必ず Tauri の `app_data_dir()` から解決する。**OneDrive 配下に設定を置かない**
 //! （CLAUDE.md §5）。作業ディレクトリが OneDrive 配下にあるため相対パスで組み立てると
@@ -7,7 +7,7 @@
 //! レイアウト（docs/DESIGN.md §12.1）:
 //!
 //! ```text
-//! %APPDATA%\com.tatsu.givsoner\
+//! %APPDATA%\com.tatsu.gitpeek\
 //! ├── settings.json
 //! ├── state.json
 //! ├── skills\
@@ -118,7 +118,7 @@ mod tests {
     #[test]
     fn ensure_creates_all_directories() {
         let dir = tempfile::tempdir().unwrap();
-        let paths = StorePaths::new(dir.path().join("com.tatsu.givsoner"));
+        let paths = StorePaths::new(dir.path().join("com.tatsu.gitpeek"));
         paths.ensure().unwrap();
         paths.ensure().unwrap(); // 二度目でも失敗しない
 

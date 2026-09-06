@@ -1,7 +1,7 @@
 /**
  * フロント側の UI 状態（`state.json` の写し）。
  *
- * 正は `%APPDATA%\com.tatsu.givsoner\state.json`（Rust 側 `store::state`）。
+ * 正は `%APPDATA%\com.tatsu.gitpeek\state.json`（Rust 側 `store::state`）。
  * **書き込みは Rust 側で 300ms デバウンスされる**ので、ペイン幅のドラッグのような
  * 高頻度の更新でもそのまま呼んでよい。
  */

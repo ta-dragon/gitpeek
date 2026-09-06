@@ -1,4 +1,4 @@
-//! 設定と UI 状態の永続化（`%APPDATA%\com.tatsu.givsoner\`）。
+//! 設定と UI 状態の永続化（`%APPDATA%\com.tatsu.gitpeek\`）。
 //!
 //! - `paths` — ディレクトリレイアウトの解決
 //! - `settings` — 手編集を想定した `settings.json`

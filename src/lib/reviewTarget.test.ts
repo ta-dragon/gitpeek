@@ -14,7 +14,7 @@ import {
 /** 読み込んだコミットから要約を引ける文脈。 */
 function withSubjects(subjects: Record<string, string>): TargetContext {
   return {
-    repositoryName: "givsoner",
+    repositoryName: "gitpeek",
     subjectOf: (sha) => (sha in subjects ? subjects[sha] : null),
   };
 }

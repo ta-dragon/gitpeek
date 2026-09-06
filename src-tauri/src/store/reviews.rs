@@ -1,6 +1,6 @@
 //! レビュー結果の永続化（T-23。docs/DESIGN.md §12.4 / CLAUDE.md §5）。
 //!
-//! `%APPDATA%\com.tatsu.givsoner\reviews\<repo-id>\<日時>-<runId の先頭 8 桁>.json`
+//! `%APPDATA%\com.tatsu.gitpeek\reviews\<repo-id>\<日時>-<runId の先頭 8 桁>.json`
 //!
 //! ここが守っていること:
 //!

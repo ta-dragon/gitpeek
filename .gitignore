@@ -23,7 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 
-# Givsoner
+# GitPeek
 dist-zip
 
 # tsc --build の中間生成物（tsconfig.node.json は composite）

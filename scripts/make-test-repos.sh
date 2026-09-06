@@ -53,7 +53,7 @@ mkdir -p "$root"
 root=$(cd "$root" && pwd)
 
 # 生成物を再現可能にする。ユーザーの .gitconfig にも左右されないようにする。
-export GIT_AUTHOR_NAME="Givsoner Test"
+export GIT_AUTHOR_NAME="GitPeek Test"
 export GIT_AUTHOR_EMAIL="test@example.invalid"
 export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
 export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"

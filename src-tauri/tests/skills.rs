@@ -7,10 +7,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use givsoner_lib::llm::skill::{
+use gitpeek_lib::llm::skill::{
     self, RepoTrustStatus, SkillEntry, SkillOrigin, SkillState, MAX_FILE_BYTES, MAX_FILES,
 };
-use givsoner_lib::store::settings::{RepoSkillTrust, SkillSettings};
+use gitpeek_lib::store::settings::{RepoSkillTrust, SkillSettings};
 
 /// 信頼していない skill に埋める目印。**これがプロンプト側へ出たら負け。**
 const LEAK_MARKER: &str = "MARKER-UNTRUSTED-BODY-MUST-NEVER-LEAK";
@@ -249,10 +249,10 @@ fn does_not_descend_into_subdirectories() {
 ///
 /// Windows の symlink 作成には開発者モードか管理者権限が要る。作れない環境では
 /// **作れなかったことを出して落とす** — 黙って素通りさせると、守れているのか
-/// 確かめていないのか区別が付かなくなる。`GIVSONER_SKIP_SYMLINK_TEST=1` で外せる。
+/// 確かめていないのか区別が付かなくなる。`GITPEEK_SKIP_SYMLINK_TEST=1` で外せる。
 #[test]
 fn does_not_follow_symlinks() {
-    if std::env::var("GIVSONER_SKIP_SYMLINK_TEST").is_ok() {
+    if std::env::var("GITPEEK_SKIP_SYMLINK_TEST").is_ok() {
         return;
     }
 
@@ -265,7 +265,7 @@ fn does_not_follow_symlinks() {
         panic!(
             "symlink を作れないので「辿らないこと」を確かめられません（{error}）。\
              Windows の設定で開発者モードを有効にするか、管理者権限で実行してください。\
-             どうしても外すときは GIVSONER_SKIP_SYMLINK_TEST=1 を設定してください。"
+             どうしても外すときは GITPEEK_SKIP_SYMLINK_TEST=1 を設定してください。"
         );
     }
 

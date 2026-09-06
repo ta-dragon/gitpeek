@@ -9,10 +9,10 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-use givsoner_lib::commandlog::CommandLog;
-use givsoner_lib::git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
-use givsoner_lib::git::snapshot::{self, SnapshotCache};
-use givsoner_lib::model::{CommitMeta, RefKind, RepositorySnapshot};
+use gitpeek_lib::commandlog::CommandLog;
+use gitpeek_lib::git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
+use gitpeek_lib::git::snapshot::{self, SnapshotCache};
+use gitpeek_lib::model::{CommitMeta, RefKind, RepositorySnapshot};
 
 use common::{fixtures, log};
 
@@ -77,7 +77,7 @@ fn loads_a_linear_history_newest_first() {
     let head = &snapshot.commits[0];
     assert_eq!(head.sha.len(), 40, "{}", head.sha);
     assert!(!head.short_sha.is_empty() && head.sha.starts_with(&head.short_sha));
-    assert_eq!(head.author_name, "Givsoner Test");
+    assert_eq!(head.author_name, "GitPeek Test");
     assert_eq!(head.author_email, "test@example.invalid");
     assert!(head.author_time > 0 && head.commit_time > 0);
 

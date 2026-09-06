@@ -1486,7 +1486,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "givsoner"
+name = "gitpeek"
 version = "0.1.0"
 dependencies = [
  "chrono",

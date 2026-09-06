@@ -14,8 +14,8 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use givsoner_lib::git::exec;
-use givsoner_lib::git::ops::{self, CheckoutTarget};
+use gitpeek_lib::git::exec;
+use gitpeek_lib::git::ops::{self, CheckoutTarget};
 
 use common::{fixtures, log};
 
@@ -223,7 +223,7 @@ fn tracking_a_name_that_already_exists_fails_with_advice() {
 #[test]
 fn a_dirty_repository_is_reported_as_dirty() {
     let (_dir, repo) = working_copy("dirty");
-    let tree = givsoner_lib::git::status::working_tree(&log(), "git", &repo).expect("status");
+    let tree = gitpeek_lib::git::status::working_tree(&log(), "git", &repo).expect("status");
 
     let guard = ops::preflight(false, false, false, Some(&tree));
     assert!(!guard.allowed(), "汚れているのに通ってしまう");

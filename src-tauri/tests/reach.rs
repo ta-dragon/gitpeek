@@ -9,11 +9,11 @@ mod common;
 use std::collections::HashSet;
 use std::process::Command;
 
-use givsoner_lib::git::snapshot;
-use givsoner_lib::graph::reach::{all_branch_status, CommitIndex};
-use givsoner_lib::graph::{self, GraphOrder};
-use givsoner_lib::model::RepositorySnapshot;
-use givsoner_lib::store::settings::VisibleRefs;
+use gitpeek_lib::git::snapshot;
+use gitpeek_lib::graph::reach::{all_branch_status, CommitIndex};
+use gitpeek_lib::graph::{self, GraphOrder};
+use gitpeek_lib::model::RepositorySnapshot;
+use gitpeek_lib::store::settings::VisibleRefs;
 
 use common::{fixtures, log};
 
@@ -187,11 +187,11 @@ fn layout_of_a_large_history_is_fast_enough() {
         } else {
             vec![format!("{:040x}", i + 1)]
         };
-        commits.push(givsoner_lib::model::CommitMeta {
+        commits.push(gitpeek_lib::model::CommitMeta {
             sha,
             short_sha: format!("{i:x}"),
             parents,
-            author_name: "Givsoner Test".into(),
+            author_name: "GitPeek Test".into(),
             author_email: "test@example.invalid".into(),
             author_time: 1_750_000_000 - i as i64,
             commit_time: 1_750_000_000 - i as i64,
@@ -202,16 +202,16 @@ fn layout_of_a_large_history_is_fast_enough() {
     let tip = commits[0].sha.clone();
     let snapshot = RepositorySnapshot {
         commits,
-        refs: vec![givsoner_lib::model::RefEntry {
+        refs: vec![gitpeek_lib::model::RefEntry {
             name: "refs/heads/main".into(),
             short_name: "main".into(),
-            kind: givsoner_lib::model::RefKind::LocalBranch,
+            kind: gitpeek_lib::model::RefKind::LocalBranch,
             target: tip.clone(),
             upstream: None,
             out_of_graph: false,
             orphan: false,
         }],
-        head: givsoner_lib::model::HeadInfo {
+        head: gitpeek_lib::model::HeadInfo {
             sha: Some(tip),
             branch: Some("refs/heads/main".into()),
             detached: false,

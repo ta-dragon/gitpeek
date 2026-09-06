@@ -10,9 +10,9 @@ mod common;
 
 use std::path::Path;
 
-use givsoner_lib::commandlog::CommandLog;
-use givsoner_lib::git::exec::{self, Cancel};
-use givsoner_lib::git::ops::{self, CloneRequest, CloneStatus};
+use gitpeek_lib::commandlog::CommandLog;
+use gitpeek_lib::git::exec::{self, Cancel};
+use gitpeek_lib::git::ops::{self, CloneRequest, CloneStatus};
 
 use common::{fixtures, log};
 
@@ -72,7 +72,7 @@ fn cloning_a_generated_bare_produces_a_usable_repository() {
     assert!(path.join(".git").is_dir(), "作業ツリー付きで clone すること");
 
     // 履歴が丸ごと来ていること。**浅くしていない**（CLAUDE.md §1）。
-    let probe = givsoner_lib::git::repo::probe(&log(), "git", path);
+    let probe = gitpeek_lib::git::repo::probe(&log(), "git", path);
     assert!(probe.is_repository, "{probe:#?}");
     assert!(!probe.is_shallow, "shallow にしてはいけない: {probe:#?}");
     assert!(!probe.is_bare, "{probe:#?}");

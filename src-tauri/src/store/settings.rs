@@ -228,7 +228,7 @@ pub struct LlmProfile {
     pub temperature: f32,
     pub max_tokens: u32,
     /// 資格情報マネージャーの参照キー（`llm/<uuid>`）。サービス名は別
-    /// （`secret::SERVICE` = `com.tatsu.givsoner`）。
+    /// （`secret::SERVICE` = `com.tatsu.gitpeek`）。
     /// **採番するのは `Store::upsert_llm_profile` だけ**で、以後変えない。
     pub credential_key: String,
 }
@@ -353,7 +353,7 @@ impl LoadError {
     pub fn message(&self) -> String {
         match self {
             Self::FutureVersion { found, supported } => format!(
-                "settings.json のスキーマ版 {found} はこのバージョンの Givsoner（対応 {supported}）では読めません。アプリを更新してください。設定は書き換えていません。"
+                "settings.json のスキーマ版 {found} はこのバージョンの GitPeek（対応 {supported}）では読めません。アプリを更新してください。設定は書き換えていません。"
             ),
             Self::Io(detail) => detail.clone(),
         }
@@ -619,7 +619,7 @@ mod tests {
             name: "local-qwen".to_string(),
             base_url: "http://localhost:11434/v1".to_string(),
             model: "qwen2.5-coder:14b".to_string(),
-            credential_key: "givsoner/llm/p1".to_string(),
+            credential_key: "gitpeek/llm/p1".to_string(),
             ..Default::default()
         });
         save(&paths, &settings).unwrap();

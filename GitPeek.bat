@@ -2,11 +2,11 @@
 chcp 65001 > nul
 setlocal
 
-rem Givsoner を開発モードで起動する（ダブルクリック用）。
+rem GitPeek を開発モードで起動する（ダブルクリック用）。
 rem 配布用の exe を作るときは npm run package:zip を使う（T-26）。
 
 cd /d "%~dp0"
-title Givsoner
+title GitPeek
 
 where npm >nul 2>nul
 if errorlevel 1 (
@@ -28,7 +28,7 @@ if not exist "node_modules" (
   if errorlevel 1 goto :error
 )
 
-echo Givsoner を起動しています。
+echo GitPeek を起動しています。
 echo 初回と Rust のコード変更後はビルドに数分かかります。
 echo このウィンドウを閉じるとアプリも終了します。
 echo.

@@ -128,7 +128,7 @@ mod tests {
             "6f94eac3aa163a7772dc8cb76ecf78adee379dfc",
             "6f94eac",
             "5c5897f6b4e4f68b7f5e638ef95bd13bef608726",
-            "Givsoner Test",
+            "GitPeek Test",
             "test@example.invalid",
             "1767225600",
             "1767225601",
@@ -141,7 +141,7 @@ mod tests {
         assert_eq!(commit.sha, "6f94eac3aa163a7772dc8cb76ecf78adee379dfc");
         assert_eq!(commit.short_sha, "6f94eac");
         assert_eq!(commit.parents, ["5c5897f6b4e4f68b7f5e638ef95bd13bef608726"]);
-        assert_eq!(commit.author_name, "Givsoner Test");
+        assert_eq!(commit.author_name, "GitPeek Test");
         assert_eq!(commit.author_time, 1767225600);
         assert_eq!(commit.commit_time, 1767225601);
         // 日本語が 8 進エスケープされずに戻ること（core.quotepath=false の効果）。

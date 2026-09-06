@@ -1,6 +1,6 @@
-# CLAUDE.md — Givsoner
+# CLAUDE.md — GitPeek
 
-個人用 Git ビューワー **Givsoner**（Tauri v2 + Rust + React/TypeScript）。
+個人用 Git ビューワー **GitPeek**（Tauri v2 + Rust + React/TypeScript）。
 
 本ファイルは**実装中に毎回効く制約**だけを抜き出したもの。
 
@@ -16,7 +16,7 @@
 
 ## 1. このアプリは何をしないか
 
-Givsoner は**ビューワー**である。以下は「未実装」ではなく「実装しないと決めた」もの。
+GitPeek は**ビューワー**である。以下は「未実装」ではなく「実装しないと決めた」もの。
 これらを追加する提案・実装をしてはいけない。
 
 - あらゆるコミット操作（commit / amend / rebase / cherry-pick / revert）
@@ -207,12 +207,12 @@ GIT_SSH_COMMAND=ssh -o BatchMode=yes     # 無いとパスフレーズ待ちで�
 ## 5. データと設定の置き場所
 
 ```
-%APPDATA%\com.tatsu.givsoner\
+%APPDATA%\com.tatsu.gitpeek\
 ├── settings.json          # 手編集を想定。schemaVersion 必須
 ├── state.json             # アプリが随時上書き。壊れたら捨てて再生成できること
 ├── skills\                # グローバル skill (*.md)
 ├── reviews\<repo-id>\     # レビュー結果 (<日時>-<runId 8 桁>.json)。上書きせず履歴として積む
-└── logs\                  # givsoner-YYYY-MM-DD.log（7 日ローテーション）
+└── logs\                  # gitpeek-YYYY-MM-DD.log（7 日ローテーション）
 ```
 
 **OneDrive 配下に設定を置かない**（同期競合とファイルロックの温床）。
@@ -463,7 +463,7 @@ GIT_SSH_COMMAND=ssh -o BatchMode=yes     # 無いとパスフレーズ待ちで�
   1 行に複数 / 左右に並べたとき両側 / **hunk の見出しには当たらない**こと /
   **端で折り返す**こと（1 件・0 件も）
 - 結合テスト用リポジトリはスクリプトで生成する（手元の実リポジトリに依存しない）。
-  生成先は `%TEMP%\givsoner-test-repos`
+  生成先は `%TEMP%\gitpeek-test-repos`
 - フロントは**純関数だけ**テストする。**対象は `src/lib/*.test.ts` が正**（`*.ts` と対で置く）。
   コンポーネントテストはしない。フックとコンポーネントから純関数を切り出してここへ置く
   （例: 一括 fetch の進行は `lib/fetchState.ts`、実行は `hooks/useFetch.ts`）。
@@ -523,7 +523,7 @@ npm run typecheck      # tsc --noEmit
 - **Rust は 1.88 以上が必須**（Tauri v2 自体は 1.77.2+。依存の `time` が edition2024 を要求して
   1.85 になり、T-20 で入れた `keyring 4.2` がさらに 1.88 を要求する）。
   ビルドが通らなくなったらまず `rustup update stable`。
-- 開発時の起動はリポジトリ直下の **`Givsoner.bat`**（ダブルクリック可）。中身は
+- 開発時の起動はリポジトリ直下の **`GitPeek.bat`**（ダブルクリック可）。中身は
   `npm run tauri dev` で、node_modules が無ければ先に `npm install` する。
   **大きなリポジトリを触るときは `npm run start:release`**（Rust が debug だと
   レーン計算が 4〜5 倍遅い）。
@@ -534,4 +534,4 @@ npm run typecheck      # tsc --noEmit
   アプリ側からは手当てできない。AdGuard のフィルタリング対象から `msedgewebview2.exe`
   または `localhost` を外すこと。
 - 配布はポータブル zip のみ。**Tauri の bundler に zip ターゲットは無い**ので、
-  `src-tauri/target/release/Givsoner.exe` を npm script で zip 化する。
+  `src-tauri/target/release/GitPeek.exe` を npm script で zip 化する。

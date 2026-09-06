@@ -1,6 +1,6 @@
-# Givsoner 設計ドキュメント
+# GitPeek 設計ドキュメント
 
-個人用 Git ビューワー **Givsoner** の設計記録。
+個人用 Git ビューワー **GitPeek** の設計記録。
 本書は 2026-09-01 の設計インタビューで確定した全決定を、決定理由つきで記録したもの。
 
 文書は 3 層に分かれている。
@@ -15,7 +15,7 @@
 
 ## 1. 製品定義
 
-Givsoner は**作者専用の Git ビューワー**である。コミット操作は一切行わない。
+GitPeek は**作者専用の Git ビューワー**である。コミット操作は一切行わない。
 
 作者は git を CLI で操作する派であり、GUI からコミットする意思がない。したがって本アプリは
 「git の書き込み操作を GUI に持ち込む」方向には一切拡張しない。これは機能の不足ではなく、
@@ -92,19 +92,39 @@ v1.1 以降で行う**（task_lists.md の「v1.1」表）。v1 では自動で�
 
 ### 2.3 アプリ識別と配布
 
-- アプリ名: **Givsoner**
-- bundle identifier: **`com.tatsu.givsoner`**
-- `productName`: `Givsoner`、ウィンドウタイトル: `Givsoner — <リポジトリ名>`
+- アプリ名: **GitPeek**
+- bundle identifier: **`com.tatsu.gitpeek`**
+- `productName`: `GitPeek`、ウィンドウタイトル: `GitPeek — <リポジトリ名>`
 - 配布は**ポータブル zip のみ**
 
 > **注意**: Tauri v2 の bundler が Windows 向けに吐けるターゲットは `nsis` と `msi` だけで、
 > **zip ターゲットは存在しない**。したがって「ポータブル zip」は `tauri build` が生成する
-> `src-tauri/target/release/Givsoner.exe` を自前で zip 化する手順になる。単一 exe で動作する
+> `src-tauri/target/release/GitPeek.exe` を自前で zip 化する手順になる。単一 exe で動作する
 > （WebView2 Runtime はシステム側にインストール済みのものを使うため同梱不要）。
 > この zip 化は npm script として用意する。
 
 - 自動更新（Tauri updater）は入れない
 - コード署名しない（初回起動時に SmartScreen 警告が出るが「詳細情報 → 実行」で通す）
+
+#### 2.3.1 `Givsoner` からの改名（2026-09-06）
+
+**T-25 まで、このアプリの名前は `Givsoner`、identifier は `com.tatsu.givsoner` だった。**
+2026-09-06 に利用者が `GitPeek` へ改名すると決めた（T-28）。
+
+**identifier も `com.tatsu.gitpeek` へ変えた。移行コードは書いていない。**
+identifier は表示名ではなく保存先の鍵なので、リブランドしても据え置くのが普通であり、
+その案も含めて 3 つ並べて聞いた。利用者が「変えて入れ直す」を選んだ。
+
+そのため改名をまたぐと、**保存先が変わる**:
+
+| いま | 中身 |
+|---|---|
+| `%APPDATA%\com.tatsu.givsoner\` | 改名前の `settings.json` / `state.json` / `skills\` / `reviews\` / `logs\` |
+| 資格情報マネージャーの `com.tatsu.givsoner` | 改名前の API キー |
+
+**どちらもアプリからは消さない**（利用者のデータを黙って消さない。CLAUDE.md §1 に倣う）。
+要らなくなったら利用者が手で消す。**一度しか動かない移行経路を永久に抱えるより、
+入れ直すほうが安い**という判断であり、v1 前で利用者が 1 人だから通る判断でもある。
 
 ### 2.4 対象環境（2026-09-01 実測）
 
@@ -163,7 +183,7 @@ git -c core.quotepath=false \
 #### commit-graph を無効にする理由
 
 commit-graph は「メッセージを読まずに履歴をたどる」操作のための索引である。ところが
-Givsoner の主問い合わせ（§4.1 の全件ダンプ）は `%an`/`%ae`/`%s` を含むため、**どのみち
+GitPeek の主問い合わせ（§4.1 の全件ダンプ）は `%an`/`%ae`/`%s` を含むため、**どのみち
 コミットオブジェクトを 1 件ずつ読む**。commit-graph を有効にすると、そこへ別ファイルへの
 アクセスが上乗せされるだけになる。
 
@@ -291,7 +311,7 @@ WebView2 の解決に失敗して使えなかった。
 
 **ただし非対象の規模を黙って読みに行かせない。** 148 万コミットのリポジトリを開いたまま
 アプリを終了すると、次回起動時に自動で読み込みが走り、デバッグビルドで 60〜90 秒
-操作できなくなったうえ、**givsoner.exe が 3.5GB・WebView2 が 3.2GB まで伸びて
+操作できなくなったうえ、**gitpeek.exe が 3.5GB・WebView2 が 3.2GB まで伸びて
 プロセスが消えた**（エラー出力なし。空き物理メモリは 10GB 以上あった）。
 
 そこで、**前回の件数が 10 万コミットを超えるリポジトリは自動で読み込まない**。
@@ -980,7 +1000,7 @@ ref ツリー（§6.4）の「3 件以上で畳む」とは規則が違う — �
 落ちる。**完全な ref 名で渡すのが唯一の正しい塞ぎ方**であり、`--detach` はその上での念押し。
 
 **detached HEAD から離れるときの警告は入れていない**（承知の上）。git 自身が警告し reflog に
-残るうえ、**Givsoner はコミットを作れない**ので、この経路で失われる作業は
+残るうえ、**GitPeek はコミットを作れない**ので、この経路で失われる作業は
 「利用者がターミナルで detached のままコミットした場合」に限られる。判定には ref 全部からの
 到達可能性が要るので、必要になったときに入れる。
 
@@ -1567,7 +1587,7 @@ enabled: true
 
 ### 11.2 置き場所と信頼モデル
 
-グローバル（`%APPDATA%\com.tatsu.givsoner\skills\`）と**リポジトリ内**
+グローバル（`%APPDATA%\com.tatsu.gitpeek\skills\`）と**リポジトリ内**
 （`<repo>/.gitviewer/skills/*.md`）の両方に対応する。リポジトリ内が優先。
 
 > **セキュリティ上の重要な制約**: 本アプリの用途には「自分が書いていないコード（OSS・上流）を
@@ -1664,16 +1684,16 @@ T-23 で覚えるようにしたのに画面から読めず、**勝手に変わ�
 
 ### 12.1 保存場所
 
-**`%APPDATA%\com.tatsu.givsoner\`** に固定する（Tauri v2 の `app_data_dir()` は
+**`%APPDATA%\com.tatsu.gitpeek\`** に固定する（Tauri v2 の `app_data_dir()` は
 `%APPDATA%\<identifier>` を返す）。
 
 ```
-%APPDATA%\com.tatsu.givsoner\
+%APPDATA%\com.tatsu.gitpeek\
 ├── settings.json          # 手編集を想定。スキーマバージョン付き
 ├── state.json             # アプリが随時上書き。壊れたら捨てて再生成できる
 ├── skills\                # グローバル skill (*.md)
 ├── reviews\<repo-id>\     # レビュー結果 (<timestamp>.json)
-└── logs\                  # givsoner-YYYY-MM-DD.log (7 日ローテーション)
+└── logs\                  # gitpeek-YYYY-MM-DD.log (7 日ローテーション)
 ```
 
 **OneDrive 配下は不可。** 作業ディレクトリが OneDrive 配下（`C:\Users\tatsu\OneDrive\Gitwork`）で
@@ -1862,7 +1882,7 @@ LLM プロファイルが未設定のまま AI レビューを押した場合は
 
 ### 13.3 ログ
 
-- **ログファイルを書く**: `logs/givsoner-YYYY-MM-DD.log`、7 日分でローテーション。
+- **ログファイルを書く**: `logs/gitpeek-YYYY-MM-DD.log`、7 日分でローテーション。
   Phase 6 以降の認証・checkout まわりの問題は再現が難しく、後から追える記録が要る
 - **画面上の git コマンドログ**は直近 500 件のリングバッファ。リポジトリ切替でクリアしない
 - **Rust 側の panic はキャッチしてエラーダイアログを出し**、ログの場所を案内する
@@ -1881,10 +1901,10 @@ LLM プロファイルが未設定のまま AI レビューを押した場合は
   skill 本文を書くと `%APPDATA%` に他人のソースと秘密が残る。LLM は接続先・モデル・
   所要時間・結果の種別まで。**git の stderr は全文残す**（利用者の判断。認証まわりは
   再現が難しく、1 行目では足りない）
-- **置き場所は `%APPDATA%\com.tatsu.givsoner\logs\`。** プラグイン既定の `LogDir` は
+- **置き場所は `%APPDATA%\com.tatsu.gitpeek\logs\`。** プラグイン既定の `LogDir` は
   Windows では `%LOCALAPPDATA%` を指すので使わず、`Folder` で明示する（CLAUDE.md §5）
 - **古いものを消すのは自前の掃除（7 日）だけ。** プラグインの回転には消させない
-  （`KeepAll`）。**消してよいのは `givsoner-YYYY-MM-DD` で始まり `.log` で終わるもの**
+  （`KeepAll`）。**消してよいのは `gitpeek-YYYY-MM-DD` で始まり `.log` で終わるもの**
   に限り、フォルダに置かれた他のファイルには触らない
 - **書けなくてもアプリを止めない。** 代わりに画面へ 1 度出す（`LogStatus`）。
   黙って落とすと「書いているつもり」になる
@@ -2011,7 +2031,7 @@ LLM プロファイルが未設定のまま AI レビューを押した場合は
 形を足すときはスクリプトとそのコメントの両方に足し、レーンに関わるものは
 `tests/lanes.rs` の一覧にも入れる。
 
-- 生成先は **`%TEMP%\givsoner-test-repos`**。この gitviewer リポジトリの中に置くと、
+- 生成先は **`%TEMP%\gitpeek-test-repos`**。この gitviewer リポジトリの中に置くと、
   「リポジトリでないパス」の判定テストが親リポジトリを拾って落ちる。
 - Windows では **git 付属の bash（`<Git>\bin\bash.exe`）で実行する**。PATH 上の `bash` は
   WSL のことがあり、Windows のパスを渡しても解決できない。`GIT_BASH` で明示指定もできる。
@@ -2138,7 +2158,7 @@ gitviewer/
 ├── CLAUDE.md                     (済)
 ├── task_lists.md                 (済) タスクと進捗
 ├── docs/DESIGN.md                (済)
-├── Givsoner.bat                  (済) ダブルクリックで開発起動
+├── GitPeek.bat                  (済) ダブルクリックで開発起動
 ├── scripts/make-test-repos.sh    (済) テスト用リポジトリ生成
 ├── package.json                  (済)
 ├── vite.config.ts                (済) vitest の設定もここ

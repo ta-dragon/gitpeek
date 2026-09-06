@@ -61,7 +61,7 @@ const BUILT_IN: &str = include_str!("skills/general-review.md");
 pub enum SkillOrigin {
     /// 同梱。編集できない。
     BuiltIn,
-    /// `%APPDATA%\com.tatsu.givsoner\skills\`
+    /// `%APPDATA%\com.tatsu.gitpeek\skills\`
     Global,
     /// `<repo>\.gitviewer\skills\`。**既定で無効。**
     Repository,

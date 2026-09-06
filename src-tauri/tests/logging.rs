@@ -14,8 +14,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-use givsoner_lib::commandlog::{CommandLog, CommandLogEntry};
-use givsoner_lib::logging::format_line;
+use gitpeek_lib::commandlog::{CommandLog, CommandLogEntry};
+use gitpeek_lib::logging::format_line;
 
 /// 書き出し先。テストバイナリで 1 つだけ立てる（`log` の記録先は 1 つしか置けない）。
 static SINK: OnceLock<PathBuf> = OnceLock::new();
@@ -49,7 +49,7 @@ fn start() -> PathBuf {
     SINK.get_or_init(|| {
         // **テストの間だけ残るファイル。** `tempfile` の後始末に任せると
         // 記録先が先に消えるので、自分で場所を決めて置く。
-        let path = std::env::temp_dir().join("givsoner-test-logging.log");
+        let path = std::env::temp_dir().join("gitpeek-test-logging.log");
         let _ = fs::remove_file(&path);
         let file = fs::OpenOptions::new()
             .create(true)

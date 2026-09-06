@@ -4,7 +4,7 @@
 
 mod common;
 
-use givsoner_lib::git::repo::{
+use gitpeek_lib::git::repo::{
     probe, scan, HeadState, RepositoryProbe, DEFAULT_EXCLUDED, DEFAULT_MAX_DEPTH,
 };
 

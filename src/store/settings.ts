@@ -1,7 +1,7 @@
 /**
  * フロント側の設定状態。
  *
- * 正は `%APPDATA%\com.tatsu.givsoner\settings.json`（Rust 側 `store::settings`）。
+ * 正は `%APPDATA%\com.tatsu.gitpeek\settings.json`（Rust 側 `store::settings`）。
  * ここはその写しを 1 つだけ持ち、更新のたびに保存する。
  * 状態管理ライブラリは入れず、`useSyncExternalStore` で購読する。
  */

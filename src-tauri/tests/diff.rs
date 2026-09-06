@@ -9,12 +9,12 @@
 
 mod common;
 
-use givsoner_lib::encoding::{LineEnding, TextEncoding};
-use givsoner_lib::git::diff::{
+use gitpeek_lib::encoding::{LineEnding, TextEncoding};
+use gitpeek_lib::git::diff::{
     self, ChangeStatus, DiffLineKind, DiffOptions, DiffTarget, FileChange, FileDiff, Revisions,
 };
-use givsoner_lib::git::snapshot;
-use givsoner_lib::model::{CommitMeta, RepositorySnapshot};
+use gitpeek_lib::git::snapshot;
+use gitpeek_lib::model::{CommitMeta, RepositorySnapshot};
 
 use common::{fixtures, log};
 
@@ -119,8 +119,8 @@ fn reads_the_full_message_and_committer() {
     assert_eq!(detail.subject, "変更の種類ひととおり");
     assert_eq!(detail.body, "本文の段落。");
     // 生成スクリプトが author と committer に同じ値を入れている。
-    assert_eq!(detail.author_name, "Givsoner Test");
-    assert_eq!(detail.committer_name, "Givsoner Test");
+    assert_eq!(detail.author_name, "GitPeek Test");
+    assert_eq!(detail.committer_name, "GitPeek Test");
     assert_eq!(detail.committer_time, detail.author_time);
     assert_eq!(detail.parents.len(), 1);
 }

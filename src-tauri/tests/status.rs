@@ -8,7 +8,7 @@ mod common;
 
 use std::sync::Mutex;
 
-use givsoner_lib::git::status::{self, WorkingTree};
+use gitpeek_lib::git::status::{self, WorkingTree};
 
 use common::{fixtures, log};
 
@@ -34,7 +34,7 @@ fn working_tree(repo: &str) -> WorkingTree {
         .unwrap_or_else(|error| panic!("{repo} の作業ツリーを読めません: {error}"))
 }
 
-fn paths(changes: &[givsoner_lib::git::diff::FileChange]) -> Vec<&str> {
+fn paths(changes: &[gitpeek_lib::git::diff::FileChange]) -> Vec<&str> {
     let mut list: Vec<&str> = changes.iter().map(|change| change.path.as_str()).collect();
     list.sort();
     list

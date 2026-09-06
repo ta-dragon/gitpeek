@@ -1,4 +1,4 @@
-# Givsoner タスクリスト
+# GitPeek タスクリスト
 
 v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に割ったもの。
 
@@ -47,7 +47,7 @@ v1（Phase 1〜9）の残作業を、人間が概ね 3 日で終える単位に�
 | 項目 | 内容 |
 |---|---|
 | 直前に完了 | T-25 設定画面とショートカット（目視 2026-09-06 通過。要望 1 件を反映）|
-| いまここ | **T-28 Givsoner → GitPeek のリネーム**（2026-09-06 に利用者が決めた）。骨子 |
+| いまここ | **T-28 Givsoner → GitPeek のリネーム**（2026-09-06 に利用者が決めた）。詳細化済み・**目視待ち** |
 | 未解決の判断事項 | **T-28 の「データを引き継ぐか」**（`%APPDATA%` フォルダと keyring のサービス名）|
 
 **残るは T-28 → T-26 だけ。** **どちらも骨子**なので、着手時に詳細化そのものを
@@ -232,7 +232,7 @@ T-20 は 3 巡・3 件、T-21 は 2 巡・2 件、**T-23 は 1 巡目で 1 件 �
 - **ログの日付は起動した日で固定される**（T-24）。プラグインが書き出し先を組み立ての
   ときに決めるため、起動したまま日付をまたぐと同じファイルに書き続ける。
   掃除は次の起動で追いつく
-- **skill を編集する画面は無い**（T-21）。グローバルは `%APPDATA%\com.tatsu.givsoner\skills\`
+- **skill を編集する画面は無い**（T-21）。グローバルは `%APPDATA%\com.tatsu.gitpeek\skills\`
   を直接編集する。**アプリから足せるのは「追加の指示」だけ**で、これは `settings.json` に
   入り skill ファイルは書き換えない（他人のリポジトリの skill にも足せるようにするため）
 - **「追加の指示」は欄から離れたときに保存する**（T-21）。保存ボタンは置いていない。
@@ -240,7 +240,7 @@ T-20 は 3 巡・3 件、T-21 は 2 巡・2 件、**T-23 は 1 巡目で 1 件 �
   `settings.json` が無駄に上書きされることはない
 - **symlink を辿らないことのテストは、開発者モードか管理者権限が要る**（T-21）。
   作れない環境では**理由を出して落ちる** — 黙って素通りさせると、守れているのか
-  確かめていないのか区別が付かなくなるため。外すときは `GIVSONER_SKIP_SYMLINK_TEST=1`
+  確かめていないのか区別が付かなくなるため。外すときは `GITPEEK_SKIP_SYMLINK_TEST=1`
 
 - **probe は 1 リポジトリあたり git を 5 回起動する。** T-17 でリモートの有無を足したぶん
   1 回増えた。この環境では 1 回 34ms（実測）なので、登録 7 件で一覧の更新が 240ms ほど伸びる。
@@ -375,11 +375,11 @@ graph LR
 - **実リポジトリを 5 個以上登録し、1 週間実運用する**
 
 **制約**: Tauri の bundler に zip ターゲットは無いので、
-`src-tauri/target/release/Givsoner.exe` を npm script で zip 化する（CLAUDE.md §10）
+`src-tauri/target/release/GitPeek.exe` を npm script で zip 化する（CLAUDE.md §10）
 
 **受け入れ条件**
 
-- ▸コマンド: `npm run package:zip` が `dist-zip/Givsoner-portable.zip` を生成する
+- ▸コマンド: `npm run package:zip` が `dist-zip/GitPeek-portable.zip` を生成する
 - ▸目視: zip を展開した exe が単体で起動する
 - ▸目視: **実リポジトリ 5 個以上で 1 週間実運用し、既存 GUI クライアントを一度も開かずに済んだ**
 
@@ -422,21 +422,56 @@ graph LR
 | `tauri.conf.json` の `identifier` | `%APPDATA%\com.tatsu.givsoner\` → `...gitpeek\` になり、**`settings.json` / `state.json` / `skills\` / `reviews\` / `logs\` が見えなくなる**（消えはせず、古いフォルダに残る）|
 | `secret.rs` の `SERVICE`（同じ文字列） | **保存済みの API キーが読めなくなる。** しかも Windows の資格情報マネージャーには残り続けるので、**孤児**になる（CLAUDE.md §4 が避けている形）|
 
-**未解決の判断事項（着手前に利用者へ聞く）**
+**実装レベルの選択（2026-09-06 に利用者が決めた）**
 
-**引き継ぐか、入れ直すか。** ログの prefix（`givsoner-`）も同じ話だが、
-`identifier` を変えるとフォルダごと変わるので、そちらの判断に従う。
+| 決めたこと | 誰が / なぜ |
+|---|---|
+| **`identifier` も keyring のサービス名も `com.tatsu.gitpeek` に変える。移行コードは書かない** | **利用者の判断。** 「据え置き（識別子は保存先の鍵なのでリブランドしても普通は動かさない）」「変えて引き継ぐ」と並べて聞いた結果。**設定・登録済みリポジトリ・レビュー履歴・API キーは手で入れ直す。** 一度しか動かない移行コードを永久に抱えるより、入れ直すほうが安いという判断 |
+| **古い `%APPDATA%\com.tatsu.givsoner\` と古い資格情報は消さない** | アプリから利用者のデータを黙って消さない（CLAUDE.md §1 の「黙ってやらない」に倣う）。**要らなくなったら利用者が手で消す** |
 
-**実装内容（骨子。上の判断が付いてから詳細化する）**
+**置換の規則**（大文字小文字を保つ 3 つだけ。これで 9 種類の綴りが全部通る）
 
-**受け入れ条件（骨子）**
+| いま | あと | これで直るもの |
+|---|---|---|
+| `Givsoner` | `GitPeek` | 画面の名前・`productName`・ウィンドウタイトル・`Givsoner.exe` / `.bat`・md の地の文 |
+| `givsoner` | `gitpeek` | Cargo / npm のパッケージ名・`givsoner_lib`・`com.tatsu.givsoner`・`givsoner-test-repos`・ログの prefix |
+| `GIVSONER` | `GITPEEK` | テスト用の環境変数 |
+
+**実装内容**
+
+1. 上の 3 規則で全ファイルを置換する（`node_modules` / `target` / `.git` / `dist` は除く）
+2. `Givsoner.bat` を `git mv` で `GitPeek.bat` にする
+3. `Cargo.lock` と `package-lock.json` は**手で書き換えず、ツールに作らせる**
+   （`cargo check` / `npm install --package-lock-only`）
+   **`.bat` は CRLF に戻す** — テキストとして読んで書くと LF になる（実際になった）
+4. **`git diff` を全部読む。** T-25 で、まとめ書き換えが隣のコメントを巻き込んだ
+5. `docs/DESIGN.md` §2.3.1 に**改名の記録を残す**（旧名・旧 identifier・移行しないと
+   決めたこととその理由）。**ここだけは旧名が恒久的に残る**
+
+**変わる置き場所**（利用者が入れ直すもの）
+
+| いま | あと |
+|---|---|
+| `%APPDATA%\com.tatsu.givsoner\` | `%APPDATA%\com.tatsu.gitpeek\` |
+| 資格情報マネージャーの `com.tatsu.givsoner` | `com.tatsu.gitpeek` |
+| `%TEMP%\givsoner-test-repos` | `%TEMP%\gitpeek-test-repos` |
+| `logs\givsoner-YYYY-MM-DD.log` | `logs\gitpeek-YYYY-MM-DD.log` |
+
+**受け入れ条件**
 
 - ▸コマンド: `npm run test:rust` / `npm run check:rust` / `npm run test` / `npm run typecheck`
-- ▸コマンド: `Givsoner` / `givsoner` が**リポジトリから 1 つも見つからない**こと
-  （引き継ぎのために意図して残す文字列があれば、**そこだけを列挙して例外にする**）
+- ▸コマンド: `givsoner` が**コードと設定から 1 つも見つからない**こと（大文字小文字を
+  無視して `git grep -i`。`node_modules` / `target` / `dist` を除く）。
+  **意図して残すのは 2 か所だけ** — ①`task_lists.md` の T-28 の本文（何を何に変えたかの
+  記録。畳めば消える。規約 1）、②`docs/DESIGN.md` §2.3.1（**改名の記録として恒久的に残す**。
+  これが無いと、なぜ `%APPDATA%` が変わったのかが後から読めない）
+- ▸コマンド: `npm run test:rust` — keyring のテストが**本番と別のサービス名を使い、
+  後始末する**ままであること（CLAUDE.md §8）
 - ▸目視: 起動してウィンドウのタイトルと画面の名前が `GitPeek` になっていること
-- ▸目視: **設定・登録済みリポジトリ・レビュー履歴・API キーが、決めたとおりに
-  引き継がれている（または、入れ直せる）**こと
+- ▸目視: **設定が入れ直せる**こと（git のパス・リポジトリ登録・接続先・API キー）。
+  新しい `%APPDATA%\com.tatsu.gitpeek\` に `settings.json` ができること
+- ▸目視: **AI レビューが最後まで通る**こと（API キーを入れ直した先が読めている確認）
+- ▸目視: ログが `gitpeek-YYYY-MM-DD.log` で書かれること（設定 → ログのタブから）
 
 **⚠️ このタスクはエージェントが単独で完了を宣言してはいけない。**
 

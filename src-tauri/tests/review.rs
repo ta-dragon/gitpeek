@@ -21,15 +21,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use givsoner_lib::git::diff::DiffSource;
-use givsoner_lib::git::exec::Cancel;
-use givsoner_lib::llm::review::{
+use gitpeek_lib::git::diff::DiffSource;
+use gitpeek_lib::git::exec::Cancel;
+use gitpeek_lib::llm::review::{
     self, ReviewEvent, ReviewPlan, ReviewRun, ReviewSink, Severity,
 };
-use givsoner_lib::llm::skill::{self, SkillEntry};
-use givsoner_lib::store::paths::StorePaths;
-use givsoner_lib::store::reviews;
-use givsoner_lib::store::settings::{LlmProfile, RepoSkillTrust, SkillSettings};
+use gitpeek_lib::llm::skill::{self, SkillEntry};
+use gitpeek_lib::store::paths::StorePaths;
+use gitpeek_lib::store::reviews;
+use gitpeek_lib::store::settings::{LlmProfile, RepoSkillTrust, SkillSettings};
 
 use common::{fixtures, log};
 use mockhttp::{sse_delta, sse_finish, Canned, MockServer, SSE_DONE};
@@ -1058,20 +1058,20 @@ fn the_saved_file_never_holds_a_plaintext_credential() {
 /// **画面が無いぶん、実物へ 1 回流しておく**（T-18 の「緑でも動かない」対策）。
 ///
 /// ```text
-/// GIVSONER_LLM_BASE_URL=http://localhost:11434/v1 \
-/// GIVSONER_LLM_MODEL=qwen2.5-coder:14b \
+/// GITPEEK_LLM_BASE_URL=http://localhost:11434/v1 \
+/// GITPEEK_LLM_MODEL=qwen2.5-coder:14b \
 /// cargo test --test review -- --ignored --nocapture
 /// ```
 #[test]
-#[ignore = "実サーバが要る。GIVSONER_LLM_BASE_URL を設定して --ignored で走らせる"]
+#[ignore = "実サーバが要る。GITPEEK_LLM_BASE_URL を設定して --ignored で走らせる"]
 fn talks_to_a_real_server() {
-    let base_url = std::env::var("GIVSONER_LLM_BASE_URL")
-        .expect("GIVSONER_LLM_BASE_URL を設定してください（例: http://localhost:11434/v1）");
-    let model = std::env::var("GIVSONER_LLM_MODEL").unwrap_or_else(|_| "qwen2.5-coder:14b".into());
+    let base_url = std::env::var("GITPEEK_LLM_BASE_URL")
+        .expect("GITPEEK_LLM_BASE_URL を設定してください（例: http://localhost:11434/v1）");
+    let model = std::env::var("GITPEEK_LLM_MODEL").unwrap_or_else(|_| "qwen2.5-coder:14b".into());
 
     let mut harness = Harness::new(&base_url);
     harness.profile.model = model;
-    harness.api_key = std::env::var("GIVSONER_LLM_API_KEY").unwrap_or_default();
+    harness.api_key = std::env::var("GITPEEK_LLM_API_KEY").unwrap_or_default();
 
     let recorder = Recorder::default();
     let run = harness.run_with(&["sub/keep.txt", "追加.txt"], &Cancel::new(), &recorder);
@@ -1113,7 +1113,7 @@ fn big_repo() -> tempfile::TempDir {
     };
 
     git(&["init", "--quiet", "-b", "main"]);
-    git(&["config", "user.name", "Givsoner Test"]);
+    git(&["config", "user.name", "GitPeek Test"]);
     git(&["config", "user.email", "test@example.invalid"]);
     git(&["config", "commit.gpgsign", "false"]);
 

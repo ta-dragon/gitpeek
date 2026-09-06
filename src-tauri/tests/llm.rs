@@ -14,8 +14,8 @@
 #[path = "common/mockhttp.rs"]
 mod mockhttp;
 
-use givsoner_lib::llm::client::{list_models, test_connection, LlmErrorKind};
-use givsoner_lib::store::settings::LlmProfile;
+use gitpeek_lib::llm::client::{list_models, test_connection, LlmErrorKind};
+use gitpeek_lib::store::settings::LlmProfile;
 use mockhttp::{closed_port, Canned, MockServer};
 
 /// 応答の見本。OpenAI / Ollama / vLLM のどれもこの形で返す。

@@ -16,7 +16,7 @@
 use keyring::{Entry, Error};
 
 /// 資格情報マネージャーに登録するサービス名。`%APPDATA%` のフォルダ名と揃えてある。
-pub const SERVICE: &str = "com.tatsu.givsoner";
+pub const SERVICE: &str = "com.tatsu.gitpeek";
 
 /// `credential_key` の採番。プロファイル 1 つにつき 1 度だけ呼ぶ。
 ///
@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn the_service_name_matches_the_app_data_folder() {
-        assert_eq!(SERVICE, "com.tatsu.givsoner");
+        assert_eq!(SERVICE, "com.tatsu.gitpeek");
         assert_eq!(Secrets::new().service, SERVICE);
     }
 }

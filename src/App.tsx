@@ -118,7 +118,7 @@ export default function App() {
   /** アプリ全体の設定（T-25）。**入口はヘッダのボタンと `Ctrl+,` の 2 つだけ。** */
   const [settingsOpen, setSettingsOpen] = useState(false);
   /**
-   * 設定と skill の置き場所（`%APPDATA%\com.tatsu.givsoner`）。
+   * 設定と skill の置き場所（`%APPDATA%\com.tatsu.gitpeek`）。
    * skill をどこへ置けばよいのか、画面から読めるようにするため。
    */
   const [dataDir, setDataDir] = useState("");
@@ -726,7 +726,7 @@ function RepositoryPanel({
   onNotice,
 }: {
   entry: RepositoryEntry | null;
-  /** `%APPDATA%\com.tatsu.givsoner`。**履歴 0 件のときに保存先を出す**のに使う。 */
+  /** `%APPDATA%\com.tatsu.gitpeek`。**履歴 0 件のときに保存先を出す**のに使う。 */
   dataDir: string;
   jumpTo: { sha: string; nonce: number } | null;
   /** グラフ行の右クリックから checkout の確認を出す（T-18）。 */

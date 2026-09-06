@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Givsoner",
+  "productName": "GitPeek",
   "version": "0.1.0",
-  "identifier": "com.tatsu.givsoner",
+  "identifier": "com.tatsu.gitpeek",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Givsoner",
+        "title": "GitPeek",
         "width": 1600,
         "height": 1000,
         "minWidth": 900,

@@ -5,7 +5,7 @@ import { crashSummary, logHint } from "./crashNotice";
 
 function status(extra: Partial<LogStatus> = {}): LogStatus {
   return {
-    dir: "C:\\Users\\tatsu\\AppData\\Roaming\\com.tatsu.givsoner\\logs",
+    dir: "C:\\Users\\tatsu\\AppData\\Roaming\\com.tatsu.gitpeek\\logs",
     writing: true,
     problem: null,
     ...extra,
@@ -15,7 +15,7 @@ function status(extra: Partial<LogStatus> = {}): LogStatus {
 describe("logHint", () => {
   it("書けているときは場所を出し、開ける", () => {
     const hint = logHint(status());
-    expect(hint.text).toContain("com.tatsu.givsoner");
+    expect(hint.text).toContain("com.tatsu.gitpeek");
     expect(hint.canOpen).toBe(true);
   });
 

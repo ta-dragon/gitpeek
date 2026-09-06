@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
-use givsoner_lib::commandlog::CommandLog;
+use gitpeek_lib::commandlog::CommandLog;
 
 /// テストの記録先。イベントを送らないので `AppHandle` が要らない。
 pub fn log() -> CommandLog {
@@ -74,7 +74,7 @@ pub fn fixtures() -> &'static Path {
     ROOT.get_or_init(|| {
         // **リポジトリの外**へ置く。git の管理下に作ると「リポジトリでないパス」の
         // テストが親リポジトリを拾ってしまう。
-        let root = std::env::temp_dir().join("givsoner-test-repos");
+        let root = std::env::temp_dir().join("gitpeek-test-repos");
         let script = crate_root()
             .parent()
             .expect("リポジトリのルート")

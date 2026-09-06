@@ -1403,7 +1403,7 @@ fn start_logging(app: &AppHandle, store: &Store) -> LogStatus {
     logging::install_panic_hook(app.clone());
     log::info!(
         target: "app",
-        "Givsoner {} を起動しました（設定: {}）",
+        "GitPeek {} を起動しました（設定: {}）",
         app.package_info().version,
         paths.root().display()
     );
@@ -1958,7 +1958,7 @@ mod tests {
         use crate::logging::LogStatus;
 
         let ok = LogStatus {
-            dir: r"C:\Users\tatsu\AppData\Roaming\com.tatsu.givsoner\logs".to_string(),
+            dir: r"C:\Users\tatsu\AppData\Roaming\com.tatsu.gitpeek\logs".to_string(),
             writing: true,
             problem: None,
         };

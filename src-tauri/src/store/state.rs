@@ -215,7 +215,7 @@ impl DebouncedWriter {
         let worker = Arc::clone(&inner);
         // 失敗しても致命的ではない（flush で同期書き込みに落ちる）ので結果は捨てる。
         let _ = thread::Builder::new()
-            .name("givsoner-state-writer".to_string())
+            .name("gitpeek-state-writer".to_string())
             .spawn(move || worker.run());
 
         Self { inner }
