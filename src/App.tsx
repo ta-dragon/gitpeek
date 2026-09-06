@@ -31,7 +31,7 @@ import { SplitPane } from "./components/common/SplitPane";
 import { RefTree } from "./components/sidebar/RefTree";
 import { RepositoryList, type SortMode } from "./components/sidebar/RepositoryList";
 import { Sidebar } from "./components/sidebar/Sidebar";
-import { LlmProfilesDialog } from "./components/settings/LlmProfiles";
+import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { RepositorySettingsDialog } from "./components/settings/RepositorySettingsDialog";
 import { ReviewDrawer } from "./components/review/ReviewDrawer";
 import { CloneDialog } from "./components/setup/CloneDialog";
@@ -43,11 +43,12 @@ import { useClone } from "./hooks/useClone";
 import { useFetch } from "./hooks/useFetch";
 import { useWriteOps, type CheckoutSubject } from "./hooks/useWriteOps";
 import { checkoutChoices, checkoutCommit, type CheckoutChoice } from "./lib/writeOps";
-import { useTheme, type ThemePreference } from "./hooks/useTheme";
+import { useTheme } from "./hooks/useTheme";
 import { ja } from "./i18n/ja";
 import { clearCompare, selectCommit, swapEnds } from "./lib/compareSelection";
 import { findingsFor, newLines, type LineLookup } from "./lib/reviewFindings";
 import { crashSummary, logHint } from "./lib/crashNotice";
+import { bindingOf, isTyping, matches } from "./lib/shortcuts";
 import { defaultSelection, initialProfile } from "./lib/reviewPlan";
 import { selectionForSource, type TargetContext } from "./lib/reviewTarget";
 import {
@@ -108,16 +109,15 @@ const COMMIT_INFO_MIN = 240;
 const COMMIT_INFO_MAX = 720;
 
 export default function App() {
-  const [theme, setTheme] = useTheme();
+  // **テーマは設定画面（T-25）で選ぶ。** ここで呼ぶのは `data-theme` を
+  // 実際に付け替えるため（副作用が要る。戻り値は使わない）。
+  useTheme();
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [logOpen, setLogOpen] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  /**
-   * AI レビューの接続先（T-20）。**T-25 でこの中身を設定画面へ移す**ので、
-   * いまは入口をヘッダのボタン 1 つに留めておく。
-   */
-  const [llmOpen, setLlmOpen] = useState(false);
+  /** アプリ全体の設定（T-25）。**入口はヘッダのボタンと `Ctrl+,` の 2 つだけ。** */
+  const [settingsOpen, setSettingsOpen] = useState(false);
   /**
    * 設定と skill の置き場所（`%APPDATA%\com.tatsu.givsoner`）。
    * skill をどこへ置けばよいのか、画面から読めるようにするため。
@@ -281,23 +281,35 @@ export default function App() {
     [repos.entries, startFetch],
   );
 
-  // Ctrl+P でリポジトリ切替、Ctrl+R / Ctrl+Shift+R で fetch（docs/DESIGN.md §6.5）。
+  // リポジトリ切替 / fetch / 設定（docs/DESIGN.md §6.5）。
+  // **キーの形は対応表（`lib/shortcuts.ts`）が持つ。** ここは何をするかだけ。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       // 入力欄では横取りしない（他のショートカットと同じ扱い）。
       if (isTyping(event.target)) return;
 
-      if (event.ctrlKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "p") {
+      if (matches(event, "openPalette")) {
         event.preventDefault();
         setPaletteOpen((current) => !current);
         return;
       }
 
-      // **`Ctrl+R` は WebView のページ再読込に取られる。** 必ず握り潰すこと。
-      if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "r") {
+      if (matches(event, "openSettings")) {
         event.preventDefault();
-        if (event.shiftKey) askAll(fetchTargets);
-        else if (repos.selectedId !== null) fetchOne(repos.selectedId);
+        setSettingsOpen((current) => !current);
+        return;
+      }
+
+      // **`Ctrl+R` は WebView のページ再読込に取られる。** 必ず握り潰すこと。
+      // **`Ctrl+Shift+R` とは別の動作**なので、修飾キーごと見る（対応表が判定する）。
+      if (matches(event, "fetchAll")) {
+        event.preventDefault();
+        askAll(fetchTargets);
+        return;
+      }
+      if (matches(event, "fetchCurrent")) {
+        event.preventDefault();
+        if (repos.selectedId !== null) fetchOne(repos.selectedId);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -332,25 +344,19 @@ export default function App() {
         <span className="app__name">{ja.app.name}</span>
         <span className="app__tagline">{ja.app.tagline}</span>
         <div className="app__spacer" />
-        <label className="app__theme">
-          {ja.theme.label}
-          <select
-            className="select"
-            value={theme}
-            onChange={(event) => setTheme(event.target.value as ThemePreference)}
-          >
-            <option value="system">{ja.theme.system}</option>
-            <option value="light">{ja.theme.light}</option>
-            <option value="dark">{ja.theme.dark}</option>
-          </select>
-        </label>
         <button type="button" className="button" onClick={() => setLogOpen((open) => !open)}>
           {logOpen ? ja.commandLog.hide : ja.commandLog.show}
         </button>
-        {/* AI レビューの接続先（T-20）。**入口は 1 つだけ**にして、
-            T-25 で中身を設定画面へ移す。 */}
-        <button type="button" className="button" onClick={() => setLlmOpen(true)}>
-          {ja.llm.open}
+        {/* **アプリ全体の設定の入口はここ 1 つ**（T-25。2026-09-06 に利用者が決めた）。
+            テーマも接続先も中に入っている。リポジトリ 1 つぶんの設定は
+            リポジトリ一覧の右クリック（CLAUDE.md §6）。 */}
+        <button
+          type="button"
+          className="button"
+          title={bindingOf("openSettings").label}
+          onClick={() => setSettingsOpen(true)}
+        >
+          {ja.settings.open}
         </button>
       </header>
 
@@ -540,13 +546,16 @@ export default function App() {
         />
       )}
 
-      {/* AI レビューの接続先（T-20）。**API キーは資格情報マネージャーへ預ける。** */}
-      {llmOpen && (
-        <LlmProfilesDialog
-          profiles={settings.settings.llmProfiles}
+      {/* アプリ全体の設定（T-25）。**API キーは資格情報マネージャーへ預ける。** */}
+      {settingsOpen && (
+        <SettingsDialog
+          settings={settings.settings}
           globalSkillDir={dataDir === "" ? "skills" : `${dataDir}\\skills`}
+          log={log}
+          onChange={(change) => void updateSettings(change)}
           onChanged={refreshSettings}
-          onClose={() => setLlmOpen(false)}
+          onGitChecked={setStatus}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
 
@@ -614,12 +623,6 @@ export default function App() {
  * 入力欄にフォーカスがあるか。**ショートカットを横取りしない**ための判定
  * （`useCommitNavigation` / `useFileNavigation` と同じ扱い）。
  */
-function isTyping(target: EventTarget | null): boolean {
-  const element = target as HTMLElement | null;
-  if (element === null) return false;
-  return /^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName) || element.isContentEditable === true;
-}
-
 /**
  * サイドバー下段のブランチ / タグツリー。
  *
@@ -1024,20 +1027,19 @@ function CommitWorkspace({
     void review.refreshHistory();
   }, [review]);
 
-  // `Ctrl+Shift+A` で開く（DESIGN.md §6.5）。**入力欄では横取りしない。**
+  // AI レビューを開く（DESIGN.md §6.5）。**入力欄では横取りしない。**
+  // キーの形は対応表（`lib/shortcuts.ts`）。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const tag = target?.tagName.toLowerCase();
-      if (tag === "input" || tag === "textarea" || target?.isContentEditable === true) return;
+      if (isTyping(event.target)) return;
 
-      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "a") {
+      if (matches(event, "openReview")) {
         event.preventDefault();
         openReview();
         return;
       }
-      // `Esc` でドロワーを閉じる（DESIGN.md §6.5）。**開いているときだけ横取りする。**
-      if (event.key === "Escape" && reviewOpen) {
+      // `Esc` でドロワーを閉じる。**開いているときだけ横取りする。**
+      if (matches(event, "close") && reviewOpen) {
         event.preventDefault();
         setReviewOpen(false);
       }
@@ -1260,7 +1262,7 @@ function CommitWorkspace({
                 // 対象が決まっていないときも**消さずに**押せない形で残す。
                 disabled={reviewSource === null}
                 onClick={openReview}
-                title="Ctrl+Shift+A"
+                title={bindingOf("openReview").label}
               >
                 {ja.review.open}
               </button>

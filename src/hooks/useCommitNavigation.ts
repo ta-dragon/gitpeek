@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ja } from "../i18n/ja";
 import type { ContextMenuItem } from "../components/common/ContextMenu";
 import type { CommitMeta } from "../lib/ipc";
+import { isTyping, matches } from "../lib/shortcuts";
 
 /** 親 / 子が複数あるときに出す選択メニュー。 */
 export type NavigationChoice = { x: number; y: number; items: ContextMenuItem[] };
@@ -82,13 +83,12 @@ export function useCommitNavigation({
 
     const onKeyDown = (event: KeyboardEvent) => {
       // 入力欄では横取りしない。
-      const target = event.target as HTMLElement | null;
-      if (target !== null && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (isTyping(event.target)) return;
 
       const current = selectedSha === null ? -1 : (indexBySha.get(selectedSha) ?? -1);
 
-      // Ctrl+H は HEAD へ。選択が無くても効く。
-      if (event.ctrlKey && !event.altKey && event.key.toLowerCase() === "h") {
+      // HEAD へ。**選択が無くても効く。**
+      if (matches(event, "gotoHead")) {
         const row = headSha === null ? undefined : indexBySha.get(headSha);
         if (row !== undefined) {
           event.preventDefault();
@@ -97,41 +97,30 @@ export function useCommitNavigation({
         return;
       }
 
-      if (event.ctrlKey || event.metaKey) return;
-
-      if (event.altKey) {
-        if (current < 0) return;
-        if (event.key === "ArrowLeft") {
-          event.preventDefault();
-          follow(commits[current].parents, current, ja.commits.parent);
-        } else if (event.key === "ArrowRight") {
-          event.preventDefault();
-          follow(childrenOf(commits, indexBySha, current), current, ja.commits.child);
-        }
+      // 親 / 子を辿るのは選択があるときだけ。
+      if (current >= 0 && matches(event, "parentCommit")) {
+        event.preventDefault();
+        follow(commits[current].parents, current, ja.commits.parent);
+        return;
+      }
+      if (current >= 0 && matches(event, "childCommit")) {
+        event.preventDefault();
+        follow(childrenOf(commits, indexBySha, current), current, ja.commits.child);
         return;
       }
 
-      switch (event.key) {
-        case "ArrowDown":
-        case "j":
-          event.preventDefault();
-          go(current < 0 ? 0 : current + 1);
-          break;
-        case "ArrowUp":
-        case "k":
-          event.preventDefault();
-          go(current < 0 ? 0 : current - 1);
-          break;
-        case "Home":
-          event.preventDefault();
-          go(0);
-          break;
-        case "End":
-          event.preventDefault();
-          go(commits.length - 1);
-          break;
-        default:
-          break;
+      if (matches(event, "commitDown")) {
+        event.preventDefault();
+        go(current < 0 ? 0 : current + 1);
+      } else if (matches(event, "commitUp")) {
+        event.preventDefault();
+        go(current < 0 ? 0 : current - 1);
+      } else if (matches(event, "commitFirst")) {
+        event.preventDefault();
+        go(0);
+      } else if (matches(event, "commitLast")) {
+        event.preventDefault();
+        go(commits.length - 1);
       }
     };
 

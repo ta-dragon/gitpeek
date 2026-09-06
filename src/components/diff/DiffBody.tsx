@@ -17,7 +17,6 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useResolvedTheme } from "../../hooks/useTheme";
 import {
   allWordSegments,
-  buildRows,
   rowIndexForLine,
   type DiffLayout,
   type DiffRow,
@@ -37,15 +36,23 @@ const NO_COLORS = new Map<DiffLine, Chunk[]>();
 export function DiffBody({
   path,
   hunks,
+  rows,
   layout,
   showLineEndings,
   findings,
   jumpTo,
+  hits,
+  scrollTo,
   scrollRef,
 }: {
   /** ハイライトの言語を決めるのに使う。 */
   path: string;
   hunks: Hunk[];
+  /**
+   * 並べる行。**`DiffPane` が組み立てて渡す**（検索も同じ行番号で数えるので、
+   * 2 か所で組み立てるとずれる）。
+   */
+  rows: DiffRow[];
   layout: DiffLayout;
   showLineEndings: boolean;
   /**
@@ -63,10 +70,13 @@ export function DiffBody({
    * （当たらなかったことはドロワー側が文言で出す）。
    */
   jumpTo: { line: number; nonce: number } | null;
+  /** 検索で当たった行（T-25）。**印を付けるだけ**で、文字は塗らない。 */
+  hits: Set<number>;
+  /** 検索で動かす先の行。**`nonce` は押した回数**（同じ当たりへもう一度飛べる）。 */
+  scrollTo: { row: number; nonce: number } | null;
   /** スクロールしているのは `.dpane__body`。仮想化はその上で行う。 */
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
-  const rows = useMemo(() => buildRows(hunks, layout), [hunks, layout]);
   /** 飛んできた先の行。**印を残す** — 動いただけだとどれが目的の行か分からない。 */
   const [target, setTarget] = useState<number | null>(null);
   const placed = useMemo(() => placeFindings(findings, hunks).byLine, [findings, hunks]);
@@ -122,6 +132,25 @@ export function DiffBody({
     virtualizer.scrollToIndex(index, { align: "center" });
   }, [jumpTo, rows, virtualizer]);
 
+  /**
+   * 検索で当たった行まで動かす（T-25）。
+   *
+   * **指摘から飛ぶのとは別に持つ。** あちらは行番号（差分の中の行）で、
+   * こちらは行リストの添字（当たりの順番）なので、同じ入口にできない。
+   */
+  const handledSearch = useRef<number | null>(null);
+  useEffect(() => {
+    if (scrollTo === null) {
+      handledSearch.current = null;
+      return;
+    }
+    if (handledSearch.current === scrollTo.nonce) return;
+    if (scrollTo.row < 0 || scrollTo.row >= rows.length) return;
+
+    handledSearch.current = scrollTo.nonce;
+    virtualizer.scrollToIndex(scrollTo.row, { align: "center" });
+  }, [scrollTo, rows.length, virtualizer]);
+
   const context: RowContext = { segments, colors, showLineEndings };
 
   return (
@@ -133,7 +162,7 @@ export function DiffBody({
             key={item.key}
             data-index={item.index}
             ref={virtualizer.measureElement}
-            className={classOf(row.kind, layout, newLineOf(row) === target)}
+            className={classOf(row.kind, layout, newLineOf(row) === target, hits.has(item.index))}
             style={{ transform: `translateY(${item.start}px)` }}
           >
             {row.kind === "hunk" ? (
@@ -181,8 +210,9 @@ function classOf(
   kind: "hunk" | "pair" | "single",
   layout: DiffLayout,
   target: boolean,
+  hit: boolean,
 ): string {
-  const mark = target ? " drow--target" : "";
+  const mark = `${target ? " drow--target" : ""}${hit ? " drow--hit" : ""}`;
   if (kind === "hunk") return `drow drow--hunk dhunk${mark}`;
   return `drow drow--${layout === "unified" ? "unified" : "split"}${mark}`;
 }

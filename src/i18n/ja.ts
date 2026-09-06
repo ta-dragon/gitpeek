@@ -260,6 +260,79 @@ export const ja = {
   },
 
   settings: {
+    // --- 設定画面（T-25）------------------------------------------------
+    title: "設定",
+    open: "設定",
+    close: "閉じる",
+    // タブ。**リポジトリ 1 つぶんの設定はここに出さない**（CLAUDE.md §6）。
+    tabs: {
+      general: "一般",
+      view: "表示",
+      diff: "差分",
+      fetch: "fetch",
+      review: "AI レビュー",
+      skills: "観点",
+      keys: "ショートカット",
+      logs: "ログ",
+    },
+    repositoryElsewhere:
+      "リポジトリごとの設定（表示するブランチ・既定の接続先・リポジトリ内の観点）は、リポジトリ一覧の右クリックから開きます。",
+
+    // 一般
+    gitPath: "git 実行ファイルのフルパス",
+    gitPathNote: "空欄なら PATH の git を使います。変えると、その場で確認し直します。",
+    gitPathChecking: "確認しています…",
+    gitPathOk: (version: string, path: string) => `${version} を ${path} で使います。`,
+    gitPathNg: (reason: string) => `使えません: ${reason}`,
+    workspaceRoot: "clone の既定の保存先",
+    workspaceRootNote: "URL から clone するとき、保存先の親フォルダに最初から入ります。",
+    workspaceRootEmpty: "まだ決まっていません。clone の画面で「この保存先を次回から既定にする」を押すと入ります。",
+
+    // 表示
+    dateFormat: "日時の出し方",
+    dateRelative: "経過時間（3 日前）",
+    dateAbsolute: "日時（2026-09-06 15:32）",
+    commitOrder: "コミットの並び順",
+    orderTopo: "枝のつながり順（topo）",
+    orderDate: "日時順（date）",
+
+    // 差分
+    diffLayout: "差分の並べ方",
+    layoutSideBySide: "左右に並べる",
+    layoutUnified: "1 列にまとめる",
+    contextLines: "変更の前後に出す行数",
+    ignoreWhitespace: "空白の違いを無視する",
+    showLineEndings: "改行の記号を出す",
+    collapseLines: "この行数を超える差分は畳む",
+    collapseBytes: "この大きさ（バイト）を超える差分は畳む",
+    collapseNote: "どちらか一方でも超えたら畳みます。開くボタンはその場に出ます。",
+
+    // fetch
+    staleWarningDays: "fetch していない日数の警告",
+    staleWarningNote: (days: number) =>
+      days === 0
+        ? "0 なので、放置していても警告しません。"
+        : `最後の fetch から ${days} 日を過ぎたリポジトリに印を出します。`,
+
+    // AI レビュー
+    reviewConcurrency: "同時に投げるファイル数",
+    reviewConcurrencyNote:
+      "ローカルの接続先では、増やすとかえって遅くなることがあります（既定は 1）。",
+    reviewContextLines: "モデルへ渡す変更の前後の行数",
+
+    // ログ
+    logsWhere: "ログの置き場所",
+    logsNote: "git の実行と、起きた問題を 7 日分残します。差分やレビューの本文は書きません。",
+
+    // 入力の検証。**理由は欄の下に 1 行**（欄は消さない。CLAUDE.md §6）。
+    form: {
+      empty: "空欄です。数字を入れてください。",
+      notANumber: "数字だけを入れてください（小数と符号は使えません）。",
+      outOfRange: (min: number, max: number) =>
+        `${min.toLocaleString()} から ${max.toLocaleString()} までの数字を入れてください。`,
+      unsaved: "この値は保存していません。",
+    },
+
     recoveredTitle: "settings.json を読み込めなかったため既定値で起動しました",
     recoveredDetail: (backupPath: string, reason: string) =>
       `元の内容は ${backupPath} へ退避しました（${reason}）。`,
@@ -981,6 +1054,50 @@ export const ja = {
       noResult: "応答がありませんでした。",
       saveTitle: "Markdown で書き出し",
     },
+  },
+
+  /**
+   * ショートカットの説明（T-25）。**鍵は `lib/shortcuts.ts` の `Action`。**
+   * 設定画面の一覧はこの 2 つを突き合わせて作るので、片方だけ足すと型で落ちる。
+   */
+  shortcuts: {
+    openPalette: "リポジトリを切り替える",
+    fetchCurrent: "いまのリポジトリを fetch する",
+    fetchAll: "登録した全リポジトリを fetch する",
+    openReview: "AI レビューを開く（実行はしない）",
+    openSettings: "設定を開く",
+    findInDiff: "差分の中を探す",
+    reload: "履歴と作業ツリーを読み直す",
+    gotoHead: "HEAD のコミットへ移動する",
+    commitDown: "1 つ下のコミットへ",
+    commitUp: "1 つ上のコミットへ",
+    commitFirst: "いちばん上のコミットへ",
+    commitLast: "いちばん下のコミットへ",
+    parentCommit: "親のコミットへ（複数なら選ぶ）",
+    childCommit: "子のコミットへ（複数なら選ぶ）",
+    fileNext: "次のファイルへ",
+    filePrev: "前のファイルへ",
+    focusDiff: "差分へフォーカスを移す",
+    close: "開いているものを閉じる",
+  },
+
+  /**
+   * 差分の中の検索（T-25。DESIGN.md §6.5 の `Ctrl+F`）。
+   *
+   * **探すのは開いているファイルの差分の中だけ。** 見つけた行へ移動して囲む
+   * （文字そのものは塗らない — 語単位差分と構文色に 3 つ目の色を重ねると、
+   * どれが変更でどれが検索結果か読めなくなる）。
+   */
+  diffSearch: {
+    open: "差分の中を探す",
+    placeholder: "差分の中を探す",
+    prev: "前へ",
+    next: "次へ",
+    close: "閉じる",
+    counts: (current: number, total: number) => `${current} / ${total}`,
+    none: "見つかりません",
+    empty: "探す言葉を入れてください。",
+    scope: "開いているファイルの中だけを探します。",
   },
 
   commandLog: {

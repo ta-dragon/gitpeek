@@ -10,6 +10,8 @@
  */
 import { useCallback, useEffect, type RefObject } from "react";
 
+import { isTyping, matches } from "../lib/shortcuts";
+
 export function useFileNavigation({
   keys,
   selected,
@@ -35,22 +37,21 @@ export function useFileNavigation({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
       // 入力欄では横取りしない（SHA ジャンプ欄で Enter が効かなくなる）。
-      if (target !== null && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (isTyping(event.target)) return;
 
-      if (event.altKey && !event.ctrlKey && !event.metaKey) {
-        if (event.key === "ArrowUp") {
-          event.preventDefault();
-          step(-1);
-        } else if (event.key === "ArrowDown") {
-          event.preventDefault();
-          step(1);
-        }
+      if (matches(event, "filePrev")) {
+        event.preventDefault();
+        step(-1);
+        return;
+      }
+      if (matches(event, "fileNext")) {
+        event.preventDefault();
+        step(1);
         return;
       }
 
-      if (event.key === "Enter" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      if (matches(event, "focusDiff")) {
         const element = bodyRef.current;
         if (element === null) return;
         event.preventDefault();

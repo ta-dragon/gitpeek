@@ -1532,6 +1532,121 @@ body {
   gap: 8px;
 }
 
+/* ---------- 設定画面（T-25。docs/DESIGN.md §6.5, §12.2）---------- */
+
+/**
+ * **入口は 1 つ**（ヘッダの「設定」と `Ctrl+,`）。中身はタブで分ける。
+ * 縦に全部並べると、どこに何があるのか読めない。
+ */
+.settings__row {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 4px 10px;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+.settings__row--check {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.settings__label {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/** 注記と理由は**値の下**（ラベルの列は空ける）。 */
+.settings__note,
+.settings__error {
+  grid-column: 2;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.settings__note {
+  color: var(--text-faint);
+}
+
+/** **理由が出ても欄は消さない**（CLAUDE.md §6）。保存しないだけ。 */
+.settings__error {
+  color: var(--danger);
+}
+
+.settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+/** どこに何があるのかを画面に残す（リポジトリ 1 つぶんの設定は別の入口）。 */
+.settings__scope {
+  flex: 1 1 240px;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/** ショートカットの一覧。**対応表から作る**ので実際のキーとずれない。 */
+.settings__keys {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings__key {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.settings__kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg-inset);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* ---------- 差分の中の検索（T-25。`Ctrl+F`）---------- */
+
+.dsearch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+/** 幅だけ足す（見た目は共通の `.input`）。 */
+.dsearch__input {
+  flex: 1 1 160px;
+  width: auto;
+  min-width: 100px;
+}
+
+.dsearch__count {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/**
+ * 当たった行の印。**文字は塗らない**（語単位差分と構文色に 3 つ目の色を
+ * 重ねると、どれが変更でどれが検索結果か読めなくなる）。
+ * いま見ている 1 件は `.drow--target` が上から囲む。
+ */
+.drow--hit {
+  background: var(--bg-hover);
+}
+
 /* ---------- git コマンドログ ---------- */
 
 .command-log {

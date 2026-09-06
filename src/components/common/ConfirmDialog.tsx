@@ -8,9 +8,9 @@
  * - **止める理由と注意を分けて出す。** 止める理由が 1 つでもあれば実行ボタンを出さない。
  *   押せないボタンを置くより、何を片付ければよいかだけを見せる
  */
-import { useEffect } from "react";
 
 import { ja } from "../../i18n/ja";
+import { useEscape } from "../../hooks/useEscape";
 
 export type ConfirmAction = {
   label: string;
@@ -139,16 +139,3 @@ export function ResultDialog({
   );
 }
 
-/** `Esc` で閉じる。`onEscape` が null の間は何もしない。 */
-function useEscape(onEscape: (() => void) | null): void {
-  useEffect(() => {
-    if (onEscape === null) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      onEscape();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onEscape]);
-}

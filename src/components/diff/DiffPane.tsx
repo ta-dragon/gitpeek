@@ -7,10 +7,18 @@
  * 差分の取得はここが持つ（一覧の取得とは別物で、**選んだファイルの分だけ**取りに行く）。
  * hunk へのパースと文字コード判別は Rust 側（`git/diff.rs`）で済んでいる。
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ja } from "../../i18n/ja";
-import { formatBytes, measureDiff, shouldCollapse } from "../../lib/diffRows";
+import {
+  buildRows,
+  formatBytes,
+  measureDiff,
+  shouldCollapse,
+  type DiffRow,
+} from "../../lib/diffRows";
+import { hitRows, rowOf, searchRows, stepHit, totalHits } from "../../lib/diffSearch";
+import { isTyping, matches } from "../../lib/shortcuts";
 import {
   loadFileDiff,
   type DiffSource,
@@ -22,6 +30,7 @@ import {
 } from "../../lib/ipc";
 import { CollapsedNotice } from "./CollapsedNotice";
 import { DiffBody } from "./DiffBody";
+import { DiffSearchBar } from "./DiffSearchBar";
 import { DiffToolbar } from "./DiffToolbar";
 import { UntrackedFile } from "./UntrackedFile";
 
@@ -89,6 +98,18 @@ export function DiffPane({
    */
   const [expanded, setExpanded] = useState(false);
 
+  /**
+   * 差分の中の検索（T-25。`Ctrl+F`）。**開いているファイルの中だけ。**
+   *
+   * 当たりの判定は純関数（`lib/diffSearch.ts`）。ここが持つのは
+   * 「開いているか」「何を打ったか」「いま何番目か」だけ。
+   */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [hitIndex, setHitIndex] = useState(-1);
+  /** 検索で動かす先。**`nonce` は押した回数**（同じ当たりへもう一度飛べるように）。 */
+  const [scrollToRow, setScrollToRow] = useState<{ row: number; nonce: number } | null>(null);
+
   const latest = useRef(0);
 
   const sourceKey = JSON.stringify(source);
@@ -155,6 +176,58 @@ export function DiffPane({
     onDiffLoaded(loading ? null : diff);
   }, [diff, loading, onDiffLoaded]);
 
+  /**
+   * 画面に並べる行。**ここで 1 度だけ組み立てて `DiffBody` へ渡す**
+   * （検索も同じ行番号で数えるので、2 か所で組み立てるとずれる）。
+   */
+  const rows = useMemo(
+    () => (diff === null || diff.binary ? [] : buildRows(diff.hunks, ui.diffLayout)),
+    [diff, ui.diffLayout],
+  );
+
+  /** 畳んであるか。**畳んでいる間は検索しない**（飛ぶ先が画面に無い）。 */
+  const collapsed =
+    diff !== null && !diff.binary && !expanded && shouldCollapse(measureDiff(diff.hunks), ui);
+  const searchable = rows.length > 0 && !collapsed;
+
+  const hits = useMemo(
+    () => (searchOpen && searchable ? searchRows(rows, query) : []),
+    [searchOpen, searchable, rows, query],
+  );
+  const total = totalHits(hits);
+
+  // 打ち直したら 1 件目から見る。**当たりが無ければどこにも行かない。**
+  useEffect(() => {
+    setHitIndex(hits.length > 0 ? 0 : -1);
+  }, [hits]);
+
+  // いま見ている当たりの行まで動かす。
+  useEffect(() => {
+    const row = rowOf(hits, hitIndex);
+    if (row === null) return;
+    setScrollToRow((current) => ({ row, nonce: (current?.nonce ?? 0) + 1 }));
+  }, [hits, hitIndex]);
+
+  // ファイルや対象が変われば、探していたものは意味を失う。
+  useEffect(() => {
+    setSearchOpen(false);
+    setQuery("");
+  }, [repositoryId, sourceKey, selectedPath]);
+
+  // `Ctrl+F` で開く（DESIGN.md §6.5）。**入力欄では横取りしない。**
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isTyping(event.target)) return;
+      if (!matches(event, "findInDiff")) return;
+      // **探せないときは開かない**（畳んである・差分が無い）。開くと空の欄が残る。
+      if (!searchable) return;
+      event.preventDefault();
+      setSearchOpen(true);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [searchable]);
+
   return (
     // `tabIndex` は `Enter` でここへフォーカスを移すため（キーボードだけで差分へ入れる）。
     <div className="dpane" ref={bodyRef} tabIndex={-1}>
@@ -191,6 +264,17 @@ export function DiffPane({
         />
       )}
 
+      {searchOpen && searchable && (
+        <DiffSearchBar
+          query={query}
+          current={hitIndex}
+          total={total}
+          onQueryChange={setQuery}
+          onStep={(delta) => setHitIndex((current) => stepHit(hits.length, current, delta))}
+          onClose={() => setSearchOpen(false)}
+        />
+      )}
+
       <div className="dpane__body" ref={bodyRef}>
         <Body
           repositoryId={repositoryId}
@@ -204,6 +288,9 @@ export function DiffPane({
           ui={ui}
           findings={findings}
           jumpTo={jumpTo}
+          rows={rows}
+          hits={hitRows(hits)}
+          scrollTo={scrollToRow}
           expanded={expanded}
           scrollRef={bodyRef}
           onExpand={() => setExpanded(true)}
@@ -229,6 +316,9 @@ function Body({
   ui,
   findings,
   jumpTo,
+  rows,
+  hits,
+  scrollTo,
   expanded,
   scrollRef,
   onExpand,
@@ -245,6 +335,11 @@ function Body({
   ui: UiSettings;
   findings: Finding[];
   jumpTo: { path: string; line: number; nonce: number } | null;
+  /** 並べる行。**組み立ては呼び出し側で 1 度だけ。** */
+  rows: DiffRow[];
+  /** 検索で当たった行（T-25）。 */
+  hits: Set<number>;
+  scrollTo: { row: number; nonce: number } | null;
   expanded: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onExpand: () => void;
@@ -309,11 +404,14 @@ function Body({
     <DiffBody
       path={diff.path}
       hunks={diff.hunks}
+      rows={rows}
       layout={ui.diffLayout}
       showLineEndings={ui.showLineEndings}
       findings={findings}
       // **別のファイルの指示は渡さない。** 行番号だけ合ってしまうと別の行へ飛ぶ。
       jumpTo={jumpTo !== null && jumpTo.path === diff.path ? jumpTo : null}
+      hits={hits}
+      scrollTo={scrollTo}
       scrollRef={scrollRef}
     />
   );

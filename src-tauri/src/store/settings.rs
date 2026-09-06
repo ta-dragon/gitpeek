@@ -25,6 +25,24 @@ pub const SCHEMA_VERSION: u32 = 1;
 /// AI レビューの並列度の上限（CLAUDE.md §7）。
 pub const MAX_REVIEW_CONCURRENCY: u8 = 3;
 
+/// 数値の欄の範囲（T-25）。
+///
+/// **画面（`src/lib/settingsForm.ts` の `NUMBER_FIELDS`）と同じ値**であること。
+/// `settings.json` は手編集を想定しているので、画面で締めるだけでは足りない
+/// （CLAUDE.md §5）。**変えたら両方直す** — 下のテストが同じ数を見ている。
+mod range {
+    /// 差分に出す前後の行。「すべて」は十分大きな `-U` で代用している。
+    pub const CONTEXT_LINES: (u32, u32) = (0, 1_000_000);
+    /// これより多い行の差分は既定で畳む。
+    pub const COLLAPSE_LINES: (u32, u32) = (100, 1_000_000);
+    /// 同じくバイト数。
+    pub const COLLAPSE_BYTES: (u32, u32) = (10_000, 100_000_000);
+    /// fetch の放置警告。**0 は「警告しない」**（範囲外ではない）。
+    pub const STALE_WARNING_DAYS: (u32, u32) = (0, 365);
+    /// LLM へ渡す unified diff の文脈行。
+    pub const REVIEW_CONTEXT_LINES: (u8, u8) = (0, 50);
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -78,7 +96,21 @@ impl Settings {
             clamp_choice(&mut repository.visible_refs.mode, &["all", "custom"]);
         }
         self.review.concurrency = self.review.concurrency.clamp(1, MAX_REVIEW_CONCURRENCY);
+
+        // 数値の欄（T-25）。**画面と同じ範囲**へ寄せる。
+        self.ui.context_lines = clamp_range(self.ui.context_lines, range::CONTEXT_LINES);
+        self.ui.collapse_lines = clamp_range(self.ui.collapse_lines, range::COLLAPSE_LINES);
+        self.ui.collapse_bytes = clamp_range(self.ui.collapse_bytes, range::COLLAPSE_BYTES);
+        self.fetch.stale_warning_days =
+            clamp_range(self.fetch.stale_warning_days, range::STALE_WARNING_DAYS);
+        self.review.context_lines =
+            clamp_range(self.review.context_lines, range::REVIEW_CONTEXT_LINES);
     }
+}
+
+/// 範囲の外なら端へ寄せる。**捨てずに寄せる**（打ち間違いでファイルを退避しない）。
+fn clamp_range<T: Ord>(value: T, (min, max): (T, T)) -> T {
+    value.clamp(min, max)
 }
 
 /// 候補に無い値なら先頭（＝既定）へ戻す。
@@ -518,6 +550,40 @@ mod tests {
             "将来版の設定を書き換えてはいけない"
         );
         assert!(!paths.settings_backup_file().exists(), "退避もしない");
+    }
+
+    /// **数値の欄も締める**（T-25）。範囲は画面（`src/lib/settingsForm.ts` の
+    /// `NUMBER_FIELDS`）と同じ値で、**ここが番人**になる（`settings.json` は
+    /// 手編集を想定しているため）。**片方だけ変えたらここで落ちる。**
+    #[test]
+    fn normalizes_numbers_to_the_same_range_as_the_screen() {
+        let mut settings = Settings::default();
+        settings.ui.context_lines = 9_999_999;
+        settings.ui.collapse_lines = 1;
+        settings.ui.collapse_bytes = 1;
+        settings.fetch.stale_warning_days = 1_000;
+        settings.review.context_lines = 200;
+        settings.normalize();
+
+        assert_eq!(settings.ui.context_lines, 1_000_000, "変えたら settingsForm.ts も");
+        assert_eq!(settings.ui.collapse_lines, 100, "変えたら settingsForm.ts も");
+        assert_eq!(settings.ui.collapse_bytes, 10_000, "変えたら settingsForm.ts も");
+        assert_eq!(settings.fetch.stale_warning_days, 365, "変えたら settingsForm.ts も");
+        assert_eq!(settings.review.context_lines, 50, "変えたら settingsForm.ts も");
+    }
+
+    /// **0 に意味がある欄を 0 のまま通す**（「放置していても警告しない」）。
+    #[test]
+    fn zero_stays_zero_where_it_means_something() {
+        let mut settings = Settings::default();
+        settings.fetch.stale_warning_days = 0;
+        settings.ui.context_lines = 0;
+        settings.review.context_lines = 0;
+        settings.normalize();
+
+        assert_eq!(settings.fetch.stale_warning_days, 0);
+        assert_eq!(settings.ui.context_lines, 0);
+        assert_eq!(settings.review.context_lines, 0);
     }
 
     #[test]

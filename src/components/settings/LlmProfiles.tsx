@@ -50,26 +50,22 @@ import {
 /** 編集中の対象。`null` は一覧を見ているだけ、`profile === null` は新規。 */
 type Editing = { profile: LlmProfile | null };
 
-/** 設定モーダルのタブ。**T-25 でこのまま設定画面へ移す。** */
-type Tab = "llm" | "skills";
-
-export function LlmProfilesDialog({
+/**
+ * 接続先の一覧と編集（T-20 → T-25 で設定画面のタブへ移した）。
+ *
+ * **枠（モーダル）は持たない。** 設定画面がタブとして中身だけを出す
+ * （入口を 1 つに畳んだ。CLAUDE.md §6）。
+ */
+export function LlmProfilesPanel({
   profiles,
-  globalSkillDir,
-  onClose,
   onChanged,
 }: {
   profiles: LlmProfile[];
-  /** グローバル skill の置き場所（`%APPDATA%\...\skills`）。文言に出す。 */
-  globalSkillDir: string;
-  onClose: () => void;
   /** 保存・削除のあとに設定を読み直させる。 */
   onChanged: () => Promise<void>;
 }) {
-  const [tab, setTab] = useState<Tab>("llm");
   const [editing, setEditing] = useState<Editing | null>(null);
   const [credentialKeys, setCredentialKeys] = useState<string[]>([]);
-  const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
   const refreshKeys = async () => {
@@ -86,8 +82,71 @@ export function LlmProfilesDialog({
     void refreshKeys();
   }, []);
 
-  // **リポジトリを渡さない。** ここに出すのは内蔵とグローバルだけで、
-  // リポジトリの中の観点は「このリポジトリの設定」が受け持つ。
+  const afterChange = async () => {
+    await onChanged();
+    await refreshKeys();
+  };
+
+  return (
+    <>
+      {failure !== null && <p className="modal__blocker">{failure}</p>}
+
+      {editing === null ? (
+        <>
+          <p className="modal__lead">{ja.llm.lead}</p>
+          <ProfileList
+            profiles={profiles}
+            credentialKeys={credentialKeys}
+            onEdit={(profile) => setEditing({ profile })}
+            onRemove={async (profile) => {
+              try {
+                await deleteLlmProfile(profile.id);
+                setFailure(null);
+                await afterChange();
+              } catch (error) {
+                setFailure(messageOf(error));
+              }
+            }}
+          />
+          <div className="settings__actions">
+            <button
+              type="button"
+              className="button"
+              onClick={() => setEditing({ profile: null })}
+            >
+              {ja.llm.add}
+            </button>
+          </div>
+        </>
+      ) : (
+        <ProfileEditor
+          existing={editing.profile}
+          hasKey={editing.profile !== null && hasSavedKey(editing.profile, credentialKeys)}
+          onSaved={async (saved) => {
+            setFailure(null);
+            await afterChange();
+            // **保存したら編集を続けられる状態にする。** 新規はここで id が付き、
+            // 「つながるか試す」が押せるようになる。
+            setEditing({ profile: saved });
+          }}
+          onFailed={setFailure}
+          onDone={() => setEditing(null)}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * 内蔵とグローバルの観点（T-21 → T-25 で設定画面のタブへ移した）。
+ *
+ * **リポジトリの中の観点はここに出さない**（CLAUDE.md §6）。どのリポジトリの
+ * 話か読めなくなるので、リポジトリ一覧の右クリックから開く。
+ */
+export function GlobalSkillsPanel({ globalSkillDir }: { globalSkillDir: string }) {
+  const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+
   useEffect(() => {
     void (async () => {
       try {
@@ -99,108 +158,21 @@ export function LlmProfilesDialog({
     })();
   }, []);
 
-  useEscape(onClose);
-
-  const afterChange = async () => {
-    await onChanged();
-    await refreshKeys();
-  };
-
   return (
-    <div className="modal" role="dialog" aria-modal="true" aria-label={ja.llm.title}>
-      <div className="modal__box modal__box--wide">
-        <h2 className="modal__title">{ja.llm.title}</h2>
-
-        {/* **タブは押せないときも消さない。** 何がここにあるのか読めなくなる。 */}
-        <div className="tabs">
-          <button
-            type="button"
-            className={`tabs__tab${tab === "llm" ? " tabs__tab--active" : ""}`}
-            onClick={() => setTab("llm")}
-          >
-            {ja.llm.title}
-          </button>
-          <button
-            type="button"
-            className={`tabs__tab${tab === "skills" ? " tabs__tab--active" : ""}`}
-            onClick={() => setTab("skills")}
-          >
-            {ja.skills.tab}
-          </button>
-        </div>
-
-        <div className="modal__body">
-          {failure !== null && <p className="modal__blocker">{failure}</p>}
-
-          {tab === "skills" ? (
-            <>
-              <p className="modal__lead">{ja.skills.globalLead(globalSkillDir)}</p>
-              {/* **リポジトリの中の観点はここに出さない。** どのリポジトリの話か
-                  読めなくなるので、リポジトリ一覧の右クリックから開く。 */}
-              <p className="modal__note">{ja.skills.repositoryElsewhere}</p>
-              {catalog !== null && (
-                <SkillList
-                  entries={skillsFrom(catalog.entries, ["builtIn", "global"])}
-                  repositoryId={null}
-                  emptyNote={ja.skills.empty}
-                  onChanged={setCatalog}
-                  onFailed={setFailure}
-                />
-              )}
-            </>
-          ) : editing === null ? (
-            <>
-              <p className="modal__lead">{ja.llm.lead}</p>
-              <ProfileList
-                profiles={profiles}
-                credentialKeys={credentialKeys}
-                onEdit={(profile) => setEditing({ profile })}
-                onRemove={async (profile) => {
-                  try {
-                    await deleteLlmProfile(profile.id);
-                    setFailure(null);
-                    await afterChange();
-                  } catch (error) {
-                    setFailure(messageOf(error));
-                  }
-                }}
-              />
-            </>
-          ) : (
-            <ProfileEditor
-              existing={editing.profile}
-              hasKey={
-                editing.profile !== null && hasSavedKey(editing.profile, credentialKeys)
-              }
-              onSaved={async (saved) => {
-                setFailure(null);
-                await afterChange();
-                // **保存したら編集を続けられる状態にする。** 新規はここで id が付き、
-                // 「つながるか試す」が押せるようになる。
-                setEditing({ profile: saved });
-              }}
-              onFailed={setFailure}
-              onDone={() => setEditing(null)}
-            />
-          )}
-        </div>
-
-        <div className="modal__actions">
-          {tab === "llm" && editing === null && (
-            <button
-              type="button"
-              className="button"
-              onClick={() => setEditing({ profile: null })}
-            >
-              {ja.llm.add}
-            </button>
-          )}
-          <button type="button" className="button button--primary" onClick={onClose}>
-            {ja.llm.close}
-          </button>
-        </div>
-      </div>
-    </div>
+    <>
+      {failure !== null && <p className="modal__blocker">{failure}</p>}
+      <p className="modal__lead">{ja.skills.globalLead(globalSkillDir)}</p>
+      <p className="modal__note">{ja.skills.repositoryElsewhere}</p>
+      {catalog !== null && (
+        <SkillList
+          entries={skillsFrom(catalog.entries, ["builtIn", "global"])}
+          repositoryId={null}
+          emptyNote={ja.skills.empty}
+          onChanged={setCatalog}
+          onFailed={setFailure}
+        />
+      )}
+    </>
   );
 }
 
@@ -651,15 +623,3 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** `Esc` で閉じる（`CloneDialog` と同じ）。 */
-function useEscape(onEscape: () => void): void {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      onEscape();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onEscape]);
-}

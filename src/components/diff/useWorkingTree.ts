@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { loadWorkingTree, type WorkingTree } from "../../lib/ipc";
+import { matches } from "../../lib/shortcuts";
 
 export type WorkingTreeState = {
   tree: WorkingTree | null;
@@ -68,7 +69,8 @@ export function useWorkingTree(repositoryId: string | null): WorkingTreeState {
   useEffect(() => {
     if (repositoryId === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "F5") return;
+      // キーの形は対応表（`lib/shortcuts.ts`）。
+      if (!matches(event, "reload")) return;
       // ブラウザの再読込は要らない（Tauri でも WebView の再読込は起きる）。
       event.preventDefault();
       reload();

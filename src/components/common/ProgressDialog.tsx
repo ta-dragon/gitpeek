@@ -7,9 +7,9 @@
  * **中止しても、そこまでに取り込まれた ref は戻らない。** 結果の文言でそう伝える
  * （黙って閉じない）。
  */
-import { useEffect } from "react";
 
 import { ja } from "../../i18n/ja";
+import { useEscape } from "../../hooks/useEscape";
 import {
   currentTarget,
   isDone,
@@ -166,16 +166,3 @@ export function FetchConfirm({
   );
 }
 
-/** `Esc` で閉じる。`onEscape` が null の間は何もしない。 */
-function useEscape(onEscape: (() => void) | null): void {
-  useEffect(() => {
-    if (onEscape === null) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      onEscape();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onEscape]);
-}
