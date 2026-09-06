@@ -862,6 +862,9 @@ export const ja = {
     noSkills: "使う観点がありません。",
     fallbackDefault: "構造化に失敗しました。モデルの出力をそのまま表示しています。",
     offDiffNote: "この差分に無い行を指しています。",
+    // 指摘を押すと差分へ飛ぶ（利用者の要望。2026-09-06）。**何が起きるかで書く。**
+    jumpHint: "押すとその行を差分に表示します",
+    jumpFileOnlyHint: "押すとそのファイルを差分に表示します（行は指定できません）",
     wholeFileNote: "ファイル全体への指摘です。",
     noFindings: "指摘はありませんでした。",
     emptyResult: "応答がありませんでした。",
@@ -904,10 +907,27 @@ export const ja = {
       root: (to: string) => `最初のコミット ${to}`,
       range: (from: string, to: string) => `${from} から ${to} への変更`,
       symmetric: (from: string, to: string) => `${from} と ${to}（分かれたところから）`,
+      // **記録に何も残っていないとき。** 古い形式や壊れた 1 件でも行は消さない。
+      unknown: "何をレビューしたのか、この記録には残っていません。",
+      // コミット 1 つの呼び名。**要約が引けたときだけ添える**（読み込んでいない
+      // コミットや、消えたコミットでは SHA だけになる）。
+      commit: (sha: string, subject: string) => `${sha}「${subject}」`,
+    },
+
+    // **何をレビューしたのかを結果と履歴の両方に出す**（利用者の要望。2026-09-06）。
+    // 履歴が増えると、日時とモデルだけではどれがどれだか読めなくなる。
+    target: {
+      repository: "リポジトリ",
+      what: "対象",
+      when: "実行日時",
+      model: "モデル",
     },
 
     history: {
       title: "レビュー履歴",
+      // **どのリポジトリの履歴かを出す。** 履歴はリポジトリごとに積んであるが、
+      // 画面にリポジトリ名が無いと、切り替えたあとで読めなくなる。
+      of: (name: string) => `${name} のレビュー履歴`,
       empty: "このリポジトリではまだレビューしていません。",
       emptyWhere: (dir: string) => `結果は ${dir} に積まれます。`,
       unreadable: "読めません",
@@ -922,6 +942,8 @@ export const ja = {
       title: "AI レビュー結果",
       savedAt: "実行日時",
       model: "モデル",
+      // **どのリポジトリの結果か。** 書き出したファイルだけを後から読むことがある。
+      repository: "リポジトリ",
       target: "対象",
       counts: "件数",
       skills: "観点",

@@ -34,6 +34,27 @@ export function buildRows(hunks: Hunk[], layout: DiffLayout): DiffRow[] {
 }
 
 /**
+ * 変更後の行番号 `line` を出している行の索引。無ければ `null`。
+ *
+ * **AI レビューの指摘から差分の行へ飛ぶために使う**（利用者の要望。2026-09-06）。
+ * 仮想スクロールなので、飛ぶ先は「行」ではなく**行リストの索引**でなければならない
+ * （DOM に無い行は掴めない）。
+ *
+ * **指摘は変更後の行番号で指す**という約束なので、削除された行しか無い場所へは
+ * 飛べない（`null` が返る）。**当たらなかったことは呼び出し側が画面に出す** —
+ * 黙って先頭に留まると、押しても何も起きないように見える。
+ */
+export function rowIndexForLine(rows: DiffRow[], line: number): number | null {
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    if (row.kind === "single" && row.line.newLine === line) return index;
+    // side-by-side では変更後の行は右側にある。**左側の行番号で引かない。**
+    if (row.kind === "pair" && row.right !== null && row.right.newLine === line) return index;
+  }
+  return null;
+}
+
+/**
  * 行内差分を差分ぜんぶに対して 1 度だけ求める。
  *
  * `wordSegments` は hunk 単位なので、行リストを作るときに 1 つに畳んでおく。

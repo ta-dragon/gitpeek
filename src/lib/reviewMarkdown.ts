@@ -3,9 +3,13 @@
  *
  * **保存形式は JSON のまま。Markdown は出力専用**（DESIGN.md §12.4）。
  * ここで作った文字列を読み戻すことはないので、**読みやすさだけを見る。**
+ *
+ * **「何をレビューしたのか」の組み立ては `reviewTarget.ts`。** 画面（結果・履歴）と
+ * 同じ文言を出すため、ここには書かない。
  */
 import { ja } from "../i18n/ja";
 import type { Severity, StoredReview } from "./ipc";
+import { describeTarget, type TargetContext } from "./reviewTarget";
 
 const SEVERITY_LABEL: Record<Severity, string> = {
   critical: "critical",
@@ -44,7 +48,7 @@ function fenced(text: string): string {
  * **指摘 0 件でも「0 件」と書く。** 空の文書を出すと、失敗したのか
  * 指摘が無かったのか区別が付かない。
  */
-export function toMarkdown(stored: StoredReview): string {
+export function toMarkdown(stored: StoredReview, context: TargetContext): string {
   const { run, profile } = stored;
   const out: string[] = [];
 
@@ -52,7 +56,11 @@ export function toMarkdown(stored: StoredReview): string {
   out.push("");
   out.push(`- ${ja.review.markdown.savedAt}: ${stored.savedAt}`);
   out.push(`- ${ja.review.markdown.model}: ${inline(profile.model)}（${inline(profile.name)}）`);
-  out.push(`- ${ja.review.markdown.target}: ${describeSource(stored)}`);
+  // **どのリポジトリの何を見たのか**を書き出しにも残す（画面と同じ文言）。
+  if (context.repositoryName !== null) {
+    out.push(`- ${ja.review.markdown.repository}: ${inline(context.repositoryName)}`);
+  }
+  out.push(`- ${ja.review.markdown.target}: ${inline(describeTarget(run.source, context))}`);
   out.push(
     `- ${ja.review.markdown.counts}: ${ja.review.markdown.fileCount(run.files.length)}` +
       ` / ${ja.review.markdown.findingCount(countAll(stored))}`,
@@ -130,20 +138,6 @@ export function toMarkdown(stored: StoredReview): string {
 
 function countAll(stored: StoredReview): number {
   return stored.run.files.reduce((total, file) => total + (file.text?.findings.length ?? 0), 0);
-}
-
-/** 何と何を比べたか。**作業ツリーも同じ形で書く。** */
-export function describeSource(stored: StoredReview): string {
-  const source = stored.run.source;
-  if (source.kind === "workingTree") {
-    return source.staged ? ja.review.source.staged : ja.review.source.unstaged;
-  }
-  const to = source.sha.slice(0, 8);
-  if (source.parent === null) return ja.review.source.root(to);
-  const from = source.parent.slice(0, 8);
-  return source.symmetric
-    ? ja.review.source.symmetric(from, to)
-    : ja.review.source.range(from, to);
 }
 
 /** 書き出しの既定のファイル名。**時刻を入れて上書きを誘わない。** */

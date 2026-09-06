@@ -2736,6 +2736,19 @@ body {
   color: var(--accent-contrast);
 }
 
+/**
+ * 指摘から飛んできた行の印（利用者の要望。2026-09-06）。
+ *
+ * **`outline` で描く。** 行は絶対配置のグリッドで、セルごとに背景色（追加・削除）が
+ * 付くため、`box-shadow: inset` だとセルの背景に隠れる。`outline` は子より後に
+ * 描かれるので上に出る。`outline-offset` を負にして**行の外へはみ出させない**
+ * （はみ出すと横スクロールが生える）。
+ */
+.drow--target {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .drow__badge--minor,
 .drow__badge--info {
   background: var(--bg-hover);
@@ -2960,8 +2973,34 @@ body {
 }
 
 .review__finding {
-  padding: 6px 0;
   border-bottom: 1px solid var(--border);
+}
+
+/**
+ * 指摘 1 件の中身。**押すと差分のその行へ飛ぶ**（利用者の要望。2026-09-06）。
+ *
+ * `button` の中に段落は置けないので、中身は `span` を積んで作る。
+ */
+.review__finding-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 6px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  /** `button` は既定でブラウザのフォントになる。**周りと同じ字にする。** */
+  font: inherit;
+  text-align: left;
+}
+
+.review__finding-body--jump {
+  cursor: pointer;
+}
+
+.review__finding-body--jump:hover {
+  background: var(--bg-hover);
 }
 
 .review__finding-head {
@@ -2985,20 +3024,26 @@ body {
   color: var(--text-faint);
   font-family: var(--font-mono);
   font-size: 11px;
-  cursor: pointer;
-}
-
-.review__finding-line:disabled {
-  cursor: default;
-  opacity: 0.6;
 }
 
 .review__finding-message {
-  margin: 4px 0 0;
+  display: block;
   font-size: 12px;
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/**
+ * 当たらなかった指摘に添える 1 行（CLAUDE.md §6）。
+ *
+ * **消さずに残して、当たらなかったと書く。** 消すと、モデルが書いたのに
+ * 画面から無くなったように見える。
+ */
+.review__finding-note {
+  display: block;
+  color: var(--text-faint);
+  font-size: 11px;
 }
 
 /** 重さは色で示す。**ダーク / ライトで別に決める**のはトークン側の役目。 */
@@ -3046,6 +3091,45 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+/**
+ * 何をレビューしたのか（利用者の要望。2026-09-06）。
+ *
+ * **日時とモデルだけだと、何度もレビューしたときにどれがどれだか読めない。**
+ * ドロワーは狭いので、名前と値を 2 列にせず行ごとに畳む。
+ */
+.review__meta {
+  margin: 0 0 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.review__meta-row {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.review__meta-key {
+  /** **「リポジトリ」が折り返さない幅。** 折り返すと値の行と噛み合わなくなる。 */
+  flex: 0 0 5em;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.review__meta-value {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/** どのリポジトリの履歴か。**0 件でも読めるように一覧の上に置く。** */
+.review__history-of {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .review__history-item {
   border-bottom: 1px solid var(--border);
 }
@@ -3084,6 +3168,15 @@ body {
 .review__history-label {
   margin-left: auto;
   color: var(--text-faint);
+}
+
+/**
+ * 何をレビューしたのか。**行の 2 段目へ回す**（`flex-basis: 100%` で折り返す）。
+ * 1 行に詰めると、コミットの要約が入ったとき時刻と件数が押し出される。
+ */
+.review__history-target {
+  flex: 0 0 100%;
+  overflow-wrap: anywhere;
 }
 
 .review__history-reason {

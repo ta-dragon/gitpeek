@@ -5,6 +5,8 @@ import {
   bySeverity,
   countFindings,
   findingsFor,
+  landsOn,
+  newLines,
   outcomeOf,
   placeFindings,
 } from "./reviewFindings";
@@ -213,5 +215,36 @@ describe("outcomeOf", () => {
       text: { summary: "", findings: [], markdown: "途中まで", fallbackReason: "切れました" },
     });
     expect(outcomeOf(both)).toBe("failed");
+  });
+});
+
+describe("newLines", () => {
+  it("変更後の行番号だけを集める", () => {
+    expect([...newLines([hunk([line(3), line(null, 4), line(5)])])].sort()).toEqual([3, 5]);
+  });
+
+  // 端の値: hunk が無い（リネームだけの差分など）。
+  it("hunk が無ければ空", () => {
+    expect(newLines([]).size).toBe(0);
+  });
+});
+
+describe("landsOn", () => {
+  const lookup = { path: "a.ts", lines: new Set([3, 5]) };
+
+  it("開いているファイルの行なら当たる・当たらないを言う", () => {
+    expect(landsOn(lookup, "a.ts", 3)).toBe(true);
+    expect(landsOn(lookup, "a.ts", 4)).toBe(false);
+  });
+
+  // **開いていないファイルのことは分からない。** 「当たらなかった」と書くと嘘になる。
+  it("別のファイル・何も開いていないときは分からない", () => {
+    expect(landsOn(lookup, "b.ts", 3)).toBeNull();
+    expect(landsOn(null, "a.ts", 3)).toBeNull();
+  });
+
+  // 端の値: ファイル全体への指摘（行を持たない）。
+  it("行を持たない指摘は分からない扱い", () => {
+    expect(landsOn(lookup, "a.ts", null)).toBeNull();
   });
 });

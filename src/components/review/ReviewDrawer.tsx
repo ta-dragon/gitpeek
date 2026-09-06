@@ -14,6 +14,8 @@ import { ja } from "../../i18n/ja";
 import { exportMarkdown } from "../../lib/ipc";
 import type { LlmProfile } from "../../lib/ipc";
 import { markdownFileName, toMarkdown } from "../../lib/reviewMarkdown";
+import type { LineLookup } from "../../lib/reviewFindings";
+import type { TargetContext } from "../../lib/reviewTarget";
 import type { ReviewState, ReviewView } from "../../hooks/useReview";
 import { PreflightPanel } from "./PreflightPanel";
 import { ReviewHistory } from "./ReviewHistory";
@@ -25,6 +27,8 @@ export function ReviewDrawer({
   profileId,
   selected,
   reviewsDir,
+  context,
+  lookup,
   onProfileChange,
   onSelectedChange,
   onRun,
@@ -40,13 +44,18 @@ export function ReviewDrawer({
   profileId: string | null;
   selected: string[];
   reviewsDir: string | null;
+  /** どのリポジトリの何を見たのか（`lib/reviewTarget.ts`）。結果・履歴・書き出しで同じ文言を使う。 */
+  context: TargetContext;
+  /** いま差分ペインに出ているファイルの行。**当たらなかった指摘を明記する**ため。 */
+  lookup: LineLookup;
   onProfileChange: (id: string | null) => void;
   onSelectedChange: (paths: string[]) => void;
   onRun: () => void;
   onCancel: () => void;
   onShow: (view: ReviewView) => void;
   onOpenHistory: (file: string) => void;
-  onJump: ((path: string, line: number) => void) | null;
+  /** 指摘から差分へ飛ぶ。**行が無い（ファイル全体への）指摘では `line` が `null`。** */
+  onJump: ((path: string, line: number | null) => void) | null;
   onClose: () => void;
   onNotice: (message: string) => void;
 }) {
@@ -58,7 +67,7 @@ export function ReviewDrawer({
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     if (path === null) return;
-    await exportMarkdown(path, toMarkdown(state.stored));
+    await exportMarkdown(path, toMarkdown(state.stored, context));
     onNotice(ja.review.exported(path));
   };
 
@@ -134,7 +143,13 @@ export function ReviewDrawer({
               {ja.review.exportMarkdown}
             </button>
           </div>
-          <ReviewResult stored={state.stored} runError={state.runError} onJump={onJump} />
+          <ReviewResult
+            stored={state.stored}
+            runError={state.runError}
+            context={context}
+            lookup={lookup}
+            onJump={onJump}
+          />
         </>
       )}
 
@@ -143,6 +158,7 @@ export function ReviewDrawer({
           rows={state.history}
           error={state.historyError}
           where={reviewsDir}
+          context={context}
           onOpen={onOpenHistory}
         />
       )}

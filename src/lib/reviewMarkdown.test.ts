@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { Finding, ReviewFileResult, StoredReview } from "./ipc";
-import { describeSource, markdownFileName, toMarkdown } from "./reviewMarkdown";
+import { markdownFileName, toMarkdown } from "./reviewMarkdown";
+import { NO_CONTEXT, type TargetContext } from "./reviewTarget";
+
+/** 書き出しの文脈。**リポジトリ名と要約が引ける場合**。 */
+const CONTEXT: TargetContext = {
+  repositoryName: "givsoner",
+  subjectOf: (sha) => (sha === "bbbbbbbbbb" ? "fix: 直す" : null),
+};
 
 function finding(extra: Partial<Finding> = {}): Finding {
   return {
@@ -53,7 +60,7 @@ function stored(extra: Partial<StoredReview["run"]> = {}): StoredReview {
 
 describe("toMarkdown", () => {
   it("見出し・メタ情報・指摘を出す", () => {
-    const text = toMarkdown(stored());
+    const text = toMarkdown(stored(), CONTEXT);
     expect(text).toContain("# AI レビュー結果");
     expect(text).toContain("qwen2.5-coder:14b");
     expect(text).toContain("2026-09-06T12:04:31+09:00");
@@ -69,6 +76,7 @@ describe("toMarkdown", () => {
       stored({
         files: [file({ text: { summary: "", findings: [], markdown: null, fallbackReason: null } })],
       }),
+      CONTEXT,
     );
     expect(text).toContain("指摘はありませんでした。");
     expect(text).toContain("## a.ts");
@@ -89,6 +97,7 @@ describe("toMarkdown", () => {
           }),
         ],
       }),
+      CONTEXT,
     );
     expect(text).toContain("> 構造化に失敗しました。");
     expect(text).toContain("## モデルが書いた Markdown");
@@ -105,6 +114,7 @@ describe("toMarkdown", () => {
           }),
         ],
       }),
+      CONTEXT,
     );
     expect(text).toContain("1 件のファイルはレビューに失敗しました");
     expect(text).toContain("接続先がエラーを返しました");
@@ -113,8 +123,8 @@ describe("toMarkdown", () => {
 
   // **中止したものと最後まで走ったものを見分けられること。**
   it("中止したことを書く", () => {
-    expect(toMarkdown(stored({ cancelled: true }))).toContain("途中で中止しました");
-    expect(toMarkdown(stored())).not.toContain("途中で中止しました");
+    expect(toMarkdown(stored({ cancelled: true }), CONTEXT)).toContain("途中で中止しました");
+    expect(toMarkdown(stored(), CONTEXT)).not.toContain("途中で中止しました");
   });
 
   /**
@@ -136,6 +146,7 @@ describe("toMarkdown", () => {
           }),
         ],
       }),
+      CONTEXT,
     );
     const headings = text.split("\n").filter((line) => line.startsWith("#"));
     expect(headings.some((line) => line.includes("にせの見出し"))).toBe(true);
@@ -156,44 +167,29 @@ describe("toMarkdown", () => {
           }),
         ],
       }),
+      CONTEXT,
     );
     expect(text).toContain("````");
   });
 
+  // **どのリポジトリの何を見たのか**が書き出しに残ること。
+  it("リポジトリと対象を書く", () => {
+    const text = toMarkdown(stored(), CONTEXT);
+    expect(text).toContain("- リポジトリ: givsoner");
+    expect(text).toContain("bbbbbbbb「fix: 直す」");
+  });
+
+  // 端の値: リポジトリ名が分からない文脈。**その行だけ出さない**（空欄を書かない）。
+  it("リポジトリ名が無ければその行を出さない", () => {
+    const text = toMarkdown(stored(), NO_CONTEXT);
+    expect(text).not.toContain("- リポジトリ:");
+    expect(text).toContain("- 対象:");
+  });
+
   it("ファイル 0 件でも落ちない", () => {
-    const text = toMarkdown(stored({ files: [], summary: null }));
+    const text = toMarkdown(stored({ files: [], summary: null }), CONTEXT);
     expect(text).toContain("# AI レビュー結果");
     expect(text).toContain("ファイル 0 件");
-  });
-});
-
-describe("describeSource", () => {
-  it("2 点の比較を短い SHA で書く", () => {
-    expect(describeSource(stored())).toContain("aaaaaaaa");
-    expect(describeSource(stored())).toContain("bbbbbbbb");
-  });
-
-  it("分かれたところからの比較を言い分ける", () => {
-    const symmetric = stored();
-    symmetric.run.source = { kind: "range", parent: "aaaaaaaaaa", sha: "bbbbbbbbbb", symmetric: true };
-    expect(describeSource(symmetric)).toContain("分かれたところ");
-  });
-
-  it("最初のコミットは片側だけ書く", () => {
-    const root = stored();
-    root.run.source = { kind: "range", parent: null, sha: "bbbbbbbbbb", symmetric: false };
-    expect(describeSource(root)).toContain("最初のコミット");
-  });
-
-  // **git の用語をそのまま出さない**（CLAUDE.md §6）。
-  it("作業ツリーは何の変更かで書く", () => {
-    const staged = stored();
-    staged.run.source = { kind: "workingTree", staged: true };
-    expect(describeSource(staged)).toBe("コミット予定の変更（ステージ済み）");
-
-    const unstaged = stored();
-    unstaged.run.source = { kind: "workingTree", staged: false };
-    expect(describeSource(unstaged)).toBe("まだコミットしていない変更");
   });
 });
 

@@ -46,8 +46,9 @@ import { checkoutChoices, checkoutCommit, type CheckoutChoice } from "./lib/writ
 import { useTheme, type ThemePreference } from "./hooks/useTheme";
 import { ja } from "./i18n/ja";
 import { clearCompare, selectCommit, swapEnds } from "./lib/compareSelection";
-import { findingsFor } from "./lib/reviewFindings";
+import { findingsFor, newLines, type LineLookup } from "./lib/reviewFindings";
 import { defaultSelection, initialProfile } from "./lib/reviewPlan";
+import { selectionForSource, type TargetContext } from "./lib/reviewTarget";
 import {
   appDataDir,
   detectGit,
@@ -58,6 +59,7 @@ import {
   type ColumnWidths,
   type CommitMeta,
   type DiffSource,
+  type FileDiff,
   type GitStatus,
   type LlmProfile,
   type LoadPhase,
@@ -792,8 +794,16 @@ function CommitWorkspace({
    */
   const [symmetric, setSymmetric] = useState(false);
   const compareFrom = perRepository.compareCommit;
+  /**
+   * 比較元が変わったあとに戻したい値。**履歴を開いたときだけ入る。**
+   *
+   * 比較元が変われば既定（2 点間差分）へ戻すのが素の振る舞いだが、履歴から
+   * 「分かれたところから」の比較を開いたときは**当時と同じ差分**を出したい。
+   */
+  const pendingSymmetric = useRef<boolean | null>(null);
   useEffect(() => {
-    setSymmetric(false);
+    setSymmetric(pendingSymmetric.current ?? false);
+    pendingSymmetric.current = null;
   }, [compareFrom, entry.id]);
 
   const commitBySha = useMemo(() => {
@@ -867,6 +877,15 @@ function CommitWorkspace({
   const [reviewOpen, setReviewOpen] = useState(false);
   const [profileId, setProfileId] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
+  /** 指摘から飛ぶ先。**`nonce` は押した回数**（同じ行をもう一度押しても飛べるように）。 */
+  const [findingJump, setFindingJump] = useState<{
+    path: string;
+    line: number;
+    nonce: number;
+  } | null>(null);
+  /** いま差分ペインが読めている差分。**読めていないあいだは `null`。** */
+  const [openDiff, setOpenDiff] = useState<FileDiff | null>(null);
+  const onDiffLoaded = useCallback((diff: FileDiff | null) => setOpenDiff(diff), []);
 
   // 接続先の既定は純関数が決める（`lib/reviewPlan.ts`）。**勝手に 1 つ目を選ばない。**
   useEffect(() => {
@@ -960,11 +979,75 @@ function CommitWorkspace({
     return findingsFor(review.state.stored.run, path);
   }, [review.state.stored, diffChange?.path]);
 
-  /** 指摘から差分へ飛ぶ。**そのファイルを開くところまで。** */
-  const jumpToFinding = (path: string, _line: number) => {
+  /**
+   * 指摘から差分へ飛ぶ（利用者の要望。2026-09-06）。
+   *
+   * **ファイルを開き、その行まで動かす。** 行を持たない（ファイル全体への）指摘と、
+   * この差分に無い行を指した指摘では、ファイルを開くところまで。
+   * 実際に動かすのは `DiffBody`（仮想スクロールなので行の索引が要る）。
+   */
+  const jumpToFinding = (path: string, line: number | null) => {
     setViewingWorking(false);
     selectFile(path);
+    // **同じ行をもう一度押しても飛べるように、押した回数で見分ける。**
+    setFindingJump((current) =>
+      line === null ? null : { path, line, nonce: (current?.nonce ?? 0) + 1 },
+    );
   };
+
+  /**
+   * 履歴の 1 件を開く。**当時の差分に画面を合わせる**（T-23 の受け入れ条件）。
+   *
+   * 合わせ先を決めるのは純関数（`lib/reviewTarget.ts`）。**記録が無ければ動かさない。**
+   */
+  const openHistoryEntry = async (file: string) => {
+    const stored = await review.openHistoryEntry(file);
+    if (stored === null) return;
+    const selection = selectionForSource(
+      stored.run.source,
+      (sha) => commitBySha.get(sha)?.parents[0] ?? null,
+    );
+    if (selection === null) return;
+
+    if (selection.kind === "workingTree") {
+      setViewingWorking(true);
+      return;
+    }
+    setViewingWorking(false);
+    // 比較元が変わると `symmetric` は既定へ戻るので、戻し先を先に置く。
+    pendingSymmetric.current = selection.symmetric;
+    setSymmetric(selection.symmetric);
+    updateRepositoryUiState(entry.id, (current) => ({
+      ...current,
+      selectedCommit: selection.selectedCommit,
+      compareCommit: selection.compareCommit,
+    }));
+  };
+
+  /**
+   * いま差分ペインが読めているファイルの行（T-23 の追補）。
+   *
+   * **当たらなかった指摘を「当たらなかった」と書く**のに要る（CLAUDE.md §6）。
+   * 判定そのものは純関数（`lib/reviewFindings.ts` の `landsOn`）。
+   */
+  const lookup: LineLookup = useMemo(
+    () => (openDiff === null ? null : { path: openDiff.path, lines: newLines(openDiff.hunks) }),
+    [openDiff],
+  );
+
+  /**
+   * 「どのリポジトリの何をレビューしたのか」を書くための手掛かり。
+   *
+   * **コミットの要約は保存していない**ので、読み込み済みのコミットから引く。
+   * 引けなければ SHA だけになる（`lib/reviewTarget.ts`）。
+   */
+  const targetContext: TargetContext = useMemo(
+    () => ({
+      repositoryName: entry.name,
+      subjectOf: (sha: string) => commitBySha.get(sha)?.subject ?? null,
+    }),
+    [entry.name, commitBySha],
+  );
 
   return (
     <SplitPane
@@ -1046,6 +1129,8 @@ function CommitWorkspace({
               bodyRef={files.bodyRef}
               ui={ui}
               findings={diffFindings}
+              jumpTo={findingJump}
+              onDiffLoaded={onDiffLoaded}
               onUiChange={(change) =>
                 void updateSettings((current) => ({
                   ...current,
@@ -1067,12 +1152,14 @@ function CommitWorkspace({
             profileId={profileId}
             selected={selectedPaths}
             reviewsDir={dataDir === "" ? null : `${dataDir}\reviews`}
+            context={targetContext}
+            lookup={lookup}
             onProfileChange={setProfileId}
             onSelectedChange={setSelectedPaths}
             onRun={runReview}
             onCancel={() => void review.cancel()}
             onShow={review.show}
-            onOpenHistory={(file) => void review.openHistoryEntry(file)}
+            onOpenHistory={(file) => void openHistoryEntry(file)}
             onJump={jumpToFinding}
             onClose={() => setReviewOpen(false)}
             onNotice={onNotice}

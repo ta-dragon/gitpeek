@@ -15,7 +15,13 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { useResolvedTheme } from "../../hooks/useTheme";
-import { allWordSegments, buildRows, type DiffLayout, type DiffRow } from "../../lib/diffRows";
+import {
+  allWordSegments,
+  buildRows,
+  rowIndexForLine,
+  type DiffLayout,
+  type DiffRow,
+} from "../../lib/diffRows";
 import { highlightDiff, languageOf, type Chunk } from "../../lib/highlight";
 import type { DiffLine, Finding, Hunk } from "../../lib/ipc";
 import { bySeverity, placeFindings } from "../../lib/reviewFindings";
@@ -34,6 +40,7 @@ export function DiffBody({
   layout,
   showLineEndings,
   findings,
+  jumpTo,
   scrollRef,
 }: {
   /** ハイライトの言語を決めるのに使う。 */
@@ -48,10 +55,20 @@ export function DiffBody({
    * `lib/reviewFindings.ts` の純関数が決める（無い行に出すと別の行の指摘に見える）。
    */
   findings: Finding[];
+  /**
+   * 指摘から飛んできた行（利用者の要望。2026-09-06）。
+   *
+   * **`nonce` は「押した回数」。** 同じ行をもう一度押しても飛べるように、
+   * 行番号だけでなくこれで見分ける。**この差分に無い行なら何もしない**
+   * （当たらなかったことはドロワー側が文言で出す）。
+   */
+  jumpTo: { line: number; nonce: number } | null;
   /** スクロールしているのは `.dpane__body`。仮想化はその上で行う。 */
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   const rows = useMemo(() => buildRows(hunks, layout), [hunks, layout]);
+  /** 飛んできた先の行。**印を残す** — 動いただけだとどれが目的の行か分からない。 */
+  const [target, setTarget] = useState<number | null>(null);
   const placed = useMemo(() => placeFindings(findings, hunks).byLine, [findings, hunks]);
   const segments = useMemo(() => allWordSegments(hunks), [hunks]);
   const colors = useHighlight(path, hunks);
@@ -69,9 +86,41 @@ export function DiffBody({
   useEffect(() => {
     if (measured.current === rows) return;
     measured.current = rows;
+    setTarget(null);
     virtualizer.scrollToOffset(0);
     virtualizer.measure();
   }, [rows, virtualizer]);
+
+  /**
+   * 指摘から飛んできた行まで動かす。
+   *
+   * **一度処理した押下は覚えておく** — 表示の設定を変えて行リストが作り直されるたびに
+   * 飛び直すと、読んでいる場所を勝手に奪う。逆に**別のファイルを開いた直後は
+   * 行リストが後から届く**ので、行リストが変わったときにも試し直す必要がある。
+   */
+  const handled = useRef<number | null>(null);
+  useEffect(() => {
+    if (jumpTo === null) {
+      handled.current = null;
+      return;
+    }
+    if (handled.current === jumpTo.nonce) return;
+
+    const index = rowIndexForLine(rows, jumpTo.line);
+    // **この差分に無い行なら動かさない。** 近くの行へ寄せると別の行の指摘に見える。
+    if (index === null) {
+      handled.current = jumpTo.nonce;
+      setTarget(null);
+      return;
+    }
+
+    handled.current = jumpTo.nonce;
+    setTarget(jumpTo.line);
+    // **行の高さは実測**なので 1 度目は当て推量の位置に着くが、`scrollToIndex` は
+    // 測り終わるまで寄せ直す（`virtual-core` の scroll reconcile）。自分で
+    // 追いかけない — 同じ目標へ二重に指示することになる。
+    virtualizer.scrollToIndex(index, { align: "center" });
+  }, [jumpTo, rows, virtualizer]);
 
   const context: RowContext = { segments, colors, showLineEndings };
 
@@ -84,7 +133,7 @@ export function DiffBody({
             key={item.key}
             data-index={item.index}
             ref={virtualizer.measureElement}
-            className={classOf(row.kind, layout)}
+            className={classOf(row.kind, layout, newLineOf(row) === target)}
             style={{ transform: `translateY(${item.start}px)` }}
           >
             {row.kind === "hunk" ? (
@@ -128,9 +177,14 @@ function FindingBadge({ findings }: { findings: Finding[] | undefined }) {
   );
 }
 
-function classOf(kind: "hunk" | "pair" | "single", layout: DiffLayout): string {
-  if (kind === "hunk") return "drow drow--hunk dhunk";
-  return `drow drow--${layout === "unified" ? "unified" : "split"}`;
+function classOf(
+  kind: "hunk" | "pair" | "single",
+  layout: DiffLayout,
+  target: boolean,
+): string {
+  const mark = target ? " drow--target" : "";
+  if (kind === "hunk") return `drow drow--hunk dhunk${mark}`;
+  return `drow drow--${layout === "unified" ? "unified" : "split"}${mark}`;
 }
 
 /**

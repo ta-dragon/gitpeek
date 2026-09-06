@@ -6,13 +6,25 @@
  *
  * **構造化に失敗した結果を捨てない**（DESIGN.md §10.6）。`markdown` が
  * 入っていれば理由を添えてそのまま出す。
+ *
+ * **指摘は押せる**（利用者の要望。2026-09-06）。押すとそのファイルを開き、
+ * 差分の該当行まで動かす。**当たらない行を指した指摘はそう書く** —
+ * 押しても何も起きないように見えるのを避ける（CLAUDE.md §6）。
  */
 import { useState } from "react";
 
 import { ja } from "../../i18n/ja";
 import { formatRawBody, headlineLines } from "../../lib/llmMessage";
 import type { Finding, LlmError, ReviewText, StoredReview } from "../../lib/ipc";
-import { bySeverity, countFindings, outcomeOf } from "../../lib/reviewFindings";
+import {
+  bySeverity,
+  countFindings,
+  landsOn,
+  outcomeOf,
+  type LineLookup,
+} from "../../lib/reviewFindings";
+import { describeTarget, type TargetContext } from "../../lib/reviewTarget";
+import { historyTime } from "../../lib/reviewPlan";
 import type { FileProgress } from "../../hooks/useReview";
 
 function Severity({ finding }: { finding: Finding }) {
@@ -23,25 +35,60 @@ function Severity({ finding }: { finding: Finding }) {
   );
 }
 
-function FindingRow({ finding, onJump }: { finding: Finding; onJump: (() => void) | null }) {
-  return (
-    <li className="review__finding">
-      <div className="review__finding-head">
+/**
+ * 指摘 1 件。**行が当たるかどうかで見え方を変える。**
+ *
+ * `lands` は純関数（`lib/reviewFindings.ts`）が決める。
+ * `null` は「開いていないファイルなので分からない」で、**何も書かない**
+ * （分からないものを「当たらなかった」と書くと嘘になる）。
+ */
+function FindingRow({
+  finding,
+  lands,
+  onJump,
+}: {
+  finding: Finding;
+  lands: boolean | null;
+  onJump: (() => void) | null;
+}) {
+  const note =
+    finding.line === null
+      ? ja.review.wholeFileNote
+      : lands === false
+        ? ja.review.offDiffNote
+        : null;
+
+  // **`button` の中に置けるのは文章の断片だけ**なので、本文も `span` で出す。
+  const body = (
+    <>
+      <span className="review__finding-head">
         <Severity finding={finding} />
         <span className="review__finding-title">{finding.title}</span>
-        {finding.line !== null && (
-          <button
-            type="button"
-            className="review__finding-line"
-            // 行へ飛べないときも**消さない**。押せない形で残す。
-            disabled={onJump === null}
-            onClick={() => onJump?.()}
-          >
-            {finding.line}
-          </button>
-        )}
-      </div>
-      <p className="review__finding-message">{finding.message}</p>
+        {finding.line !== null && <span className="review__finding-line">{finding.line}</span>}
+      </span>
+      <span className="review__finding-message">{finding.message}</span>
+      {note !== null && <span className="review__finding-note">{note}</span>}
+    </>
+  );
+
+  return (
+    <li className="review__finding">
+      {onJump === null ? (
+        <div className="review__finding-body">{body}</div>
+      ) : (
+        <button
+          type="button"
+          className="review__finding-body review__finding-body--jump"
+          title={
+            finding.line === null || lands === false
+              ? ja.review.jumpFileOnlyHint
+              : ja.review.jumpHint
+          }
+          onClick={onJump}
+        >
+          {body}
+        </button>
+      )}
     </li>
   );
 }
@@ -70,7 +117,18 @@ function Failure({ error }: { error: LlmError }) {
   );
 }
 
-function TextBlock({ text, onJump }: { text: ReviewText; onJump: ((line: number) => void) | null }) {
+function TextBlock({
+  text,
+  path,
+  lookup,
+  onJump,
+}: {
+  text: ReviewText;
+  /** どのファイルの結果か。**全体サマリでは `null`**（行に結び付けない）。 */
+  path: string | null;
+  lookup: LineLookup;
+  onJump: ((line: number | null) => void) | null;
+}) {
   // **構造化に失敗していたら、理由を添えて生出力をそのまま出す。**
   if (text.markdown !== null) {
     return (
@@ -93,9 +151,9 @@ function TextBlock({ text, onJump }: { text: ReviewText; onJump: ((line: number)
             <FindingRow
               key={index}
               finding={finding}
-              onJump={
-                onJump !== null && finding.line !== null ? () => onJump(finding.line ?? 0) : null
-              }
+              lands={path === null ? null : landsOn(lookup, path, finding.line)}
+              // **行が当たらなくても押せる。** ファイルを開くところまではできる。
+              onJump={onJump === null ? null : () => onJump(finding.line)}
             />
           ))}
         </ul>
@@ -142,16 +200,53 @@ function statusKey(status: FileProgress["status"]): "waiting" | "running" | "don
   return status;
 }
 
+/**
+ * 何をレビューしたのか（利用者の要望。2026-09-06）。
+ *
+ * **履歴から開いた 1 件でも、走り終えた直後でも同じものを出す。**
+ * 日時とモデルだけでは、何度もレビューしたときにどれがどれだか読めない。
+ * 文言の組み立ては純関数（`lib/reviewTarget.ts`）。
+ */
+function ResultMeta({ stored, context }: { stored: StoredReview; context: TargetContext }) {
+  const rows: [string, string][] = [];
+  if (context.repositoryName !== null) {
+    rows.push([ja.review.target.repository, context.repositoryName]);
+  }
+  rows.push([ja.review.target.what, describeTarget(stored.run.source, context)]);
+  rows.push([ja.review.target.when, historyTime(stored.savedAt)]);
+  rows.push([
+    ja.review.target.model,
+    `${stored.run.model}（${stored.profile.name}）`,
+  ]);
+
+  return (
+    <dl className="review__meta">
+      {rows.map(([key, value]) => (
+        <div key={key} className="review__meta-row">
+          <dt className="review__meta-key">{key}</dt>
+          <dd className="review__meta-value">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 /** 走り終えた（または履歴から開いた）結果。 */
 export function ReviewResult({
   stored,
   runError,
+  context,
+  lookup,
   onJump,
 }: {
   stored: StoredReview | null;
   runError: string | null;
-  /** 指摘から差分の行へ飛ぶ。飛べないときは `null`。 */
-  onJump: ((path: string, line: number) => void) | null;
+  /** 「何をレビューしたのか」を書くための手掛かり。 */
+  context: TargetContext;
+  /** いま差分ペインに出ているファイルの行。**当たらなかった指摘を明記する**ため。 */
+  lookup: LineLookup;
+  /** 指摘から差分へ飛ぶ。飛べないときは `null`。 */
+  onJump: ((path: string, line: number | null) => void) | null;
 }) {
   if (runError !== null) {
     return (
@@ -171,6 +266,8 @@ export function ReviewResult({
   const { run } = stored;
   return (
     <div className="review__panel">
+      <ResultMeta stored={stored} context={context} />
+
       <div className="review__counts">
         <span>{ja.review.findingsHeading(countFindings(run))}</span>
         {run.failed > 0 && <span className="review__warn">{ja.review.history.failed(run.failed)}</span>}
@@ -180,7 +277,8 @@ export function ReviewResult({
       {run.summary !== null && (
         <>
           <h3 className="review__heading">{ja.review.summaryHeading}</h3>
-          <TextBlock text={run.summary} onJump={null} />
+          {/* 全体サマリの指摘は特定のファイルのものではないので行へ結び付けない。 */}
+          <TextBlock text={run.summary} path={null} lookup={lookup} onJump={null} />
         </>
       )}
 
@@ -192,6 +290,8 @@ export function ReviewResult({
           {file.text !== null && (
             <TextBlock
               text={file.text}
+              path={file.path}
+              lookup={lookup}
               onJump={onJump === null ? null : (line) => onJump(file.path, line)}
             />
           )}

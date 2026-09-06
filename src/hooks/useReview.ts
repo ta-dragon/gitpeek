@@ -212,14 +212,23 @@ export function useReview(repositoryId: string | null) {
     await cancelReview();
   }, []);
 
+  /**
+   * 履歴の 1 件を開く。**開けた 1 件を返す。**
+   *
+   * 返すのは、呼び出し側が**当時の差分に画面を合わせる**ため（T-23 の受け入れ条件）。
+   * 合わせ先を決めるのは純関数（`lib/reviewTarget.ts` の `selectionForSource`）で、
+   * ここは読むだけ。
+   */
   const openHistoryEntry = useCallback(
-    async (file: string) => {
-      if (repositoryId === null) return;
+    async (file: string): Promise<StoredReview | null> => {
+      if (repositoryId === null) return null;
       try {
         const stored = await loadReview(repositoryId, file);
         setState((current) => ({ ...current, view: "result", stored, runError: null }));
+        return stored;
       } catch (error) {
         setState((current) => ({ ...current, historyError: message(error) }));
+        return null;
       }
     },
     [repositoryId],

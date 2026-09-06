@@ -5,6 +5,7 @@ import {
   buildRows,
   formatBytes,
   measureDiff,
+  rowIndexForLine,
   shouldCollapse,
   utf8Length,
 } from "./diffRows";
@@ -48,6 +49,58 @@ describe("buildRows", () => {
 
   it("hunk が無ければ行も無い", () => {
     expect(buildRows([], "side-by-side")).toEqual([]);
+  });
+});
+
+describe("rowIndexForLine", () => {
+  /** 行番号付きの行。**変更後の行番号で引く。** */
+  function numbered(kind: DiffLineKind, text: string, oldLine: number | null, newLine: number | null): DiffLine {
+    return { kind, text, oldLine, newLine, ending: "lf" };
+  }
+
+  const hunk = hunkOf([
+    numbered("context", "a", 10, 10),
+    numbered("removed", "b", 11, null),
+    numbered("added", "B", null, 11),
+    numbered("context", "c", 12, 12),
+  ]);
+
+  it("unified で行を見つける（hunk の見出しのぶんずれない）", () => {
+    const rows = buildRows([hunk], "unified");
+    // ["@", a, b, B, c] なので 11 行目（B）は索引 3。
+    expect(rowIndexForLine(rows, 11)).toBe(3);
+    expect(rowIndexForLine(rows, 10)).toBe(1);
+  });
+
+  it("side-by-side では右側の行番号で引く", () => {
+    const rows = buildRows([hunk], "side-by-side");
+    const index = rowIndexForLine(rows, 11);
+    expect(index).not.toBeNull();
+    const row = rows[index ?? 0];
+    expect(row.kind).toBe("pair");
+    expect(row.kind === "pair" ? row.right?.newLine : null).toBe(11);
+  });
+
+  // **削除された行しか無い場所へは飛べない**（変更後の行番号を持たない）。
+  it("削除された行だけの行番号は当たらない", () => {
+    const rows = buildRows([hunk], "unified");
+    // 削除行の変更前の行番号（11）を持つ行は右側に無い ＝ 「B」の索引が返る。
+    // 変更後に存在しない行番号は null。
+    expect(rowIndexForLine(rows, 99)).toBeNull();
+  });
+
+  // 端の値: 行が 1 つも無い / 0 と負の行番号。
+  it("行が無い・あり得ない行番号では null", () => {
+    expect(rowIndexForLine([], 1)).toBeNull();
+    const rows = buildRows([hunk], "unified");
+    expect(rowIndexForLine(rows, 0)).toBeNull();
+    expect(rowIndexForLine(rows, -1)).toBeNull();
+  });
+
+  it("複数の hunk をまたいで探す", () => {
+    const second = hunkOf([numbered("added", "z", null, 40)]);
+    const rows = buildRows([hunk, second], "unified");
+    expect(rowIndexForLine(rows, 40)).toBe(rows.length - 1);
   });
 });
 

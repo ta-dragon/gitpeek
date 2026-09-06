@@ -28,8 +28,13 @@ export type FindingPlacement = {
   offDiff: Finding[];
 };
 
-/** 差分に出ている変更後の行番号。 */
-function linesOf(hunks: Hunk[]): Set<number> {
+/**
+ * 差分に出ている変更後の行番号。
+ *
+ * **開いている差分のぶんは画面の外へも渡す** — ドロワー側で「当たらなかった指摘」を
+ * 明記するのに要る（CLAUDE.md §6）。
+ */
+export function newLines(hunks: Hunk[]): Set<number> {
   const lines = new Set<number>();
   for (const hunk of hunks) {
     for (const line of hunk.lines) {
@@ -47,7 +52,7 @@ function linesOf(hunks: Hunk[]): Set<number> {
  * **`offDiff` へ落ちる**（行に付けようが無い）。
  */
 export function placeFindings(findings: Finding[], hunks: Hunk[]): FindingPlacement {
-  const available = linesOf(hunks);
+  const available = newLines(hunks);
   const byLine = new Map<number, Finding[]>();
   const whole: Finding[] = [];
   const offDiff: Finding[] = [];
@@ -96,4 +101,24 @@ export function outcomeOf(file: ReviewFileResult): FileOutcome {
   if (file.text === null) return "empty";
   if (file.text.markdown !== null) return "fallback";
   return "ok";
+}
+
+/**
+ * いま差分ペインに出ているファイルの行（T-23 の追補）。
+ *
+ * **開いていないファイルのことは分からない。** 分からないものを「当たらなかった」と
+ * 書くと嘘になるので、`null` を返して何も書かない。
+ */
+export type LineLookup = { path: string; lines: Set<number> } | null;
+
+/**
+ * その指摘が差分の行に当たるか。**分からなければ `null`。**
+ *
+ * - `line` が `null`（ファイル全体への指摘）→ 行には当たらないが「外した」わけでもない
+ * - 開いているファイルと違う → 分からない（`null`）
+ */
+export function landsOn(lookup: LineLookup, path: string, line: number | null): boolean | null {
+  if (line === null) return null;
+  if (lookup === null || lookup.path !== path) return null;
+  return lookup.lines.has(line);
 }

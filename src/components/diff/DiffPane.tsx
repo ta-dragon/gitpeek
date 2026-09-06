@@ -47,6 +47,17 @@ type Props = {
    * **差分に無い行を指したものは行に付かない**（`lib/reviewFindings.ts` が振り分ける）。
    */
   findings: Finding[];
+  /**
+   * 指摘から飛んできた行（利用者の要望。2026-09-06）。
+   *
+   * **開いているファイルと違うものは渡ってこない**（呼び出し側がパスで見る）。
+   */
+  jumpTo: { path: string; line: number; nonce: number } | null;
+  /**
+   * 差分を読み終えたことを伝える。**ドロワーが「当たらなかった指摘」を明記する**のに
+   * 要る（CLAUDE.md §6）。読めていないあいだは `null`。
+   */
+  onDiffLoaded: (diff: FileDiff | null) => void;
   onUiChange: (change: Partial<UiSettings>) => void;
 };
 
@@ -59,6 +70,8 @@ export function DiffPane({
   bodyRef,
   ui,
   findings,
+  jumpTo,
+  onDiffLoaded,
   onUiChange,
 }: Props) {
   const [diff, setDiff] = useState<FileDiff | null>(null);
@@ -136,6 +149,12 @@ export function DiffPane({
     retry,
   ]);
 
+  // **読めた差分そのものを上へ渡す。** 行が差分にあるかどうかの判定は
+  // 純関数（`lib/reviewFindings.ts`）が行い、ここは配るだけ。
+  useEffect(() => {
+    onDiffLoaded(loading ? null : diff);
+  }, [diff, loading, onDiffLoaded]);
+
   return (
     // `tabIndex` は `Enter` でここへフォーカスを移すため（キーボードだけで差分へ入れる）。
     <div className="dpane" ref={bodyRef} tabIndex={-1}>
@@ -184,6 +203,7 @@ export function DiffPane({
           error={error}
           ui={ui}
           findings={findings}
+          jumpTo={jumpTo}
           expanded={expanded}
           scrollRef={bodyRef}
           onExpand={() => setExpanded(true)}
@@ -208,6 +228,7 @@ function Body({
   error,
   ui,
   findings,
+  jumpTo,
   expanded,
   scrollRef,
   onExpand,
@@ -223,6 +244,7 @@ function Body({
   error: string | null;
   ui: UiSettings;
   findings: Finding[];
+  jumpTo: { path: string; line: number; nonce: number } | null;
   expanded: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   onExpand: () => void;
@@ -290,6 +312,8 @@ function Body({
       layout={ui.diffLayout}
       showLineEndings={ui.showLineEndings}
       findings={findings}
+      // **別のファイルの指示は渡さない。** 行番号だけ合ってしまうと別の行へ飛ぶ。
+      jumpTo={jumpTo !== null && jumpTo.path === diff.path ? jumpTo : null}
       scrollRef={scrollRef}
     />
   );
