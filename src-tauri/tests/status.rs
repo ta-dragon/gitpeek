@@ -6,11 +6,30 @@
 
 mod common;
 
+use std::sync::Mutex;
+
 use givsoner_lib::git::status::{self, WorkingTree};
 
 use common::{fixtures, log};
 
+/// **`git status` は同じリポジトリに対して並列に走らせられない。**
+///
+/// `git status` は index の stat キャッシュを更新するので、`.git/index.lock` を
+/// 作って `.git/index` へ rename する。フィクスチャは
+/// `make-test-repos.sh` が毎回作り直すため **生成直後の 1 回目で必ずこの書き込みが
+/// 起き**、同じ repo を見る複数のテストが重なると負けたほうが
+/// `fatal: .git/index: index file open failed: Permission denied` で落ちる
+/// （Windows で実測。3 回に 1 回ほど）。
+///
+/// 各テストへ複製を配るのではなく**ここで直列化する**ことにした
+/// （2026-09-06 に利用者が決めた）。フィクスチャの生成が 13 秒あるので、
+/// git の起動を直列にしても実行時間はほとんど変わらない。
+static GIT_STATUS: Mutex<()> = Mutex::new(());
+
 fn working_tree(repo: &str) -> WorkingTree {
+    // **毒された鍵でも進む。** 1 本が落ちたときに、巻き添えで残りが
+    // 「鍵が毒されている」で落ちると、本当の失敗が読めなくなる。
+    let _guard = GIT_STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     status::working_tree(&log(), "git", &fixtures().join(repo))
         .unwrap_or_else(|error| panic!("{repo} の作業ツリーを読めません: {error}"))
 }

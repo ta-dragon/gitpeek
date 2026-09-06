@@ -192,19 +192,27 @@ function ChoiceRow<T extends string>({
   );
 }
 
+/**
+ * 真偽値の欄。**`note` はラベルの下に 1 行**（CLAUDE.md §6 —
+ * チェックボックスは「入れると何が起きるか」を添える）。
+ * 入れたときと外したときで文言が変わる欄があるので、**出し分けは呼ぶ側**が決める。
+ */
 function CheckRow({
   label,
   checked,
+  note,
   onChange,
 }: {
   label: string;
   checked: boolean;
+  note?: string;
   onChange: (checked: boolean) => void;
 }) {
   return (
     <label className="settings__row settings__row--check">
       <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
       <span className="settings__label">{label}</span>
+      {note !== undefined && <span className="settings__note">{note}</span>}
     </label>
   );
 }
@@ -288,6 +296,22 @@ function GeneralTab({
           {root === "" ? ja.settings.workspaceRootEmpty : ja.settings.workspaceRootNote}
         </span>
       </label>
+
+      {/* **コマンドログの出し入れはここだけ**（T-25。2026-09-06 に利用者が決めた）。
+          ヘッダのボタンは畳んだので、**外したときに戻し方を書く** — 戻る道が
+          読めないと、消えたようにしか見えない（CLAUDE.md §6）。 */}
+      <CheckRow
+        label={ja.settings.showCommandLog}
+        checked={settings.ui.showCommandLog}
+        note={
+          settings.ui.showCommandLog
+            ? ja.settings.showCommandLogOn
+            : ja.settings.showCommandLogOff
+        }
+        onChange={(showCommandLog) =>
+          onChange((current) => ({ ...current, ui: { ...current.ui, showCommandLog } }))
+        }
+      />
     </>
   );
 }

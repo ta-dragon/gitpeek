@@ -114,7 +114,6 @@ export default function App() {
   useTheme();
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [detecting, setDetecting] = useState(false);
-  const [logOpen, setLogOpen] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   /** アプリ全体の設定（T-25）。**入口はヘッダのボタンと `Ctrl+,` の 2 つだけ。** */
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -344,9 +343,6 @@ export default function App() {
         <span className="app__name">{ja.app.name}</span>
         <span className="app__tagline">{ja.app.tagline}</span>
         <div className="app__spacer" />
-        <button type="button" className="button" onClick={() => setLogOpen((open) => !open)}>
-          {logOpen ? ja.commandLog.hide : ja.commandLog.show}
-        </button>
         {/* **アプリ全体の設定の入口はここ 1 つ**（T-25。2026-09-06 に利用者が決めた）。
             テーマも接続先も中に入っている。リポジトリ 1 つぶんの設定は
             リポジトリ一覧の右クリック（CLAUDE.md §6）。 */}
@@ -491,7 +487,10 @@ export default function App() {
         )}
       </main>
 
-      {logOpen && <CommandLogPanel entries={entries} />}
+      {/* **出す / 隠すは設定画面の「一般」だけ**（T-25。2026-09-06 に利用者が決めた）。
+          ヘッダのボタンから移したので、状態は `settings.json` に残る — 隠したまま
+          再起動しても戻らない。 */}
+      {settings.settings.ui.showCommandLog && <CommandLogPanel entries={entries} />}
 
       {/*
         Rust 側が落ちたときの知らせ（T-24。DESIGN.md §13.3）。

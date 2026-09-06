@@ -268,6 +268,12 @@ pub struct UiSettings {
     pub collapse_lines: u32,
     /// 同じくバイト数。どちらか一方でも超えたら折りたたむ。
     pub collapse_bytes: u32,
+    /// git コマンドログのパネルを出すか（T-25。**既定は出す**）。
+    ///
+    /// **切り替えは設定画面の「一般」だけ**（2026-09-06 に利用者が決めた）。
+    /// ヘッダのボタンは畳んだので、ここが `false` のまま忘れると
+    /// パネルへ戻る道が無くなる。**設定に持って画面にも出す**（CLAUDE.md §6）。
+    pub show_command_log: bool,
 }
 
 impl Default for UiSettings {
@@ -282,6 +288,7 @@ impl Default for UiSettings {
             commit_order: "topo".to_string(),
             collapse_lines: 3_000,
             collapse_bytes: 500 * 1024,
+            show_command_log: true,
         }
     }
 }
@@ -633,5 +640,41 @@ mod tests {
         assert_eq!(ui.context_lines, 1_000_000);
         // 他の既定値まで消えていないこと（`serde(default)` が効いている）。
         assert_eq!(ui.collapse_lines, 3_000);
+    }
+
+    /// **コマンドログの表示は設定に残る**（T-25。設定画面の「一般」へ移した）。
+    ///
+    /// ヘッダのボタンを畳んだので、`false` が残らないと隠すたびに戻ってしまう。
+    /// **この欄を知らない古い `settings.json` は「出す」で読める**こと
+    /// （`serde(default)` ＋ `Default` が `true`）も一緒に見る。
+    #[test]
+    fn the_command_log_stays_hidden_across_a_restart() {
+        // 欄を知らない古いファイルの形。**既定は出す。**
+        let old: UiSettings = serde_json::from_str(r#"{"theme":"dark"}"#).expect("読めるはず");
+        assert!(old.show_command_log, "古い settings.json は「出す」で読めること");
+
+        // **フロントが送る綴りをそのまま食えること**（`lib/ipc.ts` の `showCommandLog`）。
+        // 綴りが食い違うと `serde(default)` に吸われ、画面で隠しても黙って戻る。
+        let from_front: UiSettings =
+            serde_json::from_str(r#"{"showCommandLog":false}"#).expect("読めるはず");
+        assert!(!from_front.show_command_log, "showCommandLog を受け取れていない");
+
+        let (_dir, paths) = temp_paths();
+        let mut settings = Settings::default();
+        settings.ui.show_command_log = false;
+        save(&paths, &settings).unwrap();
+
+        // 隠したまま読み戻せること（再起動しても戻らない）。
+        let loaded = load(&paths).unwrap();
+        assert!(!loaded.settings.ui.show_command_log, "隠したのに戻っている");
+
+        // **フロントが読む綴りで書けていること。**
+        let text = std::fs::read_to_string(paths.settings_file()).unwrap();
+        assert!(text.contains("\"showCommandLog\": false"), "{text}");
+
+        // **`normalize()` が真偽値を触らないこと**（数値の範囲寄せの巻き添えを見る）。
+        let mut normalized = loaded.settings;
+        normalized.normalize();
+        assert!(!normalized.ui.show_command_log);
     }
 }

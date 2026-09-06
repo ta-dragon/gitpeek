@@ -288,6 +288,11 @@ export const ja = {
     workspaceRoot: "clone の既定の保存先",
     workspaceRootNote: "URL から clone するとき、保存先の親フォルダに最初から入ります。",
     workspaceRootEmpty: "まだ決まっていません。clone の画面で「この保存先を次回から既定にする」を押すと入ります。",
+    // **コマンドログの出し入れはここだけ**（T-25。2026-09-06 に利用者が決めた）。
+    // ヘッダのボタンは畳んだので、**戻し方を消えたときの文言に書く**（CLAUDE.md §6）。
+    showCommandLog: "git コマンドログのパネルを出す",
+    showCommandLogOn: "画面の下に、実行した git コマンドと結果（exit code・stderr・所要時間）が出ます。",
+    showCommandLogOff: "パネルは出ません。もう一度出すには、ここへ戻ってチェックを入れます。",
 
     // 表示
     dateFormat: "日時の出し方",
@@ -1112,8 +1117,6 @@ export const ja = {
 
   commandLog: {
     title: "git コマンドログ",
-    show: "コマンドログを表示",
-    hide: "コマンドログを隠す",
     empty: "まだ git コマンドを実行していません。",
     showFixedArgs: "固定オプションを表示",
     capacity: (n: number) => `直近 ${n} 件を保持`,

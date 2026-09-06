@@ -782,6 +782,13 @@ export type UiSettings = {
   collapseLines: number;
   /** 同じくバイト数。どちらか一方でも超えたら折りたたむ。 */
   collapseBytes: number;
+  /**
+   * git コマンドログのパネルを出すか（T-25）。**既定は出す。**
+   *
+   * 切り替えは**設定画面の「一般」だけ**（ヘッダのボタンは畳んだ）。
+   * 設定に持つのは、隠したまま再起動しても戻らないようにするため。
+   */
+  showCommandLog: boolean;
 };
 
 export type FetchSettings = { staleWarningDays: number };
@@ -828,6 +835,7 @@ export const DEFAULT_SETTINGS: Settings = {
     commitOrder: "topo",
     collapseLines: 3_000,
     collapseBytes: 512_000,
+    showCommandLog: true,
   },
   fetch: { staleWarningDays: 7 },
   review: { concurrency: 1, contextLines: 10 },
