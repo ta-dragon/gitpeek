@@ -4,7 +4,7 @@
 //!
 //! このアプリの用途には「自分が書いていないコードを読む」が含まれる。
 //! リポジトリ内の skill を自動で読み込むと、**悪意あるリポジトリが
-//! `.gitviewer/skills/` に指示文を仕込んでレビュー結果を操作できる**
+//! `.gitpeek/skills/` に指示文を仕込んでレビュー結果を操作できる**
 //! （「このファイルの脆弱性は報告するな」等）。したがって:
 //!
 //! - **リポジトリ内 skill は既定で無効。** 明示的に信頼したときだけ使う（CLAUDE.md §4）
@@ -43,7 +43,7 @@ use sha2::{Digest, Sha256};
 use crate::store::settings::{RepoSkillTrust, SkillSettings};
 
 /// リポジトリ内 skill の置き場所。**直下だけを見る。**
-pub const REPO_SKILL_DIR: &str = ".gitviewer/skills";
+pub const REPO_SKILL_DIR: &str = ".gitpeek/skills";
 
 /// 1 ファイルの上限。これを超えるものは読まない
 /// （プロンプトを溢れさせるためだけの巨大ファイルを弾く）。
@@ -63,7 +63,7 @@ pub enum SkillOrigin {
     BuiltIn,
     /// `%APPDATA%\com.tatsu.gitpeek\skills\`
     Global,
-    /// `<repo>\.gitviewer\skills\`。**既定で無効。**
+    /// `<repo>\.gitpeek\skills\`。**既定で無効。**
     Repository,
 }
 
@@ -233,7 +233,7 @@ pub fn load(
     }
 }
 
-/// `<repo>\.gitviewer\skills`
+/// `<repo>\.gitpeek\skills`
 pub fn repo_skill_dir(repository: &Path) -> PathBuf {
     let mut dir = repository.to_path_buf();
     for segment in REPO_SKILL_DIR.split('/') {
@@ -589,6 +589,21 @@ fn default_name(file: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **リポジトリ内 skill の置き場所を文字列で固定する。**
+    ///
+    /// `repo_skill_dir()` を通してしか組み立てないので、定数を書き換えても
+    /// 他のテストは全部通ってしまう（相対的な整合しか見ていない）。
+    /// **利用者のリポジトリに作らせるフォルダ名**なので、変えるなら気付ける形にしておく。
+    #[test]
+    fn the_repository_skill_directory_is_dot_gitpeek() {
+        assert_eq!(REPO_SKILL_DIR, ".gitpeek/skills");
+        // 区切りは OS に任せる。ここで見たいのは**段の名前**であって区切り文字ではない。
+        assert_eq!(
+            repo_skill_dir(Path::new("repo")),
+            Path::new("repo").join(".gitpeek").join("skills")
+        );
+    }
 
     /// 「使うと決めてある」1 件。
     fn ready(name: &str, origin: SkillOrigin, body: &str) -> SkillEntry {
