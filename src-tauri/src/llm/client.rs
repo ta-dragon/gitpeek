@@ -50,8 +50,16 @@ const STREAM_CHUNK: usize = 8 * 1024;
 ///
 /// チャンクの切れ目で秘匿情報が割れると、チャンクごとにマスクしても素通りする。
 /// 末尾をこれだけ残し、次のチャンクと繋がってからマスクして流す。
-/// `redact` が見る一番長い形（認証情報付き URL）を丸ごと収められる幅にしてある。
-const HOLDBACK_CHARS: usize = 256;
+///
+/// **幅は体感に直結する。** 当初 256 にしていたら、これより短い応答では
+/// 差分が 1 度も流れず、最後にまとめて 1 回だけ届いていた（2026-09-06 の目視で
+/// 「少しずつ流れない」として上がった。ローカルの短いレビュー結果はほぼこれに当たる）。
+/// `redact` が見るトークンの形（`sk-` ＋ 40 字程度、`ghp_` ＋ 36 字）は丸ごと収まり、
+/// かつ数語ぶんの遅れで済む幅にしてある。
+///
+/// **鍵そのものがこれより長いときは鍵の長さまで広げる**（[`Masker::new`]）。
+/// 固定幅のままだと、長い鍵がチャンクにまたがったときに素通りする。
+const HOLDBACK_CHARS: usize = 64;
 
 /// 生の応答を画面へ出すときの上限。長い HTML のエラーページを丸ごと抱えない。
 const RAW_LIMIT: usize = 4_000;
@@ -525,7 +533,7 @@ fn whole_body_content(raw: &str) -> Option<String> {
 /// チャンクの切れ目で秘匿情報が割れると、チャンクごとに [`sanitize`] を掛けても
 /// 素通りする（T-20 で踏んだ「1 文字のキー」と同じ種類の穴）。
 ///
-/// 溜めた全文にマスクを掛け直し、**末尾 [`HOLDBACK_CHARS`] 文字を除いた分**だけ流す。
+/// 溜めた全文にマスクを掛け直し、**末尾 [`Masker::holdback`] 文字を除いた分**だけ流す。
 /// マスクで縮むのは必ず末尾側（＝まだ流していない範囲）なので、流した分は動かない。
 struct Masker<'a> {
     api_key: &'a str,
@@ -533,6 +541,8 @@ struct Masker<'a> {
     raw: String,
     /// すでに流した文字数（マスク後の数え方）。
     emitted: usize,
+    /// 手元に残す幅。**鍵が [`HOLDBACK_CHARS`] より長ければ鍵に合わせる。**
+    holdback: usize,
 }
 
 impl<'a> Masker<'a> {
@@ -541,6 +551,9 @@ impl<'a> Masker<'a> {
             api_key,
             raw: String::new(),
             emitted: 0,
+            // **鍵より狭いホールドバックは意味を成さない。**
+            // 割れた鍵が繋がる前に流れてしまう。
+            holdback: HOLDBACK_CHARS.max(api_key.chars().count()),
         }
     }
 
@@ -548,10 +561,10 @@ impl<'a> Masker<'a> {
     fn push(&mut self, text: &str) -> String {
         self.raw.push_str(text);
         let masked: Vec<char> = sanitize(&self.raw, self.api_key).chars().collect();
-        if masked.len() <= HOLDBACK_CHARS {
+        if masked.len() <= self.holdback {
             return String::new();
         }
-        let upto = masked.len() - HOLDBACK_CHARS;
+        let upto = masked.len() - self.holdback;
         if upto <= self.emitted {
             return String::new();
         }
@@ -1215,6 +1228,28 @@ line two
         assert!(!full.contains(key), "全文にキーが出ている: {full}");
         assert_eq!(streamed, full, "流した差分を繋ぐと全文になること");
         assert!(streamed.contains("前置き") && streamed.contains("後書き"));
+    }
+
+    /// **鍵がホールドバックより長くても漏れない。**
+    ///
+    /// 幅を 256 から 64 へ縮めたときに開いた穴（2026-09-06）。固定幅のままだと、
+    /// 64 文字より長い鍵がチャンクにまたがったときに繋がる前に流れてしまう。
+    #[test]
+    fn widens_the_holdback_for_a_key_longer_than_it() {
+        let key = "k".repeat(HOLDBACK_CHARS * 2);
+        let text = format!("前置き {key} 後書き{}", "x".repeat(HOLDBACK_CHARS * 3));
+
+        let mut masker = Masker::new(&key);
+        let mut streamed = String::new();
+        for character in text.chars() {
+            streamed.push_str(&masker.push(&character.to_string()));
+        }
+        let (rest, full) = masker.finish();
+        streamed.push_str(&rest);
+
+        assert!(!streamed.contains(&key), "長い鍵が流れている");
+        assert!(!full.contains(&key), "長い鍵が全文に残っている");
+        assert_eq!(streamed, full);
     }
 
     /// **短いうちは何も流さない。** 末尾を手元に残すのが仕事。

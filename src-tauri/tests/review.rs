@@ -436,6 +436,44 @@ fn tells_the_summary_how_many_files_failed() {
     );
 }
 
+/// **本文が少しずつ届くこと**（T-23 の目視で落ちた）。
+///
+/// T-22 では「流した差分を繋ぐと本文になる」ことしか見ていなかったので、
+/// **1 度にまとめて届いても緑になった**。実際、応答がホールドバックの幅より
+/// 短いと差分は 1 度も流れず、最後にまとめて 1 回だけ届いていた
+/// （ローカルの短いレビュー結果はほぼこれに当たる）。
+///
+/// **「繋ぐと本文になる」と「少しずつ届く」は別の性質。** 両方を見る。
+#[test]
+fn a_short_answer_still_arrives_a_bit_at_a_time() {
+    // 106 文字の応答を、SSE の行に細かく割って返す（Ollama はトークンごとに流す）。
+    let body: String = GOOD_JSON
+        .chars()
+        .map(|c| sse_delta(&c.to_string()))
+        .collect::<String>()
+        + SSE_DONE;
+    let server = MockServer::always(Canned::sse(body));
+    let harness = Harness::new(&server.base_url());
+
+    let recorder = Recorder::default();
+    let run = harness.run_with(&["追加.txt"], &Cancel::new(), &recorder);
+
+    let deltas = recorder
+        .events()
+        .iter()
+        .filter(|event| matches!(event, ReviewEvent::Delta { .. }))
+        .count();
+    assert!(
+        deltas >= 3,
+        "短い応答でも少しずつ届くこと（届いた回数 {deltas}）。\
+         1 回しか来ないなら、最後にまとめて流している"
+    );
+
+    // **繋ぐと本文になること**も引き続き見る（片方だけでは足りない）。
+    assert!(recorder.streamed().contains("要約です"), "{}", recorder.streamed());
+    assert!(run.files[0].text.is_some());
+}
+
 // ---- 中止（DESIGN.md §10.7）--------------------------------------------------
 
 #[test]
