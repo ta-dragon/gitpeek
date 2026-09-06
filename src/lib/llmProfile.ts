@@ -208,3 +208,35 @@ function temperatureProblem(value: string): FieldProblem | null {
   if (parsed < TEMPERATURE_MIN || parsed > TEMPERATURE_MAX) return "temperatureRange";
   return null;
 }
+
+/**
+ * リポジトリの既定の接続先を、画面に出す形にする（T-25）。
+ *
+ * **T-23 で覚えるようにしたが、画面から読めなかった。** 既定がどこにあるのか
+ * 読めないと、勝手に変わっているようにしか見えない（clone の「この保存先を
+ * 次回から既定にする」で同じ指摘を受けている。CLAUDE.md §6）。
+ *
+ * 返すのは状態だけで、日本語は `i18n/ja.ts` が持つ。
+ */
+export type DefaultProfileView = {
+  /** `select` に出す値。**見つからない ID は選べないので空にする。** */
+  selected: string;
+  /** 接続先が 1 つも無い。**押せない形で残して理由を出す**ため。 */
+  noProfiles: boolean;
+  /** 覚えている ID が一覧に無い（消したか、名前が変わった）。 */
+  missing: boolean;
+};
+
+export function defaultProfileView(
+  profiles: LlmProfile[],
+  defaultId: string | null,
+): DefaultProfileView {
+  const found = defaultId !== null && profiles.some((profile) => profile.id === defaultId);
+  return {
+    selected: found ? (defaultId as string) : "",
+    noProfiles: profiles.length === 0,
+    // **「決めていない」と「消えた」を混ぜない。** 混ぜると、勝手に外れたのか
+    // 自分で外したのか読めなくなる。
+    missing: defaultId !== null && !found,
+  };
+}

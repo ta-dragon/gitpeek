@@ -4,6 +4,7 @@ import type { LlmProfile } from "./ipc";
 import {
   apiKeyUpdate,
   clearOption,
+  defaultProfileView,
   DEFAULT_DRAFT,
   draftFromProfile,
   hasSavedKey,
@@ -247,5 +248,48 @@ describe("hasSavedKey", () => {
     expect(hasSavedKey(saved(), ["llm/abc"])).toBe(true);
     expect(hasSavedKey(saved(), [])).toBe(false);
     expect(hasSavedKey(saved({ credentialKey: "" }), [""])).toBe(false);
+  });
+});
+
+describe("defaultProfileView", () => {
+  const profiles = [saved(), saved({ id: "p2", name: "別の接続先" })];
+
+  it("覚えている接続先を選んだ状態にする", () => {
+    expect(defaultProfileView(profiles, "p2")).toEqual({
+      selected: "p2",
+      noProfiles: false,
+      missing: false,
+    });
+  });
+
+  // 端の値: まだ決めていない。**「消えた」と混ぜない。**
+  it("決めていなければ何も選ばない", () => {
+    expect(defaultProfileView(profiles, null)).toEqual({
+      selected: "",
+      noProfiles: false,
+      missing: false,
+    });
+  });
+
+  /**
+   * **覚えている ID が一覧に無い**（消した / 別の環境の設定を持ってきた）。
+   * 勝手に外れたのか自分で外したのか読めるように、状態を分ける。
+   */
+  it("覚えている接続先が見つからないときはそう言う", () => {
+    expect(defaultProfileView(profiles, "消えた")).toEqual({
+      selected: "",
+      noProfiles: false,
+      missing: true,
+    });
+  });
+
+  // 端の値: 接続先が 1 つも無い。**押せない形で残して理由を出す**ため。
+  it("接続先が無いときはそう言う", () => {
+    expect(defaultProfileView([], null)).toEqual({
+      selected: "",
+      noProfiles: true,
+      missing: false,
+    });
+    expect(defaultProfileView([], "p1").missing).toBe(true);
   });
 });

@@ -566,6 +566,11 @@ export default function App() {
           repositoryName={
             repos.entries.find((entry) => entry.id === repoSettingsId)?.name ?? ""
           }
+          profiles={settings.settings.llmProfiles}
+          defaultProfileId={
+            repos.entries.find((entry) => entry.id === repoSettingsId)?.defaultLlmProfileId ?? null
+          }
+          onProfileChanged={refreshSettings}
           onClose={() => setRepoSettingsId(null)}
         />
       )}

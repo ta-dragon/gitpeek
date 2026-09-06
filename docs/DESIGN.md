@@ -1141,8 +1141,8 @@ clone の入力欄の下にチェックボックスを 2 つ置いた。**どち
 実物での確認は目視に回す。
 
 **「この保存先を次回から既定にする」は成功したときだけ保存する。** 失敗した場所を既定に
-すると、同じ失敗を繰り返す入口になる。設定画面は T-25 なので、**いまはここが
-`workspaceRoot` を決められる唯一の入口**。
+すると、同じ失敗を繰り返す入口になる。**T-25 で設定画面からも変えられるようになった**が、
+clone の流れの中で決められることに意味があるので、こちらは残してある。
 
 **押せないときもチェックボックスを消さない**（目視で報告されて直した）。最初は「既定と同じ
 場所なら意味が無いので出さない」としたが、**保存先の欄は既定で初期化される**ので条件が
@@ -1638,11 +1638,19 @@ enabled: true
 
 | 画面 | 出すもの | 入口 |
 |---|---|---|
-| アプリ全体の「設定」 | 内蔵 ＋ グローバル（自分で置いたもの） | ヘッダの「設定」 |
-| このリポジトリの設定 | そのリポジトリの中の skill | リポジトリ一覧の**右クリック** |
+| アプリ全体の「設定」 | 内蔵 ＋ グローバルの skill ／ 接続先 ／ 表示・差分・fetch・レビューの設定 | ヘッダの「設定」と `Ctrl+,` |
+| このリポジトリの設定 | そのリポジトリの中の skill ／ **既定の接続先** | リポジトリ一覧の**右クリック** |
 
 一覧そのものは共通の部品（`SkillList.tsx`）で、出どころで絞って渡すだけにしてある。
-リポジトリ側は T-25 で他のリポジトリ設定もここへ集める。
+
+**T-25（2026-09-06）で両側とも埋めた。** アプリ全体の設定は 1 枚のダイアログ（タブ 8 枚）に
+なり、**ヘッダのテーマ選択と「接続先」ボタンもそこへ畳んだ**（入口が 3 つあると、
+どこで何が変えられるのか読めない）。リポジトリ側には**既定の接続先**を足してある —
+T-23 で覚えるようにしたのに画面から読めず、**勝手に変わっているようにしか見えなかった**
+（clone の「この保存先を次回から既定にする」と同じ指摘）。
+
+**可視 ref はここへ出さない。** ブランチツリーのチェックボックスがそのまま設定なので、
+2 か所から変えられるようにすると、どちらが効いているのか読めなくなる。
 
 ### 11.3 適用
 
@@ -2150,20 +2158,21 @@ gitviewer/
 │   │   │                              WordDiff / CollapsedNotice / CompareBar (T-15) /
 │   │   │                              WorkingTreeFiles / UntrackedFile /
 │   │   │                              useWorkingTree (T-16)
-│   │   ├── settings/             (済) LlmProfiles（接続先。T-20）/
+│   │   ├── settings/             (済) SettingsDialog（アプリ全体。タブ 8 枚。T-25）/
+│   │   │                              LlmProfiles（接続先と観点のパネル。T-20/21）/
 │   │   │                              SkillList（観点の一覧。T-21）/
-│   │   │                              RepositorySettingsDialog（リポジトリ 1 つぶん。T-21）
-│   │   ├── review/               AI レビュードロワー (T-23)
+│   │   │                              RepositorySettingsDialog（リポジトリ 1 つぶん。T-21/25）
+│   │   ├── review/               (済) AI レビュードロワー (T-23)
 │   │   ├── commandlog/           (済) git コマンドログパネル ＋ capacity（純関数）
 │   │   ├── setup/                (済) 空状態と git 未検出画面 ＋ CloneDialog (T-19)
 │   │   └── common/               (済) SplitPane / ContextMenu / CommandPalette /
 │   │                                  NoticeBar / LoadProgress / ErrorBoundary /
 │   │                                  ProgressDialog（fetch の確認と結果 — T-17）/
 │   │                                  ConfirmDialog / WriteOpsDialog (T-18)
-│   ├── hooks/                    (済) useTheme / useCommandLog /
+│   ├── hooks/                    (済) useTheme / useCommandLog / useEscape (T-25) /
 │   │                                  useCommitNavigation / useFileNavigation（§6.5）/
 │   │                                  useFetch (T-17) / useWriteOps (T-18) /
-│   │                                  useClone (T-19)
+│   │                                  useClone (T-19) / useReview (T-23)
 │   ├── lib/
 │   │   ├── graphPath.ts          (済) レーン配列 -> SVG パス（純関数・テスト対象）
 │   │   ├── relativeTime.ts       (済) 相対日時（純関数・テスト対象）
@@ -2181,6 +2190,14 @@ gitviewer/
 │   │   ├── llmProfile.ts         (済) 接続先の検証と出し分け（純関数・テスト対象 — T-20）
 │   │   ├── llmMessage.ts         (済) 応答の整形と見出しの分割（純関数・テスト対象 — T-20）
 │   │   ├── skillTrust.ts         (済) 観点の出し分けと宛先（純関数・テスト対象 — T-21）
+│   │   ├── reviewPlan.ts         (済) 実行できるかの判定と履歴の整形（純関数 — T-23）
+│   │   ├── reviewFindings.ts     (済) 指摘 -> 差分行の対応（純関数 — T-23）
+│   │   ├── reviewMarkdown.ts     (済) 書き出しの組み立て（純関数 — T-23）
+│   │   ├── reviewTarget.ts       (済) 何をレビューしたのかの文言（純関数 — T-23 追補）
+│   │   ├── crashNotice.ts        (済) 落ちたときの文言（純関数 — T-24）
+│   │   ├── shortcuts.ts          (済) キーの対応表と判定（純関数 — T-25）
+│   │   ├── settingsForm.ts       (済) 設定の入力検証（純関数 — T-25）
+│   │   ├── diffSearch.ts         (済) 差分の中の検索（純関数 — T-25）
 │   │   └── ipc.ts                (済) Tauri invoke ラッパ
 │   ├── store/                    (済) settings / uiState / repositories / snapshot
 │   └── styles/                   (済) theme.css（トークン）/ app.css / graph.css
@@ -2201,7 +2218,9 @@ gitviewer/
     │   ├── common/mockhttp.rs    (済) 自作の HTTP モックサーバ (T-20)
     │   ├── llm.rs                (済) 失敗の言い分けとマスキング (T-20)
     │   ├── secrets.rs            (済) 資格情報の往復（**本物の資格情報マネージャー**）(T-20)
-    │   └── skills.rs             (済) 実ファイルでの読み込み範囲と信頼 (T-21)
+    │   ├── skills.rs             (済) 実ファイルでの読み込み範囲と信頼 (T-21)
+    │   ├── review.rs             (済) レビューの実行と保存 (T-22, T-23)
+    │   └── logging.rs            (済) ログの口からファイルまで (T-24)
     └── src/
         ├── main.rs               (済)
         ├── lib.rs                (済) Tauri コマンドの登録と AppState
@@ -2231,19 +2250,19 @@ gitviewer/
         │   ├── client.rs         (済) OpenAI 互換クライアント (T-20)
         │   ├── skill.rs          (済) 観点の読み込みと信頼判定 (T-21)
         │   ├── skills/           (済) 内蔵 skill（`include_str!` で埋め込む）
-        │   └── review.rs         (T-22)
+        │   └── review.rs         (済) レビューの計画と実行 (T-22)
         ├── store/
         │   ├── mod.rs            (済) 設定と状態のストアの入口
         │   ├── paths.rs          (済) %APPDATA% レイアウトの解決
         │   ├── settings.rs       (済)
         │   ├── state.rs          (済)
         │   ├── json.rs           (済) アトミック書き込み
-        │   └── reviews.rs        (T-23)
+        │   └── reviews.rs        (済) レビュー結果の履歴 (T-23)
         ├── commandlog.rs         (済) git コマンドログのリングバッファ
         ├── encoding.rs           (済) 文字コード判別・改行検出 (T-12)
         ├── secret.rs             (済) Windows 資格情報マネージャー (T-20)
         ├── redact.rs             (済) マスキング（全ログ出力がここを通る）
-        └── logging.rs            ログファイル (T-24)
+        └── logging.rs            (済) ログファイルと panic の記録 (T-24)
 ```
 
 ---
