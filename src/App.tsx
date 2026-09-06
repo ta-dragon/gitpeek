@@ -57,6 +57,7 @@ import {
   logStatus,
   onAppPanic,
   openLogFolder,
+  openRepositoryFolder,
   isGitUsable,
   loadCommitMessage,
   MIN_VERSION_FALLBACK,
@@ -337,6 +338,20 @@ export default function App() {
     if (path !== null) await repositories.relocate(id, path);
   };
 
+  /**
+   * フォルダをエクスプローラーで開く（T-30）。
+   *
+   * **渡すのは登録の ID だけ**（パスは Rust 側が引く）。開けなかった理由は
+   * 画面へ出す — 黙って何も起きないと、押せていないのか開けないのか読めない。
+   */
+  const handleReveal = async (id: string) => {
+    try {
+      await openRepositoryFolder(id);
+    } catch (error) {
+      setMessage(ja.repositories.revealFailed(String(error)));
+    }
+  };
+
   return (
     <div className="app">
       <header className="app__header">
@@ -423,6 +438,7 @@ export default function App() {
                     onRemove={(id) => void repositories.remove(id)}
                     onRelocate={(id) => void handleRelocate(id)}
                     onOpenSettings={setRepoSettingsId}
+                    onReveal={(id) => void handleReveal(id)}
                     onSortModeChange={(mode: SortMode) =>
                       updateUiState((current) => ({ ...current, repositoryListSort: mode }))
                     }

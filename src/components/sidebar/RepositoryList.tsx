@@ -3,6 +3,7 @@ import { useState } from "react";
 import { ja } from "../../i18n/ja";
 import type { RepositoryEntry } from "../../lib/ipc";
 import { ContextMenu } from "../common/ContextMenu";
+import { canFetch, canReveal } from "../../lib/repositoryMenu";
 
 export type SortMode = "manual" | "recent";
 
@@ -26,6 +27,7 @@ export function RepositoryList({
   onRemove,
   onRelocate,
   onOpenSettings,
+  onReveal,
   onSortModeChange,
   onReorder,
   onFetch,
@@ -43,6 +45,8 @@ export function RepositoryList({
   onRelocate: (id: string) => void;
   /** リポジトリ 1 つぶんの設定を開く（T-21）。**アプリ全体の設定とは別。** */
   onOpenSettings: (id: string) => void;
+  /** フォルダをエクスプローラーで開く（T-30）。**パスは Rust 側が引く。** */
+  onReveal: (id: string) => void;
   onSortModeChange: (mode: SortMode) => void;
   onReorder: (orderedIds: string[]) => void;
   onFetch: (id: string) => void;
@@ -197,10 +201,17 @@ export function RepositoryList({
           items={[
             {
               label: ja.repositories.fetch,
-              title: ja.repositories.fetchHint,
-              // リモートが無いリポジトリでは意味が無いので出さない。
-              disabled: busy || !hasRemotes(entries, menu.id),
+              // **押せないときは理由を出す**（消さない。CLAUDE.md §6）。
+              // 判定は純関数（`lib/repositoryMenu.ts`）。
+              title: canFetch(entries, menu.id, busy).reason ?? ja.repositories.fetchHint,
+              disabled: !canFetch(entries, menu.id, busy).enabled,
               onSelect: () => onFetch(menu.id),
+            },
+            {
+              label: ja.repositories.reveal,
+              title: canReveal(entries, menu.id).reason ?? ja.repositories.revealHint,
+              disabled: !canReveal(entries, menu.id).enabled,
+              onSelect: () => onReveal(menu.id),
             },
             {
               // **リポジトリに紐づく設定はここから。** アプリ全体の「設定」に
@@ -346,12 +357,6 @@ function ProbeBadges({ entry }: { entry: RepositoryEntry }) {
       )}
     </>
   );
-}
-
-/** リモートを持っているか。持っていなければ fetch のメニューを出さない。 */
-function hasRemotes(entries: RepositoryEntry[], id: string): boolean {
-  const entry = entries.find((candidate) => candidate.id === id);
-  return (entry?.probe?.remotes.length ?? 0) > 0;
 }
 
 /** ツールチップに出す日数。一度も fetch していなければ null。 */

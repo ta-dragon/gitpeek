@@ -940,6 +940,16 @@ export function openLogFolder(): Promise<void> {
 }
 
 /**
+ * 登録済みリポジトリのフォルダをエクスプローラで開く。
+ *
+ * **渡すのは登録の ID だけ。** パスは Rust 側が引く（任意の場所を開ける
+ * コマンドにしないため）。移動・削除されていれば理由が返る。
+ */
+export function openRepositoryFolder(repositoryId: string): Promise<void> {
+  return invoke<void>("open_repository_folder", { repositoryId });
+}
+
+/**
  * フロントで起きた例外をログへ残す。
  *
  * 画面の受け皿は閉じると何も残らないので、**Rust 側と同じファイルへ並べる**。

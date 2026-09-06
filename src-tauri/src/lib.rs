@@ -1452,6 +1452,32 @@ fn open_log_folder(app: AppHandle, state: State<'_, AppState>) -> Result<(), Str
         .map_err(|error| format!("ログフォルダを開けません: {error}"))
 }
 
+/// 登録済みリポジトリのフォルダをエクスプローラで開く（T-30）。
+///
+/// **受け取るのは登録の ID だけで、パスはフロントから渡させない**
+/// （`open_log_folder` と同じ形）。パスを引数にすると、画面側から
+/// 任意の場所を開けるコマンドになる。
+///
+/// 開く前に**実在するフォルダかを確かめる**。登録したあとで移動・削除された
+/// リポジトリはよくあるので、エクスプローラに空振りさせるより理由を返す。
+#[tauri::command]
+fn open_repository_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let repository = state.store.repository(&repository_id)?;
+    let path = std::path::Path::new(&repository.path);
+    if !path.is_dir() {
+        return Err(format!("フォルダが見つかりません: {}", repository.path));
+    }
+    app.opener()
+        .open_path(repository.path.clone(), None::<&str>)
+        .map_err(|error| format!("フォルダを開けません: {error}"))
+}
+
 /// フロントで起きた例外をログへ残す（T-24）。
 ///
 /// 画面の受け皿（`ErrorBoundary`）は閉じると何も残らない。**Rust 側の記録と
@@ -1530,6 +1556,7 @@ pub fn run() {
             set_repository_llm_profile,
             log_status,
             open_log_folder,
+            open_repository_folder,
             log_frontend_error
         ])
         .build(tauri::generate_context!())
