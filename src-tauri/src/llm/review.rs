@@ -463,7 +463,7 @@ pub fn parse_review(content: &str, fallback_file: &str, reason_hint: Option<&str
             markdown: Some(String::new()),
             fallback_reason: Some(
                 reason_hint
-                    .unwrap_or("応答が空でした。モデルと接続先を確かめてください。")
+                    .unwrap_or("返事が空でした。モデルと接続先を確かめてください。")
                     .to_string(),
             ),
             ..ReviewText::default()
@@ -481,7 +481,7 @@ pub fn parse_review(content: &str, fallback_file: &str, reason_hint: Option<&str
         markdown: Some(trimmed.to_string()),
         fallback_reason: Some(
             reason_hint
-                .unwrap_or("構造化に失敗しました。モデルの出力をそのまま表示しています。")
+                .unwrap_or("決まった形で返ってこなかったので、モデルの出力をそのまま出しています。")
                 .to_string(),
         ),
         ..ReviewText::default()
@@ -602,17 +602,17 @@ pub fn plan(context: &ReviewContext<'_>) -> Result<ReviewPlan, String> {
 
     let sendable = files.iter().filter(|it| it.skipped.is_none()).count();
     let blocked = if context.profile.id.is_empty() {
-        Some("レビューする接続先が選ばれていません。設定で接続先を 1 つ選んでください。".to_string())
+        Some("接続先が選ばれていません。設定で 1 つ選んでください。".to_string())
     } else if all_skills.is_empty() {
         Some(
-            "使うレビュー観点が 1 つもありません。設定で観点（skill）を 1 つ以上「使う」にしてください。"
+            "使う観点が 1 つもありません。設定で 1 つ以上を「使う」にしてください。"
                 .to_string(),
         )
     } else if changes.is_empty() {
         Some("この 2 点に差分がありません。レビューするものがありません。".to_string())
     } else if sendable == 0 {
         Some(
-            "レビューできるファイルがありません。すべて除外されているか、差分の無いファイルだけです。"
+            "レビューできるファイルがありません。全部外されているか、差分の無いファイルだけです。"
                 .to_string(),
         )
     } else {
@@ -653,7 +653,7 @@ fn plan_one(
     if matched.is_empty() {
         return Ok(PlannedFile {
             skipped: Some(
-                "このファイルに当てはまるレビュー観点がありません（skill の globs）。".to_string(),
+                "このファイルに当てはまる観点がありません（skill の globs）。".to_string(),
             ),
             ..base
         });
@@ -1001,14 +1001,14 @@ fn ask(
 /// 途中で切れたときの言い方。切れていなければ `None`。
 fn truncation_reason(outcome: &ChatOutcome) -> Option<&'static str> {
     if outcome.cancelled {
-        return Some("中止したため、応答は途中までです。");
+        return Some("中止したので、返事は途中までです。");
     }
     if outcome.truncated {
-        return Some("応答が途中で切れました。受け取ったところまでを表示しています。");
+        return Some("返事が途中で切れました。受け取ったところまで出しています。");
     }
     if outcome.finish_reason.as_deref() == Some("length") {
         return Some(
-            "応答が長さの上限で切れました。接続先の設定で max tokens を増やすと最後まで返ります。",
+            "返事が長さの上限で切れました。接続先の設定で max tokens を増やすと最後まで返ります。",
         );
     }
     None

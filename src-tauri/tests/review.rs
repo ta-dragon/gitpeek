@@ -787,10 +787,11 @@ fn plan_is_blocked_with_a_readable_reason_when_no_skill_is_in_use() {
     harness.without_built_in();
 
     let plan = harness.plan();
+    // **どの前提が欠けているのかを言い分けていること。** 言い回しではなく、
+    // ほかの理由（接続先・差分・ファイル）と区別が付く語で見る
+    // （文言を直すたびに落ちると、直すのが億劫になって古い文章が残る）。
     assert!(
-        plan.blocked
-            .as_deref()
-            .is_some_and(|it| it.contains("レビュー観点")),
+        plan.blocked.as_deref().is_some_and(|it| it.contains("観点")),
         "押せない理由を出すこと: {:?}",
         plan.blocked
     );

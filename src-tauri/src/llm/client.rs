@@ -217,7 +217,7 @@ pub fn test_connection(profile: &LlmProfile, api_key: &str) -> Result<TestOutcom
     let Some(choice) = parsed.choices.first() else {
         return Err(LlmError::new(
             LlmErrorKind::BadResponse,
-            "応答に choices がありません。モデル名が正しいか確かめてください。",
+            "返事に choices がありません。OpenAI 互換の入口か、モデル名を確かめてください。",
             truncate(&body),
         ));
     };
@@ -386,7 +386,7 @@ pub fn chat_stream(
                 if raw.is_empty() {
                     return Err(LlmError::new(
                         LlmErrorKind::BadResponse,
-                        "応答を最後まで読み取れませんでした。もう一度試してください。",
+                        "返事を最後まで読み切れませんでした。もう一度どうぞ。",
                         sanitize(&error.to_string(), api_key),
                     ));
                 }
@@ -605,7 +605,7 @@ pub fn endpoint(base_url: &str, path: &str) -> Result<String, LlmError> {
     if base.is_empty() {
         return Err(LlmError::new(
             LlmErrorKind::BadUrl,
-            "接続先の URL が空です。`http://localhost:11434/v1` のように入力してください。",
+            "接続先の URL が空です。`http://localhost:11434/v1` のように入れてください。",
             String::new(),
         ));
     }
@@ -613,7 +613,7 @@ pub fn endpoint(base_url: &str, path: &str) -> Result<String, LlmError> {
     if !lower.starts_with("http://") && !lower.starts_with("https://") {
         return Err(LlmError::new(
             LlmErrorKind::BadUrl,
-            format!("接続先の URL は http:// か https:// で始まる必要があります: {base}"),
+            format!("接続先の URL は http:// か https:// で始めてください: {base}"),
             String::new(),
         ));
     }
@@ -697,7 +697,7 @@ fn read(
     let body = response.body_mut().read_to_string().map_err(|error| {
         LlmError::new(
             LlmErrorKind::BadResponse,
-            "応答を最後まで読み取れませんでした。もう一度試してください。",
+            "返事を最後まで読み切れませんでした。もう一度どうぞ。",
             sanitize(&error.to_string(), api_key),
         )
     })?;
@@ -757,21 +757,21 @@ fn http_error(status: u16, url: &str, body: &str) -> Option<LlmError> {
         401 | 403 => LlmError::new(
             LlmErrorKind::Unauthorized,
             with_reason(format!(
-                "API キーが受け付けられませんでした（HTTP {status}）。キーを入力し直してください。"
+                "API キーが通りませんでした（HTTP {status}）。キーを入れ直してください。"
             )),
             detail,
         ),
         404 => LlmError::new(
             LlmErrorKind::NotFound,
             with_reason(format!(
-                "接続先が見つかりません（HTTP 404）。{url} が正しいか、base URL の末尾が /v1 になっているかを確かめてください。"
+                "接続先が見つかりません（HTTP 404）。{url} が正しいか、末尾が /v1 になっているか確かめてください。"
             )),
             detail,
         ),
         429 => LlmError::new(
             LlmErrorKind::Status,
             with_reason(
-                "要求が多すぎると断られました（HTTP 429）。少し待ってから試してください。".to_string(),
+                "送りすぎだと断られました（HTTP 429）。少し待ってからどうぞ。".to_string(),
             ),
             detail,
         ),

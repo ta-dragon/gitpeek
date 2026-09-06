@@ -61,7 +61,7 @@ pub fn load(
         }
     })?;
     if !output.ok() {
-        return Err(output.failure("コミットの一覧を取得できませんでした"));
+        return Err(output.failure("コミットの一覧を読めませんでした"));
     }
 
     // メッセージの文字コードは git が UTF-8 へ寄せてくれる（commit の encoding ヘッダ）。

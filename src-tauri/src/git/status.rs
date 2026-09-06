@@ -85,7 +85,7 @@ fn run_status(log: &dyn LogSink, program: &str, repo: &Path) -> Result<StatusRec
         &["status", "--porcelain=v2", "-z"],
     )?;
     if !output.ok() {
-        return Err(output.failure("作業ツリーの状態を取得できませんでした"));
+        return Err(output.failure("作業ツリーの状態を読めませんでした"));
     }
 
     Ok(parse_status(&String::from_utf8_lossy(&output.stdout)))

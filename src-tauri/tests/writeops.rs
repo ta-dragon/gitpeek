@@ -210,8 +210,10 @@ fn tracking_a_name_that_already_exists_fails_with_advice() {
     .expect("checkout");
 
     assert!(!outcome.ok);
+    // **次にどうすればよいかが書いてあること。** 言い回しではなく、
+    // 打つ手を指している語で見る（文言を直すたびに落ちるテストにしない）。
     assert!(
-        outcome.message.contains("既にあります"),
+        outcome.message.contains("切り替え"),
         "何をすればいいか分からない: {}",
         outcome.message
     );

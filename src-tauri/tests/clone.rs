@@ -104,7 +104,13 @@ fn an_existing_folder_stops_before_git_runs() {
     .expect("結果を返すこと");
 
     assert_eq!(outcome.status, CloneStatus::Failed, "{outcome:#?}");
-    assert!(outcome.message.contains("既にあります"), "{}", outcome.message);
+    // **どこのフォルダの話かを伝えていること。** 言い回しではなく中身を見る
+    // （文言を直すたびにテストが落ちると、直すのが億劫になって古い文章が残る）。
+    assert!(
+        outcome.message.contains("occupied"),
+        "どのフォルダで止まったのかが読めない: {}",
+        outcome.message
+    );
     assert!(
         log.entries().is_empty(),
         "git を起動してはいけない: {:#?}",

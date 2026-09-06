@@ -244,20 +244,20 @@ fn explain_transport(stderr: &str, what: &str) -> String {
 
     if AUTH.iter().any(|needle| stderr.contains(needle)) {
         return format!(
-            "認証できませんでした。ターミナルで一度 `git {what}` を実行して資格情報を登録してください。"
+            "認証できませんでした。ターミナルで一度 `git {what}` を実行して、資格情報を登録してください。"
         );
     }
     if stderr.contains("Permission denied (publickey)") {
-        return "SSH の公開鍵で認証できませんでした。鍵が登録されているか確認してください（パスフレーズ付きの鍵は、先に ssh-agent へ登録しておく必要があります）。".to_string();
+        return "SSH の公開鍵で認証できませんでした。鍵が登録されているか確かめてください。パスフレーズ付きの鍵は、先に ssh-agent へ登録しておきます。".to_string();
     }
     if stderr.contains("Host key verification failed") {
-        return "SSH のホスト鍵が未登録です。ターミナルで一度接続して、既知のホストに登録してください。".to_string();
+        return "SSH のホスト鍵がまだ登録されていません。ターミナルで一度つないで、既知のホストに入れてください。".to_string();
     }
     if stderr.contains("Could not resolve host") || stderr.contains("Could not resolve hostname") {
-        return "リモートに接続できません（ホスト名を解決できませんでした）。".to_string();
+        return "リモートにつながりません。ホスト名を引けませんでした。".to_string();
     }
     if stderr.contains("does not appear to be a git repository") {
-        return "リモートが git リポジトリとして応答しませんでした。URL を確認してください。"
+        return "リモートが git リポジトリとして応えませんでした。URL を確かめてください。"
             .to_string();
     }
 
@@ -504,19 +504,19 @@ fn explain_checkout(stderr: &str) -> String {
     if stderr.contains("would be overwritten by checkout")
         || stderr.contains("Your local changes to the following files would be overwritten")
     {
-        return "手元の変更が上書きされるため切り替えられません。変更を片付けてからもう一度実行してください（GitPeek は stash も --force も行いません）。".to_string();
+        return "手元の変更が上書きされるので切り替えられません。片付けてからもう一度どうぞ。GitPeek は stash も --force も使いません。".to_string();
     }
     // **未追跡ファイルは止めていない**ので、同じ名前のものがあるとここに来る。
     if stderr.contains("untracked working tree files would be overwritten") {
-        return "同じ名前の未追跡ファイルがあるため切り替えられません。そのファイルを移動するか消してからもう一度実行してください。".to_string();
+        return "同じ名前の未追跡ファイルがあるので切り替えられません。そのファイルを動かすか消してから、もう一度どうぞ。".to_string();
     }
     if stderr.contains("already exists") {
-        return "同じ名前のローカルブランチが既にあります。作らずに、そのブランチへ切り替えてください。".to_string();
+        return "同じ名前のローカルブランチがもうあります。作らずに、そちらへ切り替えてください。".to_string();
     }
     if stderr.contains("did not match any file(s) known to git")
         || stderr.contains("unknown revision")
     {
-        return "対象が見つかりませんでした。fetch してからもう一度実行してください。".to_string();
+        return "対象が見つかりませんでした。fetch してからもう一度どうぞ。".to_string();
     }
     match first_line(stderr) {
         Some(line) => format!("checkout に失敗しました: {}", redact(line)),
@@ -528,13 +528,13 @@ fn explain_checkout(stderr: &str) -> String {
 fn explain_merge(stderr: &str) -> String {
     let lower = stderr.to_ascii_lowercase();
     if lower.contains("not possible to fast-forward") {
-        return "fast-forward できないので取り込みませんでした。手元にだけあるコミットがあります（GitPeek は fast-forward 以外のマージを行いません）。".to_string();
+        return "手元にだけあるコミットがあるので、早送り（fast-forward）になりません。GitPeek は早送り以外のマージをしません。".to_string();
     }
     if lower.contains("refusing to merge unrelated histories") {
         return "共通の祖先が無いので取り込めません。".to_string();
     }
     if lower.contains("would be overwritten by merge") || lower.contains("local changes") {
-        return "手元の変更が上書きされるため取り込めません。変更を片付けてからもう一度実行してください。".to_string();
+        return "手元の変更が上書きされるので取り込めません。片付けてからもう一度どうぞ。".to_string();
     }
     match first_line(stderr) {
         Some(line) => format!("マージに失敗しました: {}", redact(line)),
@@ -704,7 +704,7 @@ pub fn clone(
     let removable = match std::fs::symlink_metadata(&directory) {
         Ok(_) => {
             return Ok(refused_clone(format!(
-                "そのフォルダは既にあります: {}。別の名前にするか、既にあるほうを「追加」で登録してください。",
+                "そのフォルダはもうあります: {}。別の名前にするか、いまあるほうを「追加」で登録してください。",
                 directory.display()
             )))
         }

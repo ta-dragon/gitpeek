@@ -52,7 +52,7 @@ pub fn load(log: &dyn LogSink, program: &str, path: &Path) -> Result<Refs, Strin
         ],
     )?;
     if !output.ok() {
-        return Err(output.failure("ref の一覧を取得できませんでした"));
+        return Err(output.failure("ref の一覧を読めませんでした"));
     }
 
     Ok(parse(&String::from_utf8_lossy(&output.stdout)))

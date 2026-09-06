@@ -24,14 +24,14 @@ export const ja = {
     scanShort: "スキャン",
     clone: "URL から clone",
     remove: "登録解除",
-    removeHint: "一覧から外すだけで、フォルダは削除しません。",
+    removeHint: "一覧から外すだけ。フォルダは消えません。",
     relocate: "再指定",
-    relocateHint: "移動・リネームしたフォルダを指定し直します。",
+    relocateHint: "移動したりリネームしたあとのフォルダを選び直します。",
     reveal: "エクスプローラーで開く",
-    revealHint: "このリポジトリのフォルダをエクスプローラーで開きます。",
+    revealHint: "フォルダをエクスプローラーで開きます。",
     revealFailed: (reason: string) => `フォルダを開けませんでした。${reason}`,
     contextHint: "右クリックで登録解除",
-    empty: "リポジトリが登録されていません。",
+    empty: "まだ何も登録されていません。",
     missing: "フォルダが見つかりません",
     sortLabel: "並び順",
     sortManual: "手動",
@@ -39,11 +39,11 @@ export const ja = {
     dragHint: "ドラッグで並べ替え",
     dragDisabled: "並び順が「手動」のときだけ並べ替えられます。",
     fetch: "fetch",
-    fetchHint: "リモートから取ってきます（取ってくるだけで、作業ツリーには触りません）。",
+    fetchHint: "リモートから取ってくるだけ。作業ツリーには触りません。",
     fetchAll: "全て fetch",
-    fetchAllHint: "登録済みのリポジトリを 1 つずつ順に fetch します。",
+    fetchAllHint: "登録してあるリポジトリを順に fetch します。",
     cloneShort: "clone",
-    cloneHint: "リモートの URL から新しく取り込みます（履歴は全部持ってきます）。",
+    cloneHint: "URL を指定して新しく取り込みます。履歴は丸ごと持ってきます。",
     // 素性の表示。ahead/behind は T-17 で中身が入る。
     bare: "bare",
     shallow: "shallow",
@@ -51,7 +51,7 @@ export const ja = {
     unborn: "コミットなし",
     indexLock: "index.lock 残留",
     indexLockDetail:
-      "他の git プロセスが動作中の可能性があります。GitPeek はこのファイルを削除しません。",
+      "ほかで git が動いているのかもしれません。このファイルには触りません。",
     notRepository: "git リポジトリではありません",
     selectFolder: "リポジトリのフォルダを選択",
     selectScanRoot: "スキャンするフォルダを選択",
@@ -64,7 +64,7 @@ export const ja = {
     staleHint: (days: number | null) =>
       days === null
         ? "まだ一度も fetch していません。"
-        : `最後に fetch してから ${days} 日経っています。`,
+        : `fetch してから ${days} 日経っています。`,
   },
 
   snapshot: {
@@ -87,11 +87,11 @@ export const ja = {
     oversizedTitle: "大きなリポジトリです",
     oversizedBody: (commits: number) =>
       `前回は ${commits.toLocaleString()} コミットありました。読み込みに数十秒かかり、` +
-      `メモリを数 GB 使います。その間このウィンドウは操作できません。`,
+      `メモリを数 GB 使います。終わるまでこのウィンドウは操作できません。`,
     oversizedNote:
-      "GitPeek が想定しているのは数万コミットまでです（docs/DESIGN.md §4.1）。" +
-      "この規模の正式対応は v1.1 以降で行います。" +
-      "リリースビルド（npm run start:release）の方が大幅に速く終わります。",
+      "想定しているのは数万コミットまでです（docs/DESIGN.md §4.1）。" +
+      "この規模にきちんと対応するのは v1.1 以降です。" +
+      "リリースビルド（npm run start:release）ならかなり速く終わります。",
     oversizedLoad: "それでも読み込む",
 
     // 途中経過。段階の名前は Rust 側の LoadPhase と対応する。
@@ -119,8 +119,8 @@ export const ja = {
   },
 
   emptyState: {
-    title: "リポジトリを追加してください",
-    body: "ローカルの git リポジトリを登録するか、URL から clone すると始められます。",
+    title: "まずリポジトリを追加",
+    body: "手元の git リポジトリを登録するか、URL から clone すると始まります。",
   },
 
   /**
@@ -131,20 +131,20 @@ export const ja = {
    */
   clone: {
     title: "URL から clone",
-    lead: "リモートの URL を入力すると、指定した場所にフォルダを作って取り込みます。",
+    lead: "URL を入れると、指定した場所にフォルダを作って取り込みます。",
 
     urlLabel: "URL",
     urlPlaceholder: "https://github.com/owner/repo.git  または  git@github.com:owner/repo.git",
     parentLabel: "保存先の親フォルダ",
     parentPlaceholder: "取り込み先のフォルダをフルパスで",
     folderLabel: "作るフォルダの名前",
-    folderPlaceholder: "URL から決められないときは入力してください",
+    folderPlaceholder: "URL から決められないときだけ",
     browse: "参照…",
 
     // **どこに何ができるのかを 1 行で見せる。** 2 つの欄をどう繋ぐかは
     // 利用者が気にすることではない。
     preview: (path: string) => `${path} を新しく作って、そこへ取り込みます。`,
-    previewEmpty: "URL と保存先を入力すると、作られる場所がここに出ます。",
+    previewEmpty: "URL と保存先を入れると、できあがる場所がここに出ます。",
 
     // --- 選択肢 -------------------------------------------------------
     //
@@ -154,10 +154,10 @@ export const ja = {
     // サブモジュール。**既定 OFF**（CLAUDE.md §1 — 黙って取り込まない）。
     submodules: "サブモジュールも取り込む",
     submodulesNote:
-      "このリポジトリが参照している別のリポジトリを、同じ操作の中で取り込みます。その分だけ時間がかかり、リモートごとに認証を求められることがあります。",
+      "このリポジトリが参照している別のリポジトリも一緒に取り込みます。そのぶん時間がかかり、リモートごとに認証を求められることがあります。",
     // 実行中に出す。何度も 0 に戻るのを「やり直している」と読まれないように。
     submodulesProgressNote:
-      "サブモジュールは 1 つずつ取り込むので、進捗はそのたびに数え直されます。",
+      "サブモジュールは 1 つずつ取り込みます。進捗はそのたびに 0 から数え直します。",
 
     // 保存先を覚える。**T-25 で設定画面からも変えられるようになった**が、
     // clone の流れの中で決められることに意味があるのでこちらも残す。
@@ -180,10 +180,10 @@ export const ja = {
       `いまの既定（${current}）を、この場所に置き換えます。`,
 
     authNote:
-      "資格情報が必要なリモートでは、認証ウィンドウが前面に出ることがあります。GitPeek はパスワードもトークンも受け取らず、git に任せます。",
+      "認証が要るリモートでは、認証ウィンドウが前に出ることがあります。パスワードもトークンも GitPeek は受け取りません。git に任せます。",
     // 提供しないものを先に言う（CLAUDE.md §1）。
     fullHistoryNote:
-      "履歴は全部取り込みます（浅い clone とブランチの指定は行いません）。",
+      "履歴は丸ごと取り込みます。浅い clone やブランチの指定はしません。",
 
     run: "clone する",
     dismiss: "やめる",
@@ -194,7 +194,7 @@ export const ja = {
     cancel: "中止",
     cancelling: "中止しています…",
     // **中止したら残骸は消す**（fetch と扱いが違う）。
-    cancelNote: "中止すると、途中まで取り込んだフォルダは削除されます。",
+    cancelNote: "中止すると、途中まで取り込んだフォルダごと消します。",
 
     close: "閉じる",
     // **いちばんありそうな続きは「名前を変えてもう一度」。** 入力欄はそのまま残る。
@@ -202,12 +202,12 @@ export const ja = {
     details: "詳細",
     // 消せなかったときだけ出す。**黙って残さない。**
     leftover: (path: string) =>
-      `途中まで取り込んだフォルダを削除できませんでした: ${path}（手で削除してください）`,
+      `途中まで取り込んだフォルダを消せませんでした: ${path}（手で消してください）`,
   },
 
   crash: {
     title: "画面の描画で問題が起きました",
-    body: "この画面は GitPeek の不具合です。下の内容を添えて報告してください。",
+    body: "GitPeek の不具合です。下の内容を添えて報告してください。",
     stack: "発生箇所",
     reload: "再読込",
 
@@ -216,7 +216,7 @@ export const ja = {
     // **無い場所を案内しない。** 書けていないのに「ここに記録があります」と
     // 出すと、開いて空だったときに何が起きたのか分からなくなる。
     logChecking: "記録の場所を確認しています。",
-    logNowhere: "記録の置き場所を決められなかったため、ログは残っていません。",
+    logNowhere: "記録の置き場所を決められなかったので、ログは残っていません。",
     logAt: (dir: string) => `詳しい記録は ${dir} にあります。`,
     logNotWriting: (problem: string, dir: string) =>
       `今回の記録は残せませんでした（${problem}）。前回までの記録は ${dir} にあります。`,
@@ -232,7 +232,7 @@ export const ja = {
     // どうすればよいかを出す。
     panicTitle: "内部で問題が起きました",
     panicBody:
-      "この後の操作は正しく動かないことがあります。GitPeek を再起動してください。",
+      "これ以降の操作は当てになりません。GitPeek を再起動してください。",
     panicDetail: "発生内容",
     close: "閉じる",
   },
@@ -248,14 +248,14 @@ export const ja = {
     detecting: "git を確認しています…",
     notFoundTitle: "git が見つかりません",
     notFoundBody:
-      "GitPeek は git がインストールされている環境でのみ動作します。git をインストールするか、実行ファイルのフルパスを指定してください。",
+      "GitPeek は git が無いと動きません。git を入れるか、実行ファイルのフルパスを指定してください。",
     tooOldTitle: "git のバージョンが古すぎます",
     tooOldBody: (found: string, min: string) =>
-      `検出されたバージョンは ${found} ですが、GitPeek は ${min} 以上を必要とします。git を更新してください。`,
+      `見つかったのは ${found} でした。GitPeek には ${min} 以上が要ります。git を更新してください。`,
     unreadableTitle: "git のバージョンを判定できません",
     installLabel: "Git for Windows をダウンロード",
     installUrl: "https://git-scm.com/download/win",
-    installUrlHint: "ボタンが動作しない場合は上の URL をブラウザで開いてください。",
+    installUrlHint: "ボタンが効かないときは、上の URL をブラウザで開いてください。",
     pathLabel: "git 実行ファイルのフルパス（PATH に無い場合のみ）",
     pathPlaceholder: "C:\\Program Files\\Git\\cmd\\git.exe",
     recheck: "再チェック",
@@ -280,7 +280,7 @@ export const ja = {
       logs: "ログ",
     },
     repositoryElsewhere:
-      "リポジトリごとの設定（表示するブランチ・既定の接続先・リポジトリ内の観点）は、リポジトリ一覧の右クリックから開きます。",
+      "リポジトリごとの設定（表示するブランチ・既定の接続先・リポジトリ内の観点）は、一覧を右クリックして開きます。",
 
     // 一般
     gitPath: "git 実行ファイルのフルパス",
@@ -290,7 +290,7 @@ export const ja = {
     gitPathNg: (reason: string) => `使えません: ${reason}`,
     workspaceRoot: "clone の既定の保存先",
     workspaceRootNote: "URL から clone するとき、保存先の親フォルダに最初から入ります。",
-    workspaceRootEmpty: "まだ決まっていません。clone の画面で「この保存先を次回から既定にする」を押すと入ります。",
+    workspaceRootEmpty: "まだ決めていません。clone の画面で「この保存先を次回から既定にする」を押すと入ります。",
     // **コマンドログの出し入れはここだけ**（T-25。2026-09-06 に利用者が決めた）。
     // ヘッダのボタンは畳んだので、**戻し方を消えたときの文言に書く**（CLAUDE.md §6）。
     showCommandLog: "git コマンドログのパネルを出す",
@@ -342,7 +342,7 @@ export const ja = {
       unsaved: "この値は保存していません。",
     },
 
-    recoveredTitle: "settings.json を読み込めなかったため既定値で起動しました",
+    recoveredTitle: "settings.json を読めなかったので、既定値で起動しました",
     recoveredDetail: (backupPath: string, reason: string) =>
       `元の内容は ${backupPath} へ退避しました（${reason}）。`,
     loadFailedTitle: "設定を読み込めませんでした",
@@ -418,7 +418,7 @@ export const ja = {
     presetRemote: "リモートのみ",
     // タグにチェックが無い理由。プリセット行のホバーで出す。
     presetHint:
-      "チェックはグラフの起点になるブランチだけに効きます。タグは起点にしないため、" +
+      "チェックが効くのはグラフの起点になるブランチだけです。タグは起点にしないので、" +
       "チェックボックスを置いていません（docs/DESIGN.md §4.2）。",
     checkHint: (shortName: string) => `${shortName} をグラフに出す`,
 
@@ -442,7 +442,7 @@ export const ja = {
     // detached では取り込む先が無い。理由はダイアログで説明する。
     merge: "現在のブランチに取り込む",
     mergeHint:
-      "早送り（fast-forward）だけを行います。マージコミットは作らず、手元のコミットも書き換えません。",
+      "早送り（fast-forward）だけです。マージコミットは作らず、手元のコミットも書き換えません。",
     onlyThis: "このブランチだけ表示",
     jump: "先頭コミットへジャンプ",
     copyName: "名前をコピー",
@@ -495,20 +495,20 @@ export const ja = {
       `${branch} に ${from} を取り込みます。${branch} に無い ${n} 件のコミットが足されます。`,
     // 取り込めないときも出す。**何ができないのかを先に説明する。**
     mergeHelp:
-      "早送り（fast-forward）は、手元のブランチを相手の位置まで進めるだけの取り込みです。マージコミットは作らず、手元にあるコミットを書き換えたり消したりしません。そのため、手元にだけあるコミットが 1 件でもあると実行できません。",
+      "早送り（fast-forward）は、手元のブランチを相手の位置まで進めるだけの取り込みです。マージコミットは作らず、手元のコミットを書き換えたり消したりもしません。だから、手元にだけあるコミットが 1 件でもあると実行できません。",
     mergeRun: "取り込む",
     mergeAhead: (n: number) =>
-      `手元にだけあるコミットが ${n} 件あるので、早送りになりません。GitPeek は早送り以外の取り込み方を持っていないので、この操作はできません（ターミナルで merge / rebase を選んでください）。`,
+      `手元にだけあるコミットが ${n} 件あるので、早送りになりません。GitPeek は早送り以外の取り込み方を持っていません。ターミナルで merge か rebase を使ってください。`,
     mergeUpToDate: "取り込むものがありません。相手のコミットはすべて手元にあります。",
     mergeDetached:
       "いまブランチから外れた状態（detached HEAD）なので、取り込む先のブランチがありません。先にブランチへ切り替えてください。",
     mergeUnknown:
-      "読み込んだコミットの外を指しているので判定できません。fetch してからもう一度実行してください。",
+      "読み込んだコミットの外を指しているので判定できません。fetch してからもう一度試してください。",
 
     // --- 止める理由（docs/DESIGN.md §8.1）-----------------------------
     blockerBare: "bare リポジトリには作業ツリーがないので切り替えられません。",
     blockerDirty: (n: number) =>
-      `作業ツリーに ${n} 件の変更があります。GitPeek は stash も --force も行わないので、片付けてからもう一度実行してください。`,
+      `作業ツリーに ${n} 件の変更があります。GitPeek は stash も --force も使わないので、片付けてからもう一度試してください。`,
     blockerIndexLock:
       "index.lock が残っています。別の git が動いているかもしれません（GitPeek は消しません）。",
     blockerUnborn: "コミットが 1 件もありません。",
@@ -533,9 +533,9 @@ export const ja = {
 
     // 一括の実行前確認。**1 回だけ出す**（1 件ずつ聞かない）。
     confirmTitle: "全て fetch しますか？",
-    confirmBody: (n: number) => `${n} 件のリポジトリを 1 つずつ順に fetch します。`,
+    confirmBody: (n: number) => `${n} 件のリポジトリを順に fetch します。`,
     confirmAuth:
-      "資格情報の期限が切れているリモートがあると、認証ウィンドウが前面に出ることがあります。",
+      "資格情報の切れたリモートがあると、認証ウィンドウが前に出ることがあります。",
     confirmRun: "実行する",
     confirmCancel: "やめる",
 
@@ -552,7 +552,7 @@ export const ja = {
     statusCancelled: "中止",
     details: "詳細",
     // 一括ボタンが押せないときの説明。リモートを持つ登録が 1 つも無い場合。
-    noRepositories: "fetch できるリポジトリがありません（リモートが登録されていません）。",
+    noRepositories: "fetch できるリポジトリがありません。どれもリモートを持っていません。",
   },
 
   // 作業ツリー（T-16。docs/DESIGN.md §7.5）。**read-only なので操作の文言は無い。**
@@ -574,7 +574,7 @@ export const ja = {
     },
     // 未追跡は差分にしない（全行追加の差分はノイズが大きすぎる）。
     untrackedBody: "まだ git が知らないファイルです。差分ではなく全文を出しています。",
-    conflictBody: "衝突しています。解決は git のコマンドで行ってください。",
+    conflictBody: "衝突しています。GitPeek では直せないので、ターミナルの git で解決してください。",
     readFailed: "ファイルを読めませんでした",
     tooLarge: (size: string) => `大きすぎるので表示しません（${size}）。`,
     indexLock: "`.git/index.lock` が残っています。別の git が動いているかもしれません。",
@@ -618,7 +618,7 @@ export const ja = {
     // マージコミットの親選択（docs/DESIGN.md §7.4）。
     compareWith: "比較する親",
     parentNth: (n: number) => `第 ${n} 親`,
-    mergeNote: "マージコミットの差分は親ごとに異なります。",
+    mergeNote: "マージコミットの差分は、どの親と比べるかで変わります。",
 
     // 右ペイン下段 — 変更ファイル一覧。
     files: "変更ファイル",
@@ -655,7 +655,7 @@ export const ja = {
     // 中央下 — 差分本体（T-13）。
     selectFile: "ファイルを選ぶと、ここに差分が出ます。",
     diffFailed: "差分を取得できませんでした",
-    binaryBody: "バイナリファイルのため、差分は表示できません。",
+    binaryBody: "バイナリなので差分は出せません。",
     /*
      * バイナリは行数の代わりにサイズの変化を出す（docs/DESIGN.md §7.2）。
      * **片側が無いときは「なし」**。0 と書くと「空のファイルになった」に読める。
@@ -755,7 +755,7 @@ export const ja = {
     // **入口は設定画面のタブ**（T-25 でヘッダのボタンを畳んだ）。`open` は要らなくなった。
     title: "AI レビューの接続先",
     lead: "AI レビューに使う接続先を登録します。API キーは Windows の資格情報マネージャーに預けるので、設定ファイルには残りません。",
-    empty: "接続先がまだ登録されていません。",
+    empty: "接続先はまだありません。",
 
     add: "接続先を追加",
     edit: "編集",
@@ -769,7 +769,7 @@ export const ja = {
     baseUrlLabel: "接続先の URL",
     baseUrlPlaceholder: "http://localhost:11434/v1",
     baseUrlNote:
-      "OpenAI 互換の入口を入れてください。多くは末尾が /v1 です。Ollama は http://localhost:11434/v1 です。",
+      "OpenAI 互換の入口を入れてください。たいてい末尾は /v1 です。Ollama なら http://localhost:11434/v1。",
     modelLabel: "モデル名",
     modelPlaceholder: "qwen2.5-coder:14b",
     contextWindowLabel: "一度に渡せる長さ（トークン）",
@@ -796,9 +796,9 @@ export const ja = {
     // **保存済みのキーは読み出さない。** 表示するのは「預かっている」ことだけ。
     apiKeyLabel: "API キー",
     apiKeyPlaceholderSaved: "預かっています（変えるときだけ入力してください）",
-    apiKeyPlaceholderEmpty: "キーの要らない接続先（Ollama など）では空のままにしてください",
+    apiKeyPlaceholderEmpty: "キーの要らない接続先（Ollama など）なら空のままで",
     apiKeySaved: "このパソコンの資格情報マネージャーに預かっています。ここには表示しません。",
-    apiKeyNone: "まだ預かっていません。キーの要らない接続先ならこのままで構いません。",
+    apiKeyNone: "まだ預かっていません。キーの要らない接続先なら、このままで大丈夫です。",
     apiKeyReplaceNote: "保存すると、預かっているキーが入力した内容に入れ替わります。",
     // 「消す」の選択肢。**押せないときも消さない**（CLAUDE.md §6）。
     apiKeyClear: "預かっている API キーを消す",
@@ -815,8 +815,8 @@ export const ja = {
 
     fetchModels: "モデル名を取り出す",
     fetchingModels: "モデル名を取り出しています…",
-    modelsFound: (n: number) => `${n} 件のモデル名が返りました。候補から選べます。`,
-    modelsEmpty: "モデル名は返りませんでした。手で入力してください。",
+    modelsFound: (n: number) => `モデル名が ${n} 件返りました。候補から選べます。`,
+    modelsEmpty: "モデル名は返りませんでした。手で入れてください。",
 
     test: "つながるか試す",
     testing: "試しています…",
@@ -840,7 +840,7 @@ export const ja = {
     failureHint: {
       unauthorized: "API キーを入力し直して保存してから、もう一度試してください。",
       notFound: "URL の末尾が /v1 になっているか確かめてください。",
-      status: "接続先のサービス側で断られています。しばらく待つか、モデル名を確かめてください。",
+      status: "接続先に断られています。しばらく待つか、モデル名を確かめてください。",
       unreachable:
         "サーバが起動しているか確かめてください。Ollama なら `ollama serve` が動いている必要があります。",
       timeout: "ローカルのモデルは初回の読み込みに時間がかかります。もう一度試してください。",
@@ -871,7 +871,7 @@ export const ja = {
     globalLead: (dir: string) =>
       `AI レビューで何をどう見るかを決めるファイルです。内蔵のものが 1 つあり、${dir} に .md を置くと増やせます。`,
     repositoryElsewhere:
-      "リポジトリの中に置かれた観点は、ここには出しません。リポジトリ一覧を右クリックして「このリポジトリの設定」から確認してください。",
+      "リポジトリに置いてある観点はここには出ません。一覧を右クリックして「このリポジトリの設定」から見てください。",
     empty: "観点のファイルはまだありません。内蔵のものだけを使います。",
 
     // --- 出どころ -----------------------------------------------------
@@ -890,7 +890,7 @@ export const ja = {
       untrusted:
         "このリポジトリの中にあるファイルなので、中身を読んで決めるまで使いません。",
       recheck:
-        "前に決めたときから中身が変わっています。読み直してから、使うかどうかを決めてください。",
+        "決めたあとで中身が変わりました。読み直してから決め直してください。",
     },
     // 同名で押しのけられた。**どちらが効いているのか必ず出す。**
     shadowed: (winner: string) => `同じ名前の「${winner}」のほうを使っています。`,
@@ -912,7 +912,7 @@ export const ja = {
       use: "押すと、これからのレビューでこの観点を使います。",
       // リポジトリ内は「使う」＝「この中身を信頼する」。**そう書く。**
       useRepository:
-        "押すと、いま表示している中身を確かめたものとして、これからのレビューで使います。中身が変わったら、また確認をお願いします。",
+        "押すと、いま出ている中身を確かめたものとして使います。中身が変わったら、また確認をお願いします。",
       stop: "押すと使うのをやめます。",
       stopFileDefault:
         "ファイルの指定で最初から使うことになっています。押すと使うのをやめます。",
@@ -929,7 +929,7 @@ export const ja = {
     // **なぜ既定で使わないのかを最初に書く。** 手間の理由が読めないと、
     // 「とりあえず押す」ボタンになってしまう。
     trustWhy:
-      "リポジトリの中に置かれた観点は、そのリポジトリを作った人が書いたものです。他人のリポジトリを開くこともあるので、中身を読んで決めるまでは使いません。",
+      "リポジトリに置いてある観点は、そのリポジトリを作った人が書いたものです。他人のリポジトリを開くこともあるので、中身を読んで決めるまで使いません。",
   },
 
   /** リポジトリ 1 つぶんの設定（T-21）。**右クリックから開く。** */
@@ -938,15 +938,15 @@ export const ja = {
     openHint: "このリポジトリだけに効く設定です。",
     title: (name: string) => `${name} の設定`,
     skillsLead:
-      "このリポジトリの .gitpeek\\skills\\ に置かれている観点です。使うものを 1 つずつ決めてください。",
+      "このリポジトリの .gitpeek\\skills\\ に置いてある観点です。使うものを 1 つずつ決めてください。",
     noSkills:
-      "このリポジトリには観点のファイルが置かれていません。.gitpeek\\skills\\ に .md を置くとここに出ます。",
+      "観点のファイルはまだありません。.gitpeek\\skills\\ に .md を置くとここに出ます。",
 
     // 既定の接続先（T-23 で覚えるようにしたが、**画面から読めなかった**）。
     // **いまの値を必ず出す**（clone の「既定の保存先」と同じ扱い。CLAUDE.md §6）。
     profile: "AI レビューの既定の接続先",
     profileLead:
-      "このリポジトリでレビューを実行するとき、最初に選ばれる接続先です。実行前パネルで選び直すと、こちらも書き換わります。",
+      "このリポジトリでレビューするとき、最初に選ばれる接続先です。実行前の画面で選び直すと、こちらも変わります。",
     profileNone: "決めていない（毎回選ぶ）",
     profileMissing: "前に選んだ接続先が見つかりません（消したか、名前が変わりました）。",
     profileEmpty: "接続先がまだありません。設定の「AI レビュー」で追加すると選べます。",
@@ -976,7 +976,7 @@ export const ja = {
     noProfiles: "接続先がまだありません。設定で追加すると実行できます。",
     skillsUsed: "使う観点",
     noSkills: "使う観点がありません。",
-    fallbackDefault: "構造化に失敗しました。モデルの出力をそのまま表示しています。",
+    fallbackDefault: "決まった形で返ってこなかったので、モデルの出力をそのまま出しています。",
     offDiffNote: "この差分に無い行を指しています。",
     // 指摘を押すと差分へ飛ぶ（利用者の要望。2026-09-06）。**何が起きるかで書く。**
     jumpHint: "押すとその行を差分に表示します",
@@ -992,12 +992,12 @@ export const ja = {
       noPlan: "レビューの対象を調べています。",
       noProfile: "接続先がまだありません。設定で接続先を追加すると実行できます。",
       alreadyRunning: "いまレビューを実行中です。終わるか中止すると次を始められます。",
-      nothingSelected: "ファイルが 1 つも選ばれていません。1 つ以上チェックしてください。",
+      nothingSelected: "ファイルが 1 つも選ばれていません。チェックを 1 つ以上入れてください。",
       noProfileChosen: "接続先が選ばれていません。上のドロップダウンから選んでください。",
     },
 
     plan: {
-      lead: "この内容でレビューします。外したいファイルはチェックを外してください。",
+      lead: "この内容でレビューします。要らないファイルはチェックを外してください。",
       tokens: (n: number) => `送る量はおよそ ${n.toLocaleString()} トークンです。`,
       counts: (sending: number, skipped: number) =>
         skipped === 0

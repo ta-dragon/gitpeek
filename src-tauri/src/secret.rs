@@ -66,7 +66,7 @@ impl Secrets {
             // **`error` を混ぜない。** 保存に失敗した値が文字列化される経路を作らない。
             .map_err(|error| match error {
                 Error::NoDefaultStore | Error::Invalid(..) => unavailable(&error),
-                _ => "API キーを Windows 資格情報マネージャーへ保存できませんでした。".to_string(),
+                _ => "API キーを Windows の資格情報マネージャーへ預けられませんでした。".to_string(),
             })
     }
 
@@ -79,7 +79,7 @@ impl Secrets {
                 Err(unavailable(&Error::NoDefaultStore))
             }
             Err(_) => {
-                Err("API キーを Windows 資格情報マネージャーから読み出せませんでした。".to_string())
+                Err("API キーを Windows の資格情報マネージャーから読み出せませんでした。".to_string())
             }
         }
     }

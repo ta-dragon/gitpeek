@@ -115,7 +115,7 @@ pub fn commit_detail(
 ) -> Result<CommitDetail, String> {
     let output = exec::run(log, program, Some(path), &["show", "-s", DETAIL_FORMAT, sha])?;
     if !output.ok() {
-        return Err(output.failure("コミットの本文を取得できませんでした"));
+        return Err(output.failure("コミットの中身を読めませんでした"));
     }
 
     // メッセージの文字コードは git が UTF-8 へ寄せる（commit の encoding ヘッダ）。
@@ -138,7 +138,7 @@ pub fn commit_message(
 ) -> Result<String, String> {
     let output = exec::run(log, program, Some(path), &["show", "-s", "--format=%B", sha])?;
     if !output.ok() {
-        return Err(output.failure("コミットメッセージを取得できませんでした"));
+        return Err(output.failure("コミットメッセージを読めませんでした"));
     }
     // 文字コードは git が UTF-8 へ寄せる（commit の encoding ヘッダ）。
     // `%B` は末尾に改行が 1 つ付く。
@@ -153,7 +153,7 @@ pub fn commit_message(
 /// `A...B` を選んだ理由と結び付かない。それ以外はそのまま生の 1 行目を添える。
 fn explain(output: &exec::GitOutput, context: &str) -> String {
     if output.stderr.contains("no merge base") {
-        return "共通の祖先がありません。無関係な履歴どうしなので、マージベース起点では比べられません。".to_string();
+        return "共通の祖先がありません。関係のない履歴どうしなので、分かれたところからは比べられません。".to_string();
     }
     output.failure(context)
 }
@@ -342,7 +342,7 @@ pub fn changed_files(
 
     let output = exec::run(log, program, Some(path), &args)?;
     if !output.ok() {
-        return Err(explain(&output, "変更ファイルの一覧を取得できませんでした"));
+        return Err(explain(&output, "変更ファイルの一覧を読めませんでした"));
     }
 
     // パス名は `core.quotepath=false` により生バイトで出る。UTF-8 として読めない名前は
@@ -646,7 +646,7 @@ pub fn file_diff(
 
     let output = exec::run(log, program, Some(repo), &args)?;
     if !output.ok() {
-        return Err(explain(&output, "差分を取得できませんでした"));
+        return Err(explain(&output, "差分を読めませんでした"));
     }
 
     // **ここで文字コードを判別する**（docs/DESIGN.md §9.1）。`stdout_lossy` は使わない。
