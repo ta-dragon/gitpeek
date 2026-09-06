@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::commandlog::{CommandLogEntry, LogSink};
+use crate::redact::redact;
 
 /// 全 git 呼び出しに固定付与する設定。
 ///
@@ -61,6 +62,13 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub struct GitOutput {
     /// 生バイト列のまま保持する。文字コード判別は呼び出し側の責務（docs/DESIGN.md §9.1）。
     pub stdout: Vec<u8>,
+    /// **`redact` を通してある**（T-24 の点検。CLAUDE.md §4）。
+    ///
+    /// stderr は画面にもログにも出る唯一の経路なので、**組み立てるここで 1 度だけ**
+    /// マスクする。呼び出し側が忘れても平文が漏れない
+    /// （個別に通していた `git/ops.rs` はそのままでよい — 二重に通っても変わらない）。
+    /// マスクが書き換えるのは資格情報らしき部分だけなので、`fatal:` などの
+    /// 目印を見るパースには影響しない。
     pub stderr: String,
     pub exit_code: Option<i32>,
 }
@@ -109,7 +117,7 @@ pub fn run(
 
     match result {
         Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            let stderr = redact(&String::from_utf8_lossy(&output.stderr));
             let exit_code = output.status.code();
             record(log, program, repo, args, exit_code, &stderr, duration_ms);
             Ok(GitOutput {
@@ -186,7 +194,7 @@ pub fn run_streaming(
     let status = child.wait();
     let stderr = stderr_reader
         .join()
-        .map(|buffer| String::from_utf8_lossy(&buffer).into_owned())
+        .map(|buffer| redact(&String::from_utf8_lossy(&buffer)))
         .unwrap_or_default();
     let duration_ms = started.elapsed().as_millis() as u64;
 
@@ -339,7 +347,7 @@ pub fn run_progress(
 
     let status = child.lock().expect("子プロセスの lock").wait();
     let stdout = stdout_reader.join().unwrap_or_default();
-    let stderr = String::from_utf8_lossy(&stderr_bytes).into_owned();
+    let stderr = redact(&String::from_utf8_lossy(&stderr_bytes));
     let duration_ms = started.elapsed().as_millis() as u64;
 
     match (status, read_error) {

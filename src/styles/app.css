@@ -1515,6 +1515,23 @@ body {
   font-size: 12px;
 }
 
+/**
+ * ログの場所の案内（T-24）。**無い場所を案内しない**判断は純関数側
+ * （`lib/crashNotice.ts`）で、ここは見た目だけ。
+ */
+.crash__log {
+  margin: 0 0 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.crash__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* ---------- git コマンドログ ---------- */
 
 .command-log {

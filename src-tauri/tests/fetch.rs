@@ -93,6 +93,42 @@ fn head_of(repo: &Path, name: &str) -> String {
         .to_string()
 }
 
+/// **git が吐いた stderr に平文の資格情報が残らない**（T-24 の点検。CLAUDE.md §4）。
+///
+/// `git/ops.rs` は個別に `redact` を通していたが、`GitOutput.stderr` そのものは
+/// 生のままだった。画面に出る経路（`GitOutput::failure`）とログの経路が
+/// これを読むので、**組み立てるところで 1 度だけ**マスクするように変えた。
+///
+/// **知らないオプションを渡す**のは、git が受け取った文字列をそのまま
+/// stderr へ書き返す数少ない経路だから（`fetch <url>` では git 自身が
+/// URL の資格情報を落としてしまい、**マスクを外しても通ってしまう**）。
+/// 伏せ字になった形まで見ているので、git が書き返さなくなればこのテストは落ちる。
+#[test]
+fn the_stderr_that_comes_back_carries_no_plain_credentials() {
+    let log = log();
+    let secret = "ghp_abcdefghijklmnopqrstuvwxyz012345";
+    let option = format!("--bogus=https://tatsu:{secret}@example.invalid/r.git");
+
+    let output = exec::run(&log, "git", None, &[&option]).expect("git が起動すること");
+
+    assert!(!output.ok(), "知らないオプションなので失敗するはず");
+    assert!(
+        output.stderr.contains("tatsu:***@example.invalid/r.git"),
+        "git が書き返した URL が伏せ字になっていない: {}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains(secret),
+        "stderr に平文のトークンが残っている: {}",
+        output.stderr
+    );
+
+    // コマンドログ側（画面に出るもの）にも残らない。**引数にも入っている。**
+    let recorded = format!("{:?}", log.entries());
+    assert!(recorded.contains("tatsu:***@"), "コマンドログで伏せ字になっていない");
+    assert!(!recorded.contains(secret), "コマンドログに平文が残っている");
+}
+
 /// 上流が動いたあとの fetch で、**増えるものと消えるものが両方起きる**こと。
 #[test]
 fn fetch_adds_and_prunes_remote_refs() {

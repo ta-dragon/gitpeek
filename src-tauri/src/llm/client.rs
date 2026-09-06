@@ -457,6 +457,19 @@ pub fn chat_stream(
     outcome.content = content;
     outcome.raw = truncate(&sanitize(&raw, api_key));
     outcome.elapsed_ms = elapsed_ms(started);
+
+    // **ログにはメタ情報だけ残す**（T-24）。プロンプト・差分・応答本文は書かない —
+    // %APPDATA% に他人のソースが残る。base URL は書き出しの口でマスクされる。
+    log::info!(
+        target: "llm",
+        "chat model={} base={} {}ms {}文字{}{}",
+        profile.model,
+        profile.base_url,
+        outcome.elapsed_ms,
+        outcome.content.chars().count(),
+        if outcome.cancelled { " 中止" } else { "" },
+        if outcome.truncated { " 途中で切れた" } else { "" },
+    );
     Ok(outcome)
 }
 

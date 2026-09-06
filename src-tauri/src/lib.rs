@@ -3,6 +3,7 @@ pub mod encoding;
 pub mod git;
 pub mod graph;
 pub mod llm;
+pub mod logging;
 pub mod model;
 mod redact;
 pub mod secret;
@@ -15,6 +16,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, State};
 
 use commandlog::{CommandLog, CommandLogEntry, EmittingLog};
+use logging::LogStatus;
 use git::detect::GitStatus;
 use encoding::TextEncoding;
 use git::diff::{CommitDetail, DiffOptions, DiffSource, DiffTarget, FileChange, FileDiff};
@@ -92,6 +94,11 @@ pub struct AppState {
     /// fetch / clone と**別に持つ**のは同じ理由。レビューは分単位で走るので、
     /// 途中で fetch を始めても中止ボタンが効かなくならないようにする。
     pub review_cancel: Mutex<Option<git::exec::Cancel>>,
+    /// ログの置き場所と、書けているかどうか（T-24）。
+    ///
+    /// **書けなくてもアプリは止めない**が、黙って落とすと「書いているつもり」に
+    /// なるので、理由を画面へ出せるようにここへ残す（CLAUDE.md §6）。
+    pub log_status: LogStatus,
 }
 
 /// git を検出する。`path` が指定されていればそのフルパスを、無ければ PATH 上の `git` を試す。
@@ -121,6 +128,26 @@ async fn detect_git(
     } else {
         None
     };
+
+    // **git があるかどうかは、後から追うとき最初に見る**（T-24）。
+    // 個々の git 実行は `commandlog.rs` が残すので、ここは判定の結果だけ。
+    if status.usable() {
+        log::info!(
+            target: "app",
+            "git を検出しました: {} {}",
+            status.path,
+            status.version.as_deref().unwrap_or("（版が読めない）")
+        );
+    } else {
+        log::warn!(
+            target: "app",
+            "git を使えません: {} found={} versionOk={} {}",
+            status.path,
+            status.found,
+            status.version_ok,
+            status.error.as_deref().unwrap_or("")
+        );
+    }
 
     Ok(status)
 }
@@ -1339,6 +1366,101 @@ async fn cancel_review(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/* ---------- ログ（T-24。docs/DESIGN.md §13.3）---------- */
+
+/// ログを始める。**書けなくても起動を止めない。**
+///
+/// 順番に意味がある。**掃除 → プラグイン → panic hook → 最初の 1 行**。
+/// hook を先に入れるとログがまだ無く、panic の記録先が標準エラーだけになる。
+fn start_logging(app: &AppHandle, store: &Store) -> LogStatus {
+    let today = chrono::Local::now().date_naive();
+
+    let Ok(paths) = store.paths() else {
+        // データディレクトリすら用意できていない。**この場合は全コマンドが
+        // 理由付きで失敗する**ので、ログが無いこと自体は主因ではない。
+        return LogStatus {
+            dir: String::new(),
+            writing: false,
+            problem: Some("設定の置き場所を用意できなかったため、ログを残せません。".to_string()),
+        };
+    };
+    let dir = paths.logs_dir();
+
+    // **古いものを先に消す**（7 日。DESIGN.md §13.3）。消せなくても続ける。
+    logging::sweep(&dir, today, logging::KEEP_DAYS);
+
+    let mut status = LogStatus {
+        dir: logging::dir_display(&dir),
+        writing: true,
+        problem: None,
+    };
+    if let Err(error) = app.plugin(logging::plugin(&dir, today)) {
+        status.writing = false;
+        status.problem = Some(format!("ログファイルに書けません: {error}"));
+        return status;
+    }
+
+    logging::install_panic_hook(app.clone());
+    log::info!(
+        target: "app",
+        "Givsoner {} を起動しました（設定: {}）",
+        app.package_info().version,
+        paths.root().display()
+    );
+
+    // **設定を読めなかったことも残す**（T-24）。`Store::init` はログより先に
+    // 走るので、ここで結果だけ書き写す（読めていれば何も書かない）。
+    match store.settings() {
+        Ok(payload) => {
+            if let Some(recovery) = payload.recovered {
+                log::warn!(
+                    target: "app",
+                    "settings.json を読めなかったため既定値で起動しました（{}）。元の内容は {} へ退避しました",
+                    recovery.reason,
+                    recovery.backup_path
+                );
+            }
+        }
+        Err(error) => log::warn!(target: "app", "設定を読めません: {error}"),
+    }
+
+    status
+}
+
+/// ログの置き場所と、書けているかどうか（T-24）。
+///
+/// **書けていないことを画面に出す**ために返す（CLAUDE.md §6）。
+#[tauri::command]
+fn log_status(state: State<'_, AppState>) -> LogStatus {
+    state.log_status.clone()
+}
+
+/// ログフォルダを開く。
+///
+/// **capability は広げない。** 開けるのはこのフォルダだけで、フロントから
+/// 任意のパスを渡せる形にしない（`opener:allow-open-path` を足すと、
+/// 画面側から何でも開けるようになる）。
+#[tauri::command]
+fn open_log_folder(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    if state.log_status.dir.is_empty() {
+        return Err("ログの置き場所が決まっていません。".to_string());
+    }
+    app.opener()
+        .open_path(state.log_status.dir.clone(), None::<&str>)
+        .map_err(|error| format!("ログフォルダを開けません: {error}"))
+}
+
+/// フロントで起きた例外をログへ残す（T-24）。
+///
+/// 画面の受け皿（`ErrorBoundary`）は閉じると何も残らない。**Rust 側の記録と
+/// 同じファイルに並ぶ**ほうが後から辿りやすい。マスキングは書き出しの口で通る。
+#[tauri::command]
+fn log_frontend_error(message: String) {
+    log::error!(target: "ui", "{message}");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -1348,6 +1470,7 @@ pub fn run() {
             // 起動時に読んでおくことで、フロントが一度も呼ばなくても
             // settings.json / state.json が生成される。
             let store = Store::init(app.handle());
+            let log_status = start_logging(app.handle(), &store);
             app.manage(AppState {
                 log: Arc::new(CommandLog::default()),
                 git_path: Mutex::new(None),
@@ -1356,6 +1479,7 @@ pub fn run() {
                 fetch_cancel: Mutex::new(None),
                 clone_cancel: Mutex::new(None),
                 review_cancel: Mutex::new(None),
+                log_status,
             });
             Ok(())
         })
@@ -1403,7 +1527,10 @@ pub fn run() {
             list_reviews,
             load_review,
             export_markdown,
-            set_repository_llm_profile
+            set_repository_llm_profile,
+            log_status,
+            open_log_folder,
+            log_frontend_error
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -1820,6 +1947,38 @@ mod tests {
         .unwrap();
         assert_eq!(wrapped["runId"], "r1");
         assert_eq!(wrapped["kind"], "summaryStarted");
+    }
+
+    /// **ログの状態をフロントがそのまま読めること**（T-24）。
+    ///
+    /// 書けていないことを画面に出す経路がこれに乗っている。**形がずれると
+    /// 「書けているつもり」で黙る**ので、両方の状態を固定する。
+    #[test]
+    fn the_log_status_wire_format_matches_what_the_front_end_reads() {
+        use crate::logging::LogStatus;
+
+        let ok = LogStatus {
+            dir: r"C:\Users\tatsu\AppData\Roaming\com.tatsu.givsoner\logs".to_string(),
+            writing: true,
+            problem: None,
+        };
+        let json = serde_json::to_value(&ok).unwrap();
+        assert_eq!(json["writing"], true);
+        assert_eq!(json["problem"], serde_json::Value::Null);
+        assert!(json["dir"].as_str().unwrap().ends_with("logs"));
+
+        let broken = LogStatus {
+            dir: String::new(),
+            writing: false,
+            problem: Some("ログファイルに書けません: 権限がありません".to_string()),
+        };
+        let json = serde_json::to_value(&broken).unwrap();
+        assert_eq!(json["writing"], false);
+        assert_eq!(json["dir"], "");
+        assert!(json["problem"]
+            .as_str()
+            .unwrap()
+            .starts_with("ログファイルに書けません"));
     }
 
     /// **保存した結果をフロントがそのまま読めること**（T-23）。

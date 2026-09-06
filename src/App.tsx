@@ -47,11 +47,15 @@ import { useTheme, type ThemePreference } from "./hooks/useTheme";
 import { ja } from "./i18n/ja";
 import { clearCompare, selectCommit, swapEnds } from "./lib/compareSelection";
 import { findingsFor, newLines, type LineLookup } from "./lib/reviewFindings";
+import { crashSummary, logHint } from "./lib/crashNotice";
 import { defaultSelection, initialProfile } from "./lib/reviewPlan";
 import { selectionForSource, type TargetContext } from "./lib/reviewTarget";
 import {
   appDataDir,
   detectGit,
+  logStatus,
+  onAppPanic,
+  openLogFolder,
   isGitUsable,
   loadCommitMessage,
   MIN_VERSION_FALLBACK,
@@ -63,6 +67,7 @@ import {
   type GitStatus,
   type LlmProfile,
   type LoadPhase,
+  type LogStatus,
   type RefEntry,
   type RepositoryEntry,
   type UiSettings,
@@ -131,6 +136,18 @@ export default function App() {
    * **スクロールさせる合図**だけ。同じブランチを続けて選んでも効くよう連番を添える。
    */
   const [jumpTo, setJumpTo] = useState<{ sha: string; nonce: number } | null>(null);
+  /**
+   * ログの置き場所と、書けているかどうか（T-24）。
+   *
+   * **書けていないことは画面に出す**（CLAUDE.md §6）。黙って落とすと
+   * 「書いているつもり」になる。
+   */
+  const [log, setLog] = useState<LogStatus | null>(null);
+  /**
+   * Rust 側が落ちたことの知らせ（T-24）。**画面は生きているが、以後の操作は
+   * 当てにならない**ので、理由とログの場所を出す（DESIGN.md §13.3）。
+   */
+  const [panic, setPanic] = useState<string | null>(null);
 
   const entries = useCommandLog();
   const settings = useSettings();
@@ -162,6 +179,29 @@ export default function App() {
     void appDataDir()
       .then(setDataDir)
       .catch(() => setDataDir(""));
+  }, []);
+
+  // ログの状態も起動中に変わらない。**読めなくてもアプリは成立する。**
+  useEffect(() => {
+    void logStatus()
+      .then(setLog)
+      .catch(() => setLog(null));
+  }, []);
+
+  // Rust 側の panic を受け取る（T-24）。**購読は 1 回だけ。**
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+
+    void onAppPanic((event) => setPanic(event.message)).then((unlisten) => {
+      if (cancelled) unlisten();
+      else stop = unlisten;
+    });
+
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
   }, []);
 
   // StrictMode の二重実行で git を 2 回起動しないようにする。
@@ -339,6 +379,17 @@ export default function App() {
         <NoticeBar title={repos.error} onDismiss={() => void repositories.refresh()} />
       )}
       {message !== null && <NoticeBar title={message} onDismiss={() => setMessage(null)} />}
+      {/*
+        **ログに書けていないことを黙って隠さない**（T-24）。1 度閉じれば消える。
+        文言の組み立ては純関数（`lib/crashNotice.ts`）。
+      */}
+      {log !== null && !log.writing && (
+        <NoticeBar
+          title={ja.crash.logNotWritingTitle}
+          detail={logHint(log).text}
+          onDismiss={() => setLog({ ...log, writing: true })}
+        />
+      )}
 
       <main className="app__main">
         {status === null ? (
@@ -435,6 +486,41 @@ export default function App() {
       </main>
 
       {logOpen && <CommandLogPanel entries={entries} />}
+
+      {/*
+        Rust 側が落ちたときの知らせ（T-24。DESIGN.md §13.3）。
+        **画面は生きているが、以後の操作は当てにならない。**
+        文言の組み立ては純関数（`lib/crashNotice.ts`）。
+      */}
+      {panic !== null && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label={ja.crash.panicTitle}>
+          <div className="modal__box">
+            <h2 className="modal__title">{ja.crash.panicTitle}</h2>
+            <p className="modal__lead">{ja.crash.panicBody}</p>
+            <p className="modal__note">{ja.crash.panicDetail}</p>
+            <pre className="crash__detail">{crashSummary(panic)}</pre>
+            <p className="crash__log">{logHint(log).text}</p>
+            <div className="modal__actions">
+              {/* **開けないときも消さない。** 押せない形で残す（CLAUDE.md §6）。 */}
+              <button
+                type="button"
+                className="button"
+                disabled={!logHint(log).canOpen}
+                onClick={() => void openLogFolder().catch(() => setMessage(ja.crash.openLogFolderFailed))}
+              >
+                {ja.crash.openLogFolder}
+              </button>
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={() => setPanic(null)}
+              >
+                {ja.crash.close}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* fetch の確認と進行（docs/DESIGN.md §8.3）。**一括のときだけ確認を 1 回。** */}
       {fetching.pending !== null && (

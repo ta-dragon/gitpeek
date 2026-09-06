@@ -902,6 +902,53 @@ export function appDataDir(): Promise<string> {
   return invoke<string>("app_data_dir");
 }
 
+/* ---------- ログ（`src-tauri/src/logging.rs`。T-24）---------- */
+
+/**
+ * ログの置き場所と、書けているかどうか。
+ *
+ * **書けていないことを画面に出す**ために持つ（CLAUDE.md §6）。黙って落とすと
+ * 「書いているつもり」になる。
+ */
+export type LogStatus = {
+  /** ログフォルダ。**空なら場所すら決まっていない。** */
+  dir: string;
+  writing: boolean;
+  /** 書けていない理由。null なら書けている。 */
+  problem: string | null;
+};
+
+export function logStatus(): Promise<LogStatus> {
+  return invoke<LogStatus>("log_status");
+}
+
+/**
+ * ログフォルダを開く。
+ *
+ * **開けるのはログフォルダだけ**（パスは Rust 側が持っており、こちらから渡さない）。
+ */
+export function openLogFolder(): Promise<void> {
+  return invoke<void>("open_log_folder");
+}
+
+/**
+ * フロントで起きた例外をログへ残す。
+ *
+ * 画面の受け皿は閉じると何も残らないので、**Rust 側と同じファイルへ並べる**。
+ */
+export function logFrontendError(message: string): Promise<void> {
+  return invoke<void>("log_frontend_error", { message });
+}
+
+const PANIC_EVENT = "app-panic";
+
+/** Rust 側が落ちたことの知らせ。**本文はマスク済み。** */
+export type PanicEvent = { message: string };
+
+export function onAppPanic(handler: (event: PanicEvent) => void): Promise<UnlistenFn> {
+  return listen<PanicEvent>(PANIC_EVENT, (event) => handler(event.payload));
+}
+
 /* ---------- LLM（`src-tauri/src/llm/client.rs` / `src-tauri/src/secret.rs`）---------- */
 
 /**
