@@ -154,6 +154,13 @@ Release からはそのリンクを張る。公開プロジェクトなので、
 **タグは GitLab 側で作る**（`ref` にコミット SHA を渡す）。手元でタグを打ってから上げると、
 リリースの作成に失敗したときにタグだけが残る。手元へは `git fetch --tags` で持ってくる。
 
+**プロジェクトが公開でも、パッケージレジストリは既定で匿名に開いていない**
+（2026-09-07 に実測。匿名の HEAD が 401 を返した）。**Settings → General → Visibility, project
+features, permissions → Package registry →「Allow anyone to pull from Package Registry」**を
+ON にして初めて、ログインしていない人が zip を落とせる。**既定は OFF。**
+リンクはあるのに落とせないリリースができるので、**スクリプトは公開したあとに匿名で HEAD を
+投げて確かめ**、落とせなければ設定の場所を出す（リリースは作り直さなくてよい）。
+
 **`.ps1` は UTF-8 BOM 付きで保存する。** Windows PowerShell 5.1 は BOM の無い `.ps1` を
 ANSI（この環境では CP932）として読むので、**日本語のコメントが化けて閉じ引用符まで飲み込まれ**、
 `The string is missing the terminator` で落ちる（2026-09-07 に実際に踏んだ）。

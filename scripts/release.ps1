@@ -178,6 +178,11 @@ Step 3 'これから行うこと'
 Note "アップロード PUT  $uploadUrl"
 Note "リリース作成 POST $api/releases"
 Note "タグ $tag は GitLab 側で $($head.Substring(0,8)) に作られます"
+Note ''
+Note '落とす人にログインを求めないためには、プロジェクトの設定で'
+Note '「Allow anyone to pull from Package Registry」が ON である必要があります（既定は OFF）。'
+Note 'Settings → General → Visibility, project features, permissions'
+Note '公開したあとに、このスクリプトが匿名で落とせるか確かめます。'
 
 if ($DryRun) {
     Write-Host ''
@@ -220,9 +225,34 @@ try {
         -Body $bytes -ContentType 'application/json; charset=utf-8' | Out-Null
 } catch { Show-ApiError $_ 'リリースの作成' }
 
+Step 6 'ログインしていない人が落とせるか確かめる'
+# **ここを確かめないと、リンクはあるのに落とせないリリースができる。**
+# 匿名のまま HEAD を投げる（トークンは付けない）。
+$anonymous = $false
+try {
+    Invoke-WebRequest -Uri $downloadUrl -Method Head -UseBasicParsing -TimeoutSec 30 | Out-Null
+    $anonymous = $true
+    Note '落とせます'
+} catch {
+    $code = $null
+    if ($_.Exception.Response) { $code = $_.Exception.Response.StatusCode.value__ }
+    Note "落とせません（HTTP $code）"
+}
+
 Write-Host ''
 Write-Host "GitPeek $Version を公開しました。" -ForegroundColor Green
 Write-Host "  https://gitlab.com/$Project/-/releases/$tag"
+
+if (-not $anonymous) {
+    Write-Host ''
+    Write-Host 'ただし、いまはログインしていない人が zip を落とせません。' -ForegroundColor Yellow
+    Write-Host '次の設定を ON にしてください（既定は OFF です）:' -ForegroundColor Yellow
+    Write-Host "  https://gitlab.com/$Project/edit"
+    Write-Host '  Visibility, project features, permissions → Package registry →'
+    Write-Host '  「Allow anyone to pull from Package Registry」'
+    Write-Host 'リリースを作り直す必要はありません。設定を変えれば同じリンクで落とせるようになります。'
+}
+
 Write-Host ''
 Write-Host '確かめること:' -ForegroundColor Yellow
 Write-Host '  - シークレットウィンドウで上の URL を開き、ログインせずに zip を落とせるか'
