@@ -20,7 +20,8 @@ GitPeek は**ビューワー**である。以下は「未実装」ではなく�
 - stage / unstage / discard / stash の作成・適用（作業ツリーは **read-only** 表示のみ）
 - `--force` 付き checkout、自動 stash、非 fast-forward マージ（`merge` は常に `--ff-only`）
 - shallow clone (`--depth`)、`--single-branch`、clone 時の `--branch`、`--shallow-submodules`
-- **タグ**の作成・削除・リネーム、**ブランチの削除・リネーム**、**ブランチの自動作成**、自動更新、コード署名
+- **タグ**の作成・削除・リネーム、**ブランチの削除・リネーム**、**ブランチの自動作成**、自動更新、
+  コード署名（署名は 2026-09-08 に調べ直して「しない」を維持。DESIGN.md §2.3.4）
 - 外部通信（Gravatar 等）。ネットワークに出るのは git の fetch/clone と LLM API だけ
 
 git に対して書き込むのは **checkout / fetch / merge --ff-only / clone** の 4 つだけ。
