@@ -214,6 +214,10 @@ npm run check:rust  # cargo clippy -D warnings    npm run typecheck   # tsc --no
   29 秒返らない間ページの評価が止まる**（実測。HTML 自体は 33ms で届いている）。`index.html` の受け皿もこの間は
   動けないので、**アプリ側からは手当てできない。** AdGuard のフィルタリング対象から `msedgewebview2.exe`
   または `localhost` を外すこと。
+- **リリースは手元で作って上げる**（`npm run release` → `scripts/release.ps1`。GitLab.com に Windows の
+  共有ランナーが無いため。DESIGN.md §2.3.2）。**トークンは環境変数 `GITLAB_TOKEN` から読むだけ**で、
+  スクリプトにもリポジトリにも置かない。**`.ps1` は UTF-8 BOM 付きで保存する** — Windows PowerShell 5.1 は
+  BOM の無い `.ps1` を CP932 として読み、日本語のコメントが閉じ引用符を飲み込んで構文エラーになる。
 - 配布はポータブル zip のみ（`npm run package:zip`。Tauri の bundler に zip ターゲットは無いので自前で固める）。
   **`tauri.conf.json` の `mainBinaryName` を消さない** — 消すと実体が `gitpeek.exe`（小文字）になるが、Windows は
   大文字小文字を区別しないので **`package:zip` は偶然通り、壊れたことに気付けない**（DESIGN.md §2.3）。

@@ -18,6 +18,10 @@
 <img alt="license: MIT" src="https://img.shields.io/badge/license-MIT-1F6FEB?style=flat-square">
 </p>
 
+<p>
+<a href="https://gitlab.com/tatsunoko7324/gitpeek/-/releases"><img alt="ダウンロード" src="https://img.shields.io/badge/download-Releases-FC6D26?style=for-the-badge&logo=gitlab&logoColor=white"></a>
+</p>
+
 </div>
 
 <!-- スクリーンショットは docs/images/top.png を撮り直してから入れる（作者のメールアドレスと
@@ -27,6 +31,7 @@
 
 ## 目次
 
+- [ダウンロード](#ダウンロード)
 - [GitPeek とは](#gitpeek-とは)
 - [できること](#できること)
 - [何を「しない」と決めたか](#何をしないと決めたか)
@@ -39,6 +44,15 @@
 - [ライセンス](#ライセンス)
 
 ---
+
+## ダウンロード
+
+[**Releases**](https://gitlab.com/tatsunoko7324/gitpeek/-/releases) からポータブル版の zip を落として、
+展開するだけで動きます。インストーラーはありません。各リリースには **SHA-256** を載せてあるので、
+落としたファイルと突き合わせられます。
+
+コード署名はしていないので、初回起動時に SmartScreen の警告が出ます
+（「詳細情報」→「実行」で進めてください）。
 
 ## GitPeek とは
 
@@ -100,8 +114,8 @@ API キーらしき形をマスクしてから記録します。
 
 ### インストール
 
-1. zip を好きな場所に展開する
-2. `GitPeek.exe` を起動する
+1. [Releases](https://gitlab.com/tatsunoko7324/gitpeek/-/releases) から zip を落とす
+2. 好きな場所に展開して `GitPeek.exe` を起動する
 3. 左のサイドバーからリポジトリを登録する
 
 登録の方法は 3 通りです — **フォルダを選ぶ**、**親フォルダをスキャンして一括で見つける**、
@@ -182,6 +196,10 @@ npm run typecheck       tsc --noEmit
 ```
 
 結合テストで使うリポジトリはスクリプトが生成するので、手元の実リポジトリには依存しません。
+
+リリースは手元で作って上げます（`npm run release`）。GitLab.com の共有ランナーに Windows のものが
+無く、Tauri の Windows 向けビルドを Linux で作るのは現実的でないためです。詳しくは
+[`docs/DESIGN.md`](docs/DESIGN.md) §2.3.2 を見てください。
 
 ## 設計ドキュメント
 
