@@ -17,7 +17,7 @@ if errorlevel 1 (
 
 where cargo >nul 2>nul
 if errorlevel 1 (
-  echo [エラー] cargo が見つかりません。Rust 1.85 以上をインストールしてください。
+  echo [エラー] cargo が見つかりません。Rust 1.88 以上をインストールしてください。
   echo         https://rustup.rs/
   goto :error
 )

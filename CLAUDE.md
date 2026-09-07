@@ -218,6 +218,12 @@ npm run check:rust  # cargo clippy -D warnings    npm run typecheck   # tsc --no
   共有ランナーが無いため。DESIGN.md §2.3.2）。**トークンは環境変数 `GITLAB_TOKEN` から読むだけ**で、
   スクリプトにもリポジトリにも置かない。**`.ps1` は UTF-8 BOM 付きで保存する** — Windows PowerShell 5.1 は
   BOM の無い `.ps1` を CP932 として読み、日本語のコメントが閉じ引用符を飲み込んで構文エラーになる。
+- **アイコンを変えたら `npm run tauri icon docs/images/app-icon.png` を実行し、`src-tauri/build.rs` を
+  触ってから起動する**（元画像は 1024×1024 の透過 PNG）。**cargo は `src-tauri/icons/` を入力として
+  見ていない**ので、touch しないと `tauri dev` が「変更なし」と判断し、**古いアイコンの exe がそのまま
+  起動する**（2026-09-08 に踏んだ。icon.ico は新しいのに画面だけ古い、という形で出る）。
+  `package:zip` は先に touch を走らせるので、配布ぶんは気にしなくてよい。**`icons/android` と
+  `icons/ios` は使わないので追跡しない**（`.gitignore` に入れてある）。
 - 配布はポータブル zip のみ（`npm run package:zip`。Tauri の bundler に zip ターゲットは無いので自前で固める）。
   **`tauri.conf.json` の `mainBinaryName` を消さない** — 消すと実体が `gitpeek.exe`（小文字）になるが、Windows は
   大文字小文字を区別しないので **`package:zip` は偶然通り、壊れたことに気付けない**（DESIGN.md §2.3）。
