@@ -20,7 +20,7 @@ use logging::LogStatus;
 use git::detect::GitStatus;
 use encoding::TextEncoding;
 use git::diff::{CommitDetail, DiffOptions, DiffSource, DiffTarget, FileChange, FileDiff};
-use git::ops::FetchOutcome;
+use git::ops::{FetchOutcome, MergeCheck};
 use git::status::{WorkingFile, WorkingTree};
 use git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
 use git::repo::{RepositoryEntry, RepositoryProbe};
@@ -540,43 +540,161 @@ async fn merge_check(
             &Reporting::silent(),
         )?;
 
-        let index = graph::reach::CommitIndex::new(&snapshot.commits);
-        let Some(head) = snapshot.head.sha.as_deref() else {
-            return Ok(MergeCheck::unknown());
-        };
-        Ok(match index.ahead_behind(head, &rev_sha) {
-            Some((ahead, behind)) => MergeCheck {
-                ahead,
-                behind,
-                known: true,
-            },
-            None => MergeCheck::unknown(),
-        })
+        Ok(merge_check_of(&snapshot, &rev_sha))
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
-/// [`merge_check`] の結果。
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MergeCheck {
-    /// HEAD にあって相手に無い数。**0 でないと fast-forward できない。**
-    ahead: u32,
-    /// 相手にあって HEAD に無い数。取り込む件数。
-    behind: u32,
-    /// どちらも読み込んだコミット集合にあるか。false なら判定できない。
-    known: bool,
+/// スナップショットから ahead/behind を数える（docs/DESIGN.md §8.2）。
+///
+/// **判定を書くのはここ 1 か所。** [`merge_check`] コマンドと
+/// 「取ってきて取り込む」（[`fetch_and_merge`]）の両方がここを通る。二重に書くと、
+/// 「確認画面が言ったこと」と「実際に走らせた条件」が食い違う。
+///
+/// `pub` なのは**結合テストから同じ判定を呼ぶため**（`tests/writeops.rs`）。
+/// テストが自前で数えると、判定そのものは一度も試されない。
+pub fn merge_check_of(snapshot: &RepositorySnapshot, rev_sha: &str) -> MergeCheck {
+    // detached は数と無関係に決まる。**判定できないときも落とさない**
+    // （「取り込む先が無い」のか「数えられなかった」のかで文言が変わる）。
+    let detached = snapshot.head.branch.is_none();
+
+    let Some(head) = snapshot.head.sha.as_deref() else {
+        return MergeCheck::unknown(detached);
+    };
+    let index = graph::reach::CommitIndex::new(&snapshot.commits);
+    match index.ahead_behind(head, rev_sha) {
+        Some((ahead, behind)) => MergeCheck {
+            ahead,
+            behind,
+            known: true,
+            detached,
+        },
+        None => MergeCheck::unknown(detached),
+    }
 }
 
-impl MergeCheck {
-    fn unknown() -> Self {
-        Self {
-            ahead: 0,
-            behind: 0,
-            known: false,
-        }
+/// 完全な ref 名から数える（`refs/remotes/origin/main`）。
+///
+/// **fetch のあとは ref の指す先が変わっている**ので、確認画面が持っていた SHA では
+/// なく、取り直したスナップショットで引き直す。名前が見つからなければ「判定できない」
+/// （上流が消えた場合。ここで勝手に別の ref を選ばない）。
+pub fn merge_check_of_ref(snapshot: &RepositorySnapshot, rev: &str) -> MergeCheck {
+    match snapshot.refs.iter().find(|entry| entry.name == rev) {
+        Some(entry) => merge_check_of(snapshot, &entry.target),
+        None => MergeCheck::unknown(snapshot.head.branch.is_none()),
     }
+}
+
+/// 「取ってきて取り込む」の段が変わったことを知らせるイベント名（T-31）。
+///
+/// **中止できるのは fetch の間だけ**なので、取り込みへ移ったことを画面へ伝える
+/// 必要がある。伝えないと、効かない中止ボタンが押せるまま残る。
+const FETCH_MERGE_PHASE_EVENT: &str = "fetch-merge-phase";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchMergePhaseEvent<'a> {
+    repository_id: &'a str,
+    /// いまのところ `merging` だけ。fetch の段はコマンドを呼んだ側が知っている。
+    phase: &'a str,
+}
+
+/// 取ってきて、早送りできるならそのまま取り込む（docs/DESIGN.md §8.6。T-31）。
+///
+/// **`git pull` は呼ばない。** 既存の fetch と `merge --ff-only` を順に呼ぶだけで、
+/// 順番と失敗時の扱いは [`git::ops::fetch_and_merge`] が持つ。ここが渡すのは
+/// アプリ側の材料だけ — 判定（[`guard_for`]）、中止の合図、進捗の送り先、
+/// そして**取り込む前の判定**（スナップショットを取り直して数える）。
+///
+/// **中止は既存の `cancel_fetch` が効く。** ただし取り込みが始まったあとは効かない。
+#[tauri::command]
+async fn fetch_and_merge(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: git::ops::FetchMergeRequest,
+) -> Result<git::ops::FetchMergeOutcome, String> {
+    let repository = state.store.repository(&request.repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let cache = state.snapshots.clone();
+    let handle = app.clone();
+
+    // 中止の合図は fetch と同じスロットを使う。**実行が終わったら必ず外す。**
+    let cancel = git::exec::Cancel::new();
+    if let Ok(mut slot) = state.fetch_cancel.lock() {
+        *slot = Some(cancel.clone());
+    }
+
+    let started = std::time::Instant::now();
+    let running = cancel.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        let sink = EmittingLog::new(&handle, &log);
+
+        // **判定は fetch の前に 1 度。** 通らなければ fetch もしない
+        // （docs/DESIGN.md §8.6）。取ってくる間に汚れた場合は git が取り込みを拒む。
+        let guard = guard_for(&sink, &program, &path);
+
+        let mut on_progress = |progress: git::fetchprogress::FetchProgress| {
+            let _ = handle.emit(
+                FETCH_PROGRESS_EVENT,
+                FetchProgressEvent {
+                    repository_id: &repository.id,
+                    progress,
+                    elapsed_ms: started.elapsed().as_millis() as u64,
+                },
+            );
+        };
+        let mut on_merging = || {
+            let _ = handle.emit(
+                FETCH_MERGE_PHASE_EVENT,
+                FetchMergePhaseEvent {
+                    repository_id: &repository.id,
+                    phase: "merging",
+                },
+            );
+        };
+        let mut check = || {
+            // **ref が動いているので読み直す。** `load_cached` は ref の指紋が
+            // 変わっていれば自分で取り直すので、force は立てない。
+            let snapshot = git::snapshot::load_cached(
+                &sink,
+                &program,
+                &path,
+                &cache,
+                &repository.id,
+                false,
+                &Reporting::silent(),
+            )?;
+            Ok(merge_check_of_ref(&snapshot, &request.rev))
+        };
+
+        git::ops::fetch_and_merge(
+            &sink,
+            &program,
+            &path,
+            &request.rev,
+            &guard,
+            &running,
+            git::ops::FetchMergeHooks {
+                on_progress: &mut on_progress,
+                on_merging: &mut on_merging,
+                check: &mut check,
+            },
+        )
+    })
+    .await
+    .map_err(|error| error.to_string());
+
+    if let Ok(mut slot) = state.fetch_cancel.lock() {
+        *slot = None;
+    }
+
+    outcome?
 }
 
 /// コミット 1 件の本文（docs/DESIGN.md §7.3）。
@@ -1534,6 +1652,7 @@ pub fn run() {
             checkout,
             merge_ff,
             merge_check,
+            fetch_and_merge,
             load_settings,
             save_settings,
             load_ui_state,

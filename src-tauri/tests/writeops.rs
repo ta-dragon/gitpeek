@@ -14,8 +14,8 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use gitpeek_lib::git::exec;
-use gitpeek_lib::git::ops::{self, CheckoutTarget};
+use gitpeek_lib::git::exec::{self, Cancel};
+use gitpeek_lib::git::ops::{self, CheckoutTarget, FetchStatus};
 
 use common::{fixtures, log};
 
@@ -299,4 +299,271 @@ fn failure_details_are_redacted() {
     assert!(!outcome.ok);
     let joined = format!("{} {}", outcome.message, outcome.details.join(" "));
     assert!(!joined.contains("s3cret"), "平文が出ている: {joined}");
+}
+
+// ---------------------------------------------------------------------------
+// 取ってきて取り込む（T-31。docs/DESIGN.md §8.6）
+// ---------------------------------------------------------------------------
+
+/// 上流と手元を**両方**複製し、手元の origin を複製側へ向け直す。
+///
+/// 上流を共有したままにしてはいけない（`tests/fetch.rs` と同じ理由 —
+/// 掴まれたファイルが残ると、次のテストバイナリが fixtures を作り直せない）。
+fn pair(origin_name: &str, client_name: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().expect("一時ディレクトリ");
+    let origin = dir.path().join(origin_name);
+    let client = dir.path().join(client_name);
+    copy_dir(&fixtures().join(origin_name), &origin);
+    copy_dir(&fixtures().join(client_name), &client);
+
+    let url = origin.display().to_string();
+    let output = exec::run(
+        &log(),
+        "git",
+        Some(&client),
+        &["remote", "set-url", "origin", &url],
+    )
+    .expect("remote set-url");
+    assert!(output.ok(), "上流を複製側へ向け直せない: {}", output.stderr);
+
+    (dir, origin, client)
+}
+
+/// `lib.rs` の `guard_for` と同じ材料の集め方。**判定そのものは `preflight` の 1 か所。**
+fn guard_of(repo: &Path) -> ops::WriteGuard {
+    let probe = gitpeek_lib::git::repo::probe(&log(), "git", repo);
+    let unborn = matches!(
+        probe.head,
+        Some(gitpeek_lib::git::repo::HeadState::Unborn { .. })
+    );
+    let tree = if probe.is_bare {
+        None
+    } else {
+        gitpeek_lib::git::status::working_tree(&log(), "git", repo).ok()
+    };
+    ops::preflight(probe.is_bare, unborn, probe.index_lock_present, tree.as_ref())
+}
+
+/// 取ってきて取り込む。返り値の 2 つ目は**「取り込みへ移った」合図が来た回数**。
+///
+/// **判定は `lib.rs` と同じ `merge_check_of_ref` を通す。** テストが自前で数えると、
+/// 実際に使われる判定は一度も試されない（申し送り 10「緑になった理由まで見る」）。
+fn fetch_and_merge(
+    repo: &Path,
+    rev: &str,
+    guard: &ops::WriteGuard,
+) -> (ops::FetchMergeOutcome, usize) {
+    let mut merging = 0usize;
+    let mut progress = |_: gitpeek_lib::git::fetchprogress::FetchProgress| {};
+    let mut on_merging = || merging += 1;
+    let mut check = || {
+        let snapshot = gitpeek_lib::git::snapshot::load(&log(), "git", repo)?;
+        Ok(gitpeek_lib::merge_check_of_ref(&snapshot, rev))
+    };
+
+    let outcome = ops::fetch_and_merge(
+        &log(),
+        "git",
+        repo,
+        rev,
+        guard,
+        &Cancel::new(),
+        ops::FetchMergeHooks {
+            on_progress: &mut progress,
+            on_merging: &mut on_merging,
+            check: &mut check,
+        },
+    )
+    .expect("起動できること");
+
+    // **借用を先に手放してから数える。** `merging` は `on_merging` が握っている。
+    let (_, _, _) = (progress, on_merging, check);
+    (outcome, merging)
+}
+
+/// **これが T-31 の要。** 上流が進んでいるとき、取ってきてそのまま取り込む。
+///
+/// `fetch-client` は clone した**あとで**上流が動いた形なので、
+/// 取ってこないと `origin/main` は動かない（＝取り込むものが無い）。
+#[test]
+fn an_upstream_that_moved_is_fetched_and_then_merged() {
+    let (_dir, _origin, repo) = pair("fetch-origin.git", "fetch-client");
+    let before = head_sha(&repo);
+    assert_eq!(
+        sha_of(&repo, "refs/remotes/origin/main"),
+        before,
+        "前提: 取ってくる前は遅れていない",
+    );
+
+    let (outcome, merging) = fetch_and_merge(&repo, "refs/remotes/origin/main", &guard_of(&repo));
+
+    let fetched = outcome.fetch.expect("fetch まで進むこと");
+    assert_eq!(fetched.status, FetchStatus::Success, "{fetched:#?}");
+
+    let check = outcome.check.expect("取り込む前に判定を通すこと");
+    assert_eq!(
+        (check.ahead, check.behind, check.known),
+        (0, 1, true),
+        "{check:?}"
+    );
+
+    let merged = outcome.merge.expect("取り込みまで進むこと");
+    assert!(merged.ok, "取り込めない: {}", merged.message);
+    assert_eq!(merging, 1, "取り込みへ移る合図を 1 度だけ出すこと");
+
+    assert_ne!(head_sha(&repo), before, "HEAD が動いていない");
+    assert_eq!(
+        head_sha(&repo),
+        sha_of(&repo, "refs/remotes/origin/main"),
+        "上流の先端に並んでいない",
+    );
+    assert_eq!(
+        head_branch(&repo).as_deref(),
+        Some("main"),
+        "ブランチから外れてはいけない",
+    );
+    // **勝手にローカルブランチを作らない**（CLAUDE.md §1）。
+    // 取ってくると `origin/feature` が増えるので、DWIM を踏むならここに出る。
+    assert_eq!(local_branches(&repo), ["main"], "ローカルブランチが増えた");
+}
+
+/// **分岐していたら取り込まない。** 取ってくるところまでは進み、
+/// 判定の結果（ahead / behind）をそのまま返す（画面はこれを読んで理由を出す）。
+#[test]
+fn a_diverged_branch_is_fetched_but_not_merged() {
+    let (_dir, _origin, repo) = pair("upstream.git", "diverged");
+    let before = head_sha(&repo);
+    let branches = local_branches(&repo);
+
+    let (outcome, merging) = fetch_and_merge(&repo, "refs/remotes/origin/main", &guard_of(&repo));
+
+    assert_eq!(
+        outcome.fetch.expect("fetch は走ること").status,
+        FetchStatus::Success,
+    );
+    let check = outcome.check.expect("判定を通すこと");
+    assert_eq!(
+        (check.ahead, check.behind, check.known),
+        (2, 3, true),
+        "{check:?}"
+    );
+    assert!(!check.can_fast_forward(), "分岐しているのに通してしまう");
+
+    assert!(
+        outcome.merge.is_none(),
+        "取り込んではいけない: {:#?}",
+        outcome.merge
+    );
+    assert_eq!(merging, 0, "取り込みへ移ってはいけない");
+    assert_eq!(head_sha(&repo), before, "HEAD が動いてはいけない");
+    assert_eq!(local_branches(&repo), branches, "ローカルブランチが増えた");
+}
+
+/// **判定が通らなければ fetch もしない**（docs/DESIGN.md §8.6）。
+///
+/// 「走らなかった」ことを `refused` だけで見ると、**fetch は走っていたのに
+/// 緑になる**。`origin/main` が動いていないことで、git 自体が起きていないことを見る。
+#[test]
+fn a_dirty_repository_is_refused_before_the_fetch_runs() {
+    let (_dir, _origin, repo) = pair("fetch-origin.git", "fetch-client");
+    std::fs::write(repo.join("a.txt"), "手を入れた\n").expect("汚す");
+
+    let before = head_sha(&repo);
+    let remote_before = sha_of(&repo, "refs/remotes/origin/main");
+
+    let guard = guard_of(&repo);
+    assert!(!guard.allowed(), "前提: 汚れていること");
+
+    let (outcome, merging) = fetch_and_merge(&repo, "refs/remotes/origin/main", &guard);
+
+    assert!(outcome.fetch.is_none(), "fetch まで走ってしまった");
+    assert!(outcome.check.is_none());
+    assert!(outcome.merge.is_none());
+    assert_eq!(merging, 0);
+    let refused = outcome.refused.expect("止めた理由を返すこと");
+    assert!(refused.blockers.contains(&ops::Blocker::Dirty), "{refused:?}");
+
+    assert_eq!(head_sha(&repo), before, "HEAD が動いてはいけない");
+    assert_eq!(
+        sha_of(&repo, "refs/remotes/origin/main"),
+        remote_before,
+        "リモート追跡 ref が動いている＝fetch が走っている",
+    );
+}
+
+/// **上流がタグを付け替えていても取り込みへ進む**（`FetchStatus::Partial`。DESIGN.md §8.6）。
+///
+/// ブランチは取り込めており、タグは早送りの可否に関係しない。ここで止めると、
+/// タグを手で直すまでこの操作が使えなくなる。
+#[test]
+fn a_retagged_upstream_is_partial_but_still_merges() {
+    let (_dir, origin, repo) = pair("fetch-tag-origin.git", "fetch-tag-client");
+
+    // 生成時の上流は**タグだけ**を付け替えている。ブランチも進めて、
+    // 「タグは弾かれるが main は進む」形にする。**テストからは git を呼んでよい。**
+    let output = exec::run(
+        &log(),
+        "git",
+        Some(&origin),
+        &["update-ref", "refs/heads/main", "refs/tags/v1"],
+    )
+    .expect("update-ref");
+    assert!(output.ok(), "{}", output.stderr);
+
+    let before = head_sha(&repo);
+    let (outcome, merging) = fetch_and_merge(&repo, "refs/remotes/origin/main", &guard_of(&repo));
+
+    let fetched = outcome.fetch.expect("fetch まで進むこと");
+    assert_eq!(fetched.status, FetchStatus::Partial, "{fetched:#?}");
+
+    let merged = outcome.merge.expect("一部でも取り込みへ進むこと");
+    assert!(merged.ok, "取り込めない: {}", merged.message);
+    assert_eq!(merging, 1);
+    assert_ne!(head_sha(&repo), before, "HEAD が動いていない");
+    assert_eq!(head_branch(&repo).as_deref(), Some("main"));
+}
+
+/// 取り込むものが無いときは**走らせない。** git は exit 0 で何もしないが、
+/// 「取り込みました」と報告すると、実際に何か起きたのか読めなくなる。
+#[test]
+fn nothing_to_merge_does_not_run_the_merge() {
+    let (_dir, _origin, repo) = pair("ff-origin.git", "ff-client");
+    // `ff-client` は生成時に fetch 済みで、上流はもう動かない。先に並べてしまう。
+    let merged = ops::merge_ff(&log(), "git", &repo, "refs/remotes/origin/main").expect("merge");
+    assert!(merged.ok, "{}", merged.message);
+    let before = head_sha(&repo);
+
+    let (outcome, merging) = fetch_and_merge(&repo, "refs/remotes/origin/main", &guard_of(&repo));
+
+    let check = outcome.check.expect("判定を通すこと");
+    assert_eq!((check.ahead, check.behind), (0, 0), "{check:?}");
+    assert!(outcome.merge.is_none(), "走らせてはいけない");
+    assert_eq!(merging, 0);
+    assert_eq!(head_sha(&repo), before);
+}
+
+/// **detached では取り込む先が無い。** 判定が `detached` を落とすと、
+/// 画面は「取り込むものがありません」という見当違いの理由を出す。
+#[test]
+fn a_detached_head_is_reported_as_detached() {
+    let (_dir, _origin, repo) = pair("fetch-origin.git", "fetch-client");
+    let outcome = ops::checkout(
+        &log(),
+        "git",
+        &repo,
+        &CheckoutTarget::Detach {
+            rev: "HEAD".to_string(),
+        },
+    )
+    .expect("checkout");
+    assert!(outcome.ok, "{}", outcome.message);
+
+    let before = head_sha(&repo);
+    let (outcome, merging) = fetch_and_merge(&repo, "refs/remotes/origin/main", &guard_of(&repo));
+
+    let check = outcome.check.expect("判定を通すこと");
+    assert!(check.detached, "detached を落としている: {check:?}");
+    assert!(outcome.merge.is_none());
+    assert_eq!(merging, 0);
+    assert_eq!(head_sha(&repo), before);
 }

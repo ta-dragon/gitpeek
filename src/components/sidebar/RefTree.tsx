@@ -19,6 +19,7 @@ import {
   type RefGroup,
 } from "../../lib/refTree";
 import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
+import { fetchMergeItem } from "../common/refMenu";
 import { RefTreeNodeView, type NodeCallbacks } from "./RefTreeNode";
 
 type Props = {
@@ -37,6 +38,8 @@ type Props = {
   onCheckout: (entry: RefEntry) => void;
   /** 現在のブランチへ FF マージする確認を出す（T-18。docs/DESIGN.md §8.2）。 */
   onMerge: (entry: RefEntry) => void;
+  /** 取ってきてから取り込む確認を出す（T-31。docs/DESIGN.md §8.6）。 */
+  onFetchMerge: (entry: RefEntry) => void;
   /** コピーの結果など、短い通知を出す。 */
   onNotice: (message: string) => void;
 };
@@ -52,6 +55,7 @@ export function RefTree({
   onJump,
   onCheckout,
   onMerge,
+  onFetchMerge,
   onNotice,
 }: Props) {
   const [filter, setFilter] = useState("");
@@ -176,6 +180,7 @@ export function RefTree({
             onVisibleRefsChange,
             onCheckout,
             onMerge,
+            onFetchMerge,
           })}
         />
       )}
@@ -276,6 +281,7 @@ function menuItems(
     onVisibleRefsChange: (next: VisibleRefs) => void;
     onCheckout: (entry: RefEntry) => void;
     onMerge: (entry: RefEntry) => void;
+    onFetchMerge: (entry: RefEntry) => void;
   },
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
@@ -293,6 +299,8 @@ function menuItems(
       title: ja.refTree.mergeHint,
       onSelect: () => actions.onMerge(entry),
     });
+    // 取ってきてから取り込む（T-31）。**押せなくても消さない**（CLAUDE.md §6）。
+    items.push(fetchMergeItem(entry, headBranch, actions.onFetchMerge));
     items.push({
       label: ja.refTree.onlyThis,
       onSelect: () => actions.onVisibleRefsChange(onlyVisible(branchNames(refs), [entry.name])),

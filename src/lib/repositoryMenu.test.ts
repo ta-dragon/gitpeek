@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { RepositoryEntry, RepositoryProbe } from "./ipc";
-import { canFetch, canReveal } from "./repositoryMenu";
+import { canFetch, canFetchMerge, canReveal } from "./repositoryMenu";
 
 function probe(overrides: Partial<RepositoryProbe> = {}): RepositoryProbe {
   return {
@@ -84,5 +84,43 @@ describe("canFetch", () => {
 
   it("probe が取れていないリポジトリは fetch できない", () => {
     expect(canFetch([entry({ probe: null })], "r1", false).enabled).toBe(false);
+  });
+});
+
+/**
+ * 取ってきて取り込む（T-31。docs/DESIGN.md §8.6）。
+ *
+ * **見るのは「取ってきても変わらないこと」だけ。** ahead / behind をここで見ると、
+ * いま分岐しているだけの場面で押せなくなる（取ってくれば解けることがある）。
+ */
+describe("canFetchMerge", () => {
+  it("リモート追跡ブランチなら押せる", () => {
+    expect(canFetchMerge("remoteBranch", "main")).toEqual({ enabled: true, why: null });
+  });
+
+  it("detached では取り込む先が無い", () => {
+    expect(canFetchMerge("remoteBranch", null)).toEqual({ enabled: false, why: "detached" });
+  });
+
+  /** 手元にしかないブランチは、取ってきても指す先が動かない。 */
+  it("ローカルブランチには取ってくる先が無い", () => {
+    expect(canFetchMerge("localBranch", "main")).toEqual({
+      enabled: false,
+      why: "localBranch",
+    });
+  });
+
+  /** タグはそもそもメニューに出さないが、渡されても押せないこと。 */
+  it("タグは押せない", () => {
+    expect(canFetchMerge("tag", "main").enabled).toBe(false);
+  });
+
+  /**
+   * **detached の判定を先に出す。** 逆にすると、detached で
+   * ローカルブランチを右クリックしたときに「取ってくる先が無い」とだけ出て、
+   * ブランチへ切り替えれば済む話だと読めない。
+   */
+  it("detached とローカルブランチが重なったら detached を言う", () => {
+    expect(canFetchMerge("localBranch", null).why).toBe("detached");
   });
 });

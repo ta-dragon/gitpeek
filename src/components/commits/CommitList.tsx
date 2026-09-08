@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
+import { fetchMergeItem } from "../common/refMenu";
 import { CommitGraph } from "../graph/CommitGraph";
 import type { WorkingSummary } from "../../lib/workingTree";
 import { WorkingTreeRow } from "./WorkingTreeRow";
@@ -85,6 +86,8 @@ type Props = {
   onCheckoutRef: (entry: RefEntry) => void;
   /** 同じく、現在のブランチへ取り込む確認を出す。 */
   onMergeRef: (entry: RefEntry) => void;
+  /** 取ってきてから取り込む確認を出す（T-31。docs/DESIGN.md §8.6）。 */
+  onFetchMergeRef: (entry: RefEntry) => void;
   /** 短い通知（コピーの結果）。 */
   onNotice: (message: string) => void;
   onColumnsChange: (next: ColumnWidths) => void;
@@ -108,6 +111,7 @@ export function CommitList({
   onCopyMessage,
   onCheckoutRef,
   onMergeRef,
+  onFetchMergeRef,
   onNotice,
   onColumnsChange,
   onOrderChange,
@@ -459,6 +463,7 @@ export function CommitList({
           items={chipMenuItems(chipMenu.entry, chipMenu.sha, head.branch, {
             onCheckoutRef,
             onMergeRef,
+            onFetchMergeRef,
             onCheckoutCommit,
           })}
           onClose={() => setChipMenu(null)}
@@ -485,6 +490,7 @@ function chipMenuItems(
   actions: {
     onCheckoutRef: (entry: RefEntry) => void;
     onMergeRef: (entry: RefEntry) => void;
+    onFetchMergeRef: (entry: RefEntry) => void;
     onCheckoutCommit: (sha: string) => void;
   },
 ): ContextMenuItem[] {
@@ -505,6 +511,8 @@ function chipMenuItems(
       title: ja.refTree.mergeHint,
       onSelect: () => actions.onMergeRef(entry),
     });
+    // **ref ツリーと同じ項目を出す。** 片方だけにあると、どこから辿れるのか読めない。
+    items.push(fetchMergeItem(entry, headBranch, actions.onFetchMergeRef));
   }
 
   items.push({

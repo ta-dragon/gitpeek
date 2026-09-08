@@ -9,7 +9,12 @@
  * ローカルブランチは短い名前、それ以外は完全な ref 名 ＋ `--detach`。
  * ここで取り違えると、git が**ローカル追跡ブランチを勝手に作る**（CLAUDE.md §1 違反）。
  */
-import type { CheckoutTarget, RefEntry } from "./ipc";
+import type {
+  CheckoutTarget,
+  FetchMergeOutcome,
+  FetchStatus,
+  RefEntry,
+} from "./ipc";
 
 /** 確認画面に並べる 1 つの選択肢。 */
 export type CheckoutChoice = {
@@ -111,7 +116,10 @@ export function checkoutCommit(sha: string): CheckoutTarget {
  */
 export type MergeVerdict =
   | { can: true; behind: number }
-  | { can: false; why: "detached" | "unknown" | "ahead" | "upToDate" };
+  | { can: false; why: MergeBlockReason };
+
+/** 取り込めない理由。**文言は `i18n/ja.ts`**（CLAUDE.md §6）。 */
+export type MergeBlockReason = "detached" | "unknown" | "ahead" | "upToDate";
 
 export function mergeVerdict(
   check: { ahead: number; behind: number; known: boolean },
@@ -123,4 +131,47 @@ export function mergeVerdict(
   if (check.ahead > 0) return { can: false, why: "ahead" };
   if (check.behind === 0) return { can: false, why: "upToDate" };
   return { can: true, behind: check.behind };
+}
+
+/**
+ * 「取ってきて取り込む」の結果を**どの段で止まったか**に畳む（T-31。DESIGN.md §8.6）。
+ *
+ * 結果は 4 つの `null` になりうるフィールドで届くので、そのまま `.tsx` で
+ * 場合分けすると判定にテストが 1 つも当たらない（CLAUDE.md §8）。文言は返さない —
+ * 種別だけ返し、文字列は `i18n/ja.ts` が持つ（CLAUDE.md §6）。
+ *
+ * **取り込まなかった理由は `mergeVerdict` を使い回す。** 確認画面と結果画面で
+ * 別の言い方をすると、同じ状態が 2 通りに読める。
+ */
+export type FetchMergeStage =
+  /** 判定が通らず、**fetch もしていない。** */
+  | { stage: "refused" }
+  /** 取ってくるところで止まった（失敗 / 中止）。**取り込んでいない。** */
+  | { stage: "fetchStopped"; status: FetchStatus }
+  /** 取ってきたが、取り込めなかった。 */
+  | { stage: "notMerged"; why: MergeBlockReason }
+  /** 取り込みを走らせた。 */
+  | { stage: "merged"; ok: boolean };
+
+export function fetchMergeStage(outcome: FetchMergeOutcome): FetchMergeStage {
+  if (outcome.refused !== null || outcome.fetch === null) return { stage: "refused" };
+
+  // **中止と失敗は「取り込まなかった」だけでなく「取ってこられなかった」。**
+  // ここを一緒にすると、fetch が失敗したのに「取り込むものがありません」と出る。
+  if (outcome.fetch.status === "failed" || outcome.fetch.status === "cancelled") {
+    return { stage: "fetchStopped", status: outcome.fetch.status };
+  }
+
+  if (outcome.merge !== null) return { stage: "merged", ok: outcome.merge.ok };
+
+  // 判定が無いのは Rust 側が形を変えたときだけ。**握り潰さず「判定できない」に寄せる。**
+  if (outcome.check === null) return { stage: "notMerged", why: "unknown" };
+
+  const verdict = mergeVerdict(outcome.check, outcome.check.detached);
+  return { stage: "notMerged", why: verdict.can ? "unknown" : verdict.why };
+}
+
+/** 結果に添える生の行。**fetch の分と取り込みの分を落とさずに繋ぐ。** */
+export function fetchMergeDetails(outcome: FetchMergeOutcome): string[] {
+  return [...(outcome.fetch?.lines ?? []), ...(outcome.merge?.details ?? [])];
 }

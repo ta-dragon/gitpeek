@@ -24,7 +24,12 @@ import {
 } from "./lib/workingTree";
 import { CommandPalette } from "./components/common/CommandPalette";
 import { FetchConfirm, FetchDialog } from "./components/common/ProgressDialog";
-import { WriteOpsDialog, WriteOpsResult } from "./components/common/WriteOpsDialog";
+import {
+  FetchMergeProgress,
+  FetchMergeResult,
+  WriteOpsDialog,
+  WriteOpsResult,
+} from "./components/common/WriteOpsDialog";
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
 import { SplitPane } from "./components/common/SplitPane";
@@ -455,6 +460,7 @@ export default function App() {
                       onJump={revealCommit}
                       onCheckout={writing.askCheckout}
                       onMerge={writing.askMerge}
+                      onFetchMerge={writing.askFetchMerge}
                       onNotice={setMessage}
                     />
                   )
@@ -489,6 +495,7 @@ export default function App() {
                   }
                   onCheckoutRef={writing.askCheckout}
                   onMergeRef={writing.askMerge}
+                  onFetchMergeRef={writing.askFetchMerge}
                   onNotice={setMessage}
                 />
               )
@@ -613,11 +620,27 @@ export default function App() {
           request={writing.request}
           onCheckout={writing.doCheckout}
           onMerge={writing.doMerge}
+          onFetchMerge={writing.doFetchMerge}
           onCancel={writing.dismiss}
         />
       )}
 
-      {(writing.busy || writing.outcome !== null) && (
+      {/* 取ってきて取り込む（T-31。docs/DESIGN.md §8.6）。**進行と結果は形が違う。**
+          中止できるのは取ってくる間だけで、それは `phase` が持っている。 */}
+      {writing.phase !== null && (
+        <FetchMergeProgress
+          phase={writing.phase}
+          progress={writing.progress}
+          cancelling={writing.cancelling}
+          onCancel={writing.cancel}
+        />
+      )}
+
+      {writing.fetchMerge !== null && (
+        <FetchMergeResult outcome={writing.fetchMerge} onClose={writing.dismiss} />
+      )}
+
+      {((writing.busy && writing.phase === null) || writing.outcome !== null) && (
         <WriteOpsResult
           outcome={writing.outcome ?? EMPTY_OUTCOME}
           busy={writing.busy}
@@ -655,6 +678,7 @@ function RefTreePanel({
   onJump,
   onCheckout,
   onMerge,
+  onFetchMerge,
   onNotice,
 }: {
   entry: RepositoryEntry;
@@ -662,6 +686,13 @@ function RefTreePanel({
   /** checkout の確認。**選択肢を決めるのは `lib/writeOps.ts`**（純関数）。 */
   onCheckout: (subject: CheckoutSubject, choices: CheckoutChoice[]) => void;
   onMerge: (rev: string, revLabel: string, revSha: string, branch: string | null) => void;
+  /** 取ってきて取り込む確認（T-31。docs/DESIGN.md §8.6）。**渡す形は取り込みと同じ。** */
+  onFetchMerge: (
+    rev: string,
+    revLabel: string,
+    revSha: string,
+    branch: string | null,
+  ) => void;
   onNotice: (message: string) => void;
 }) {
   const snapshot = useSnapshot();
@@ -689,6 +720,7 @@ function RefTreePanel({
       onJump={onJump}
       onCheckout={(target) => askCheckoutRef(target, data.refs, onCheckout)}
       onMerge={(target) => askMergeRef(target, data.head.branch, onMerge)}
+      onFetchMerge={(target) => askMergeRef(target, data.head.branch, onFetchMerge)}
       onNotice={onNotice}
     />
   );
@@ -707,7 +739,12 @@ export function askCheckoutRef(
   ask({ kind: SUBJECT_KIND[entry.kind], name: entry.shortName }, checkoutChoices(entry, refs));
 }
 
-/** ref を FF マージの確認へ渡す。**git へ渡すのは完全な ref 名。** */
+/**
+ * ref を「取り込む」／「取ってきて取り込む」の確認へ渡す。**git へ渡すのは完全な ref 名。**
+ *
+ * **2 つの動線で同じものを使う**（T-31）。渡す形が違うと、片方だけ SHA を渡して
+ * 判定が通らない、といった食い違いが起きる。
+ */
 export function askMergeRef(
   entry: RefEntry,
   headBranch: string | null,
@@ -739,6 +776,7 @@ function RepositoryPanel({
   onCheckoutCommit,
   onCheckoutRef,
   onMergeRef,
+  onFetchMergeRef,
   onNotice,
 }: {
   entry: RepositoryEntry | null;
@@ -749,6 +787,13 @@ function RepositoryPanel({
   onCheckoutCommit: (sha: string) => void;
   onCheckoutRef: (subject: CheckoutSubject, choices: CheckoutChoice[]) => void;
   onMergeRef: (rev: string, revLabel: string, revSha: string, branch: string | null) => void;
+  /** 取ってきて取り込む確認（T-31。docs/DESIGN.md §8.6）。**渡す形は取り込みと同じ。** */
+  onFetchMergeRef: (
+    rev: string,
+    revLabel: string,
+    revSha: string,
+    branch: string | null,
+  ) => void;
   onNotice: (message: string) => void;
 }) {
   const snapshot = useSnapshot();
@@ -805,6 +850,7 @@ function RepositoryPanel({
       onCheckoutCommit={onCheckoutCommit}
       onCheckoutRef={onCheckoutRef}
       onMergeRef={onMergeRef}
+      onFetchMergeRef={onFetchMergeRef}
       onNotice={onNotice}
     />
   );
@@ -832,6 +878,7 @@ function CommitWorkspace({
   onCheckoutCommit,
   onCheckoutRef,
   onMergeRef,
+  onFetchMergeRef,
   onNotice,
 }: {
   entry: RepositoryEntry;
@@ -850,6 +897,12 @@ function CommitWorkspace({
   /** ref チップの右クリックから（T-18）。**ref ツリーと同じ翻訳を通す。** */
   onCheckoutRef: (subject: CheckoutSubject, choices: CheckoutChoice[]) => void;
   onMergeRef: (rev: string, revLabel: string, revSha: string, branch: string | null) => void;
+  onFetchMergeRef: (
+    rev: string,
+    revLabel: string,
+    revSha: string,
+    branch: string | null,
+  ) => void;
   onNotice: (message: string) => void;
 }) {
   const { state: uiState } = useUiState();
@@ -1214,6 +1267,9 @@ function CommitWorkspace({
               onCopyMessage={(sha) => void copyMessage(sha)}
               onCheckoutRef={(entry) => askCheckoutRef(entry, data.refs, onCheckoutRef)}
               onMergeRef={(entry) => askMergeRef(entry, data.head.branch, onMergeRef)}
+              onFetchMergeRef={(entry) =>
+                askMergeRef(entry, data.head.branch, onFetchMergeRef)
+              }
               onNotice={onNotice}
               onColumnsChange={setColumns}
               onOrderChange={(next) => void snapshots.setOrder(next)}

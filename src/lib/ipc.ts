@@ -399,11 +399,59 @@ export type MergeCheck = {
   behind: number;
   /** どちらも読み込んだコミット集合にあるか。false なら判定できない。 */
   known: boolean;
+  /** HEAD がブランチから外れている。**取り込む先が無い。** */
+  detached: boolean;
 };
 
 export function mergeCheck(repositoryId: string, revSha: string): Promise<MergeCheck> {
   return invoke<MergeCheck>("merge_check", { repositoryId, revSha });
 }
+
+/* ---------- 取ってきて取り込む（T-31。`src-tauri/src/git/ops.rs`）---------- */
+
+/**
+ * 「取ってきて取り込む」の依頼。**Rust 側の `git::ops::FetchMergeRequest` と同じ形。**
+ *
+ * `rev` は**完全な ref 名**（`refs/remotes/origin/main`）。fetch のあとに指す先が
+ * 変わるので、SHA ではなく名前で渡す（Rust 側が取り直したグラフで引き直す）。
+ */
+export type FetchMergeRequest = {
+  repositoryId: string;
+  rev: string;
+};
+
+/**
+ * 「取ってきて取り込む」の結果。**走らなかった段は `null` で届く。**
+ *
+ * どこで止まったかは `lib/writeOps.ts` の `fetchMergeStage` が組み立てる
+ * （判定を `.tsx` に書くとテストが 1 つも当たらない）。
+ */
+export type FetchMergeOutcome = {
+  /** 判定で止めたときだけ `null`（**fetch も走っていない**）。 */
+  fetch: FetchOutcome | null;
+  /** 取り込む前に通した判定。fetch まで進んだときだけ入る。 */
+  check: MergeCheck | null;
+  /** 取り込みの結果。走らせなかったときは `null`。 */
+  merge: WriteOutcome | null;
+  /** 判定が通らなかったときの内訳。 */
+  refused: WriteGuard | null;
+};
+
+/**
+ * 取ってきて、早送りできるならそのまま取り込む（`fetch` → `merge --ff-only`）。
+ *
+ * **`git pull` は呼ばない**（docs/DESIGN.md §8.6）。順番と失敗時の扱いは Rust 側にある。
+ * **中止は `cancelFetch()` が効く。ただし取り込みが始まったら止まらない。**
+ */
+export function fetchAndMerge(request: FetchMergeRequest): Promise<FetchMergeOutcome> {
+  return invoke<FetchMergeOutcome>("fetch_and_merge", { request });
+}
+
+/** `fetch-merge-phase` イベントの中身。**取り込みへ移った合図。** */
+export type FetchMergePhaseEvent = {
+  repositoryId: string;
+  phase: "merging";
+};
 
 /* ---------- レーン割り当て（`src-tauri/src/graph/lane.rs`）---------- */
 
@@ -1372,6 +1420,20 @@ export function onFetchProgress(
   handler: (progress: FetchProgress) => void,
 ): Promise<UnlistenFn> {
   return listen<FetchProgress>(FETCH_PROGRESS_EVENT, (event) => handler(event.payload));
+}
+
+const FETCH_MERGE_PHASE_EVENT = "fetch-merge-phase";
+
+/**
+ * 「取ってきて取り込む」が取り込みへ移ったことを受け取る（T-31）。
+ *
+ * **これが来たら中止ボタンを閉じる。** `merge --ff-only` は止められないので、
+ * 押せる中止ボタンを残すと「押したのに止まらない」ことになる。
+ */
+export function onFetchMergePhase(
+  handler: (event: FetchMergePhaseEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<FetchMergePhaseEvent>(FETCH_MERGE_PHASE_EVENT, (event) => handler(event.payload));
 }
 
 const CLONE_PROGRESS_EVENT = "clone-progress";

@@ -9,20 +9,35 @@
  * 「いま押せない理由」なので、分けて置くと読み落とす。
  */
 import { ja } from "../../i18n/ja";
-import type { Blocker, CheckoutTarget, WriteGuard } from "../../lib/ipc";
-import { mergeVerdict } from "../../lib/writeOps";
-import type { WriteRequest } from "../../hooks/useWriteOps";
+import type {
+  Blocker,
+  CheckoutTarget,
+  FetchMergeOutcome,
+  FetchProgress,
+  WriteGuard,
+} from "../../lib/ipc";
+import {
+  fetchMergeDetails,
+  fetchMergeStage,
+  mergeVerdict,
+  type MergeBlockReason,
+} from "../../lib/writeOps";
+import type { FetchMergePhase, WriteRequest } from "../../hooks/useWriteOps";
 import { ConfirmDialog, ResultDialog, type ConfirmAction } from "./ConfirmDialog";
+import { LoadProgress } from "./LoadProgress";
 
 export function WriteOpsDialog({
   request,
   onCheckout,
   onMerge,
+  onFetchMerge,
   onCancel,
 }: {
   request: WriteRequest;
   onCheckout: (target: CheckoutTarget) => void;
   onMerge: (rev: string) => void;
+  /** 取ってきて取り込む（T-31）。**受け取るのは完全な ref 名。** */
+  onFetchMerge: (rev: string) => void;
   onCancel: () => void;
 }) {
   const blockers = request.guard.blockers.map((blocker) =>
@@ -60,6 +75,44 @@ export function WriteOpsDialog({
         blockers={blockers}
         notes={notes}
         actions={actions}
+        onCancel={onCancel}
+      />
+    );
+  }
+
+  // 取ってきて取り込む（T-31。docs/DESIGN.md §8.6）。
+  //
+  // **取り込めるかどうかはここで決めない。** 取ってくると変わるので、
+  // いまの値は注記として出すだけ。止める理由に入れるのは、
+  // **取ってきても変わらないもの**（判定と detached）だけ。
+  if (request.op === "fetchMerge") {
+    const reasons =
+      request.branch === null ? [...blockers, ja.writeOps.mergeDetached] : blockers;
+
+    const notes: string[] = [
+      request.check.known
+        ? ja.writeOps.fetchMergeNow(request.check.ahead, request.check.behind)
+        : ja.writeOps.fetchMergeNowUnknown,
+      ja.writeOps.fetchMergeCancelNote,
+    ];
+    if (request.guard.untracked > 0) {
+      notes.push(ja.writeOps.noteUntracked(request.guard.untracked));
+    }
+
+    return (
+      <ConfirmDialog
+        title={ja.writeOps.fetchMergeTitle}
+        lead={ja.writeOps.fetchMergeLead(request.branch ?? "", request.revLabel)}
+        help={ja.writeOps.fetchMergeHelp}
+        blockers={reasons}
+        notes={notes}
+        actions={[
+          {
+            label: ja.writeOps.fetchMergeRun,
+            primary: true,
+            onSelect: () => onFetchMerge(request.rev),
+          },
+        ]}
         onCancel={onCancel}
       />
     );
@@ -145,7 +198,7 @@ function blockerText(blocker: Blocker, guard: WriteGuard): string {
   }
 }
 
-function whyNot(why: "detached" | "unknown" | "ahead" | "upToDate", ahead: number): string {
+function whyNot(why: MergeBlockReason, ahead: number): string {
   switch (why) {
     case "detached":
       return ja.writeOps.mergeDetached;
@@ -156,4 +209,125 @@ function whyNot(why: "detached" | "unknown" | "ahead" | "upToDate", ahead: numbe
     case "ahead":
       return ja.writeOps.mergeAhead(ahead);
   }
+}
+
+/**
+ * 「取ってきて取り込む」の実行中（T-31。docs/DESIGN.md §8.6）。
+ *
+ * **中止ボタンは取ってくる間しか出さない。** `merge --ff-only` は止められないので、
+ * 押せるボタンを残すと「押したのに止まらない」ことになる。段が変わったことは
+ * Rust 側からのイベントで届く。
+ */
+export function FetchMergeProgress({
+  phase,
+  progress,
+  cancelling,
+  onCancel,
+}: {
+  phase: FetchMergePhase;
+  progress: FetchProgress | null;
+  cancelling: boolean;
+  onCancel: () => void;
+}) {
+  const fetching = phase === "fetching";
+
+  return (
+    <div
+      className="modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label={ja.writeOps.fetchMergeTitle}
+    >
+      <div className="modal__box modal__box--wide">
+        <h2 className="modal__title">
+          {fetching ? ja.writeOps.fetchMergeFetching : ja.writeOps.fetchMergeMerging}
+        </h2>
+
+        {fetching ? (
+          <LoadProgress
+            // git の見出しをそのまま出す。**翻訳されていることがある。**
+            label={progress?.label ?? ja.writeOps.fetchMergeFetching}
+            done={progress?.done ?? 0}
+            total={progress?.total ?? null}
+            estimated={false}
+            elapsedMs={progress?.elapsedMs ?? 0}
+          />
+        ) : (
+          // **止められないことを黙っていない。**
+          <p className="modal__note">{ja.writeOps.fetchMergeNoCancel}</p>
+        )}
+
+        <div className="modal__actions">
+          <button
+            type="button"
+            className="button"
+            onClick={onCancel}
+            disabled={!fetching || cancelling}
+          >
+            {cancelling ? ja.writeOps.fetchMergeCancelling : ja.writeOps.fetchMergeCancel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 「取ってきて取り込む」の結果（T-31）。
+ *
+ * **どこまで進んだかを最初の 1 行で言う。** 「取ってきたが取り込まなかった」と
+ * 「取ってこられなかった」は別の話なので、同じ文言にまとめない。
+ * どの段で止まったかの判定は `lib/writeOps.ts` の `fetchMergeStage`（CLAUDE.md §8）。
+ */
+export function FetchMergeResult({
+  outcome,
+  onClose,
+}: {
+  outcome: FetchMergeOutcome;
+  onClose: () => void;
+}) {
+  const stage = fetchMergeStage(outcome);
+  const lines: string[] = [];
+
+  switch (stage.stage) {
+    case "refused":
+      lines.push(ja.writeOps.refused);
+      if (outcome.refused !== null) {
+        const guard = outcome.refused;
+        lines.push(...guard.blockers.map((blocker) => blockerText(blocker, guard)));
+      }
+      break;
+    case "fetchStopped":
+      lines.push(
+        stage.status === "cancelled"
+          ? ja.writeOps.fetchMergeFetchCancelled
+          : ja.writeOps.fetchMergeFetchFailed,
+      );
+      if (outcome.fetch !== null) lines.push(outcome.fetch.message);
+      break;
+    case "notMerged":
+      lines.push(ja.writeOps.fetchMergeNotMerged);
+      if (outcome.fetch !== null) lines.push(outcome.fetch.message);
+      lines.push(whyNot(stage.why, outcome.check?.ahead ?? 0));
+      break;
+    case "merged":
+      if (stage.ok) {
+        lines.push(ja.writeOps.fetchMergeMerged);
+        if (outcome.fetch !== null) lines.push(outcome.fetch.message);
+      } else {
+        lines.push(ja.writeOps.fetchMergeMergeFailed);
+        if (outcome.merge !== null) lines.push(outcome.merge.message);
+      }
+      break;
+  }
+
+  return (
+    <ResultDialog
+      ok={stage.stage === "merged" && stage.ok}
+      message={lines.join(" ")}
+      details={fetchMergeDetails(outcome)}
+      busy={false}
+      onClose={onClose}
+    />
+  );
 }

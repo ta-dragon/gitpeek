@@ -3,6 +3,9 @@
 //! **git に対して書き込むのは checkout / fetch / merge --ff-only / clone の 4 つだけ**
 //! （CLAUDE.md §1）。このモジュールに他の操作を足さないこと。
 //! v1 で入っているのは fetch / checkout / merge --ff-only / clone の 4 つ。
+//!
+//! 「取ってきて取り込む」（[`fetch_and_merge`]。T-31）は**5 つ目ではない** —
+//! `git pull` を呼ばず、上の 2 つを順に呼ぶだけ（docs/DESIGN.md §8.6）。
 
 use std::path::{Path, PathBuf};
 
@@ -476,7 +479,9 @@ pub fn merge_ff(
     if output.ok() {
         return Ok(WriteOutcome {
             ok: true,
-            message: format!("{rev} を取り込みました。"),
+            // **画面と同じ語彙で言う**（`i18n/ja.ts`）。GitPeek がやるのは
+            // 早送りだけなので「取り込む」ではなく「進める」（2026-09-08）。
+            message: format!("{rev} の位置まで進めました。"),
             details,
             refused: None,
         });
@@ -527,18 +532,20 @@ fn explain_checkout(stderr: &str) -> String {
 /// FF マージの失敗を画面向けの 1 行にする。
 fn explain_merge(stderr: &str) -> String {
     let lower = stderr.to_ascii_lowercase();
+    // **`fast-forward` は残す。** 診断に要る語で、git の出力やログと突き合わせられる
+    // （CLAUDE.md §6）。言い換えるのは「何ができないのか」のほう。
     if lower.contains("not possible to fast-forward") {
-        return "手元にだけあるコミットがあるので、早送り（fast-forward）になりません。GitPeek は早送り以外のマージをしません。".to_string();
+        return "手元にだけあるコミットがあるので、進めるだけでは追いつけません（fast-forward になりません）。GitPeek は早送りしかしません。".to_string();
     }
     if lower.contains("refusing to merge unrelated histories") {
-        return "共通の祖先が無いので取り込めません。".to_string();
+        return "共通の祖先が無いので進められません。".to_string();
     }
     if lower.contains("would be overwritten by merge") || lower.contains("local changes") {
-        return "手元の変更が上書きされるので取り込めません。片付けてからもう一度どうぞ。".to_string();
+        return "手元の変更が上書きされるので進められません。片付けてからもう一度どうぞ。".to_string();
     }
     match first_line(stderr) {
-        Some(line) => format!("マージに失敗しました: {}", redact(line)),
-        None => "マージに失敗しました。".to_string(),
+        Some(line) => format!("ブランチを進められませんでした: {}", redact(line)),
+        None => "ブランチを進められませんでした。".to_string(),
     }
 }
 
@@ -548,6 +555,157 @@ fn first_line(stderr: &str) -> Option<&str> {
         .lines()
         .map(str::trim)
         .find(|line| !line.is_empty() && !line.starts_with("hint:"))
+}
+
+// ---------------------------------------------------------------------------
+// 取ってきて取り込む（T-31。docs/DESIGN.md §8.6）
+// ---------------------------------------------------------------------------
+
+/// HEAD と相手の ahead/behind（docs/DESIGN.md §8.2）。
+///
+/// **数えるのはここではない** — 材料はメモリ上のグラフから作る（`lib.rs` の
+/// `merge_check_of`）。この型が持つのは「その数で早送りできるのか」だけ。
+/// `merge_check` コマンドと「取ってきて取り込む」の両方がこの型を通る。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeCheck {
+    /// HEAD にあって相手に無い数。**0 でないと fast-forward できない。**
+    pub ahead: u32,
+    /// 相手にあって HEAD に無い数。取り込む件数。
+    pub behind: u32,
+    /// どちらも読み込んだコミット集合にあるか。false なら判定できない。
+    pub known: bool,
+    /// HEAD がブランチから外れている。**取り込む先が無い。**
+    pub detached: bool,
+}
+
+impl MergeCheck {
+    /// 判定できなかったとき。**detached だけは分かっている**ので落とさない。
+    pub fn unknown(detached: bool) -> Self {
+        Self {
+            ahead: 0,
+            behind: 0,
+            known: false,
+            detached,
+        }
+    }
+
+    /// 早送りできるか。**画面の言い換え（`lib/writeOps.ts` の `mergeVerdict`）と
+    /// 同じ条件**だが、走らせてよいかを決めるのはこちら。
+    ///
+    /// `behind == 0` を弾くのは「取り込むものが無い」だけで害は無いが、
+    /// **何も起きない実行を「取り込みました」と報告しない**ため。
+    pub fn can_fast_forward(&self) -> bool {
+        self.known && !self.detached && self.ahead == 0 && self.behind > 0
+    }
+}
+
+/// フロントから届く「取ってきて取り込む」の依頼。
+///
+/// **`rev` は完全な ref 名**（`refs/remotes/origin/main`）。fetch のあとに
+/// 指す先が変わるので、SHA ではなく名前で受け取り、取り直したスナップショットで引き直す。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchMergeRequest {
+    pub repository_id: String,
+    pub rev: String,
+}
+
+/// 「取ってきて取り込む」の結果。
+///
+/// **どこまで進んだかが読めること**が要件（CLAUDE.md §6）。走らなかったものは
+/// `None` で、フロントはその形から「どの段で止まったか」を組み立てる
+/// （`lib/writeOps.ts` の `fetchMergeStage`）。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FetchMergeOutcome {
+    /// fetch の結果。**判定で止めたときだけ `None`。**
+    pub fetch: Option<FetchOutcome>,
+    /// 取り込む前に通した判定。fetch まで進んだときだけ入る。
+    pub check: Option<MergeCheck>,
+    /// 取り込みの結果。**走らせなかったときは `None`**（理由は `check` が持つ）。
+    pub merge: Option<WriteOutcome>,
+    /// 判定が通らなかったときの内訳。**fetch も走っていない。**
+    pub refused: Option<WriteGuard>,
+}
+
+/// [`fetch_and_merge`] が外へ出す口。
+///
+/// **引数を 3 つ並べない**（clippy の `too_many_arguments`）だけでなく、
+/// 「進捗」「段が変わった」「判定」を 1 か所に並べて読めるようにするため。
+pub struct FetchMergeHooks<'a> {
+    /// fetch の進捗。**取り込みの最中は 1 度も呼ばれない。**
+    pub on_progress: &'a mut dyn FnMut(FetchProgress),
+    /// 取り込みへ移る直前に 1 度だけ。**ここから先は中止が効かない**ので、
+    /// 画面はこれを合図に中止ボタンを閉じる。
+    pub on_merging: &'a mut dyn FnMut(),
+    /// 取り込んでよいかの判定。**fetch のあとに呼ぶ**（先に呼ぶと古い ref で数える）。
+    ///
+    /// スナップショットの読み直しを含むのでここでは持たない
+    /// （`lib.rs` はキャッシュ経由、結合テストは直読み）。
+    pub check: &'a mut dyn FnMut() -> Result<MergeCheck, String>,
+}
+
+/// 取ってきて、早送りできるならそのまま取り込む（docs/DESIGN.md §8.6）。
+///
+/// **新しい git の動詞は足していない。** `git pull` は呼ばず、既存の
+/// [`fetch`] と [`merge_ff`] を順に呼ぶだけ（理由は DESIGN.md §8.6）。
+///
+/// 順番と、どこで止めるか:
+///
+/// 1. `guard` が通らなければ**何もしない。fetch もしない**（DESIGN.md §8.6）
+/// 2. fetch が失敗・中止なら**取り込みへ進まない**。`Partial`（上流がタグを
+///    付け替えた）は進む — ブランチは取り込めており、タグは早送りに関係しない
+/// 3. 判定が「早送りできる」と言ったときだけ [`merge_ff`] を走らせる。
+///    **`--ff-only` は判定があっても外さない**（CLAUDE.md §1）
+///
+/// **中止が効くのは fetch の間だけ。** 取り込みは [`exec::run`] なので止まらない。
+pub fn fetch_and_merge(
+    log: &dyn LogSink,
+    program: &str,
+    repo: &Path,
+    rev: &str,
+    guard: &WriteGuard,
+    cancel: &Cancel,
+    hooks: FetchMergeHooks<'_>,
+) -> Result<FetchMergeOutcome, String> {
+    if !guard.allowed() {
+        return Ok(FetchMergeOutcome {
+            fetch: None,
+            check: None,
+            merge: None,
+            refused: Some(guard.clone()),
+        });
+    }
+
+    let fetched = fetch(log, program, repo, cancel, hooks.on_progress)?;
+    if !matches!(fetched.status, FetchStatus::Success | FetchStatus::Partial) {
+        return Ok(FetchMergeOutcome {
+            fetch: Some(fetched),
+            check: None,
+            merge: None,
+            refused: None,
+        });
+    }
+
+    let check = (hooks.check)()?;
+    if !check.can_fast_forward() {
+        return Ok(FetchMergeOutcome {
+            fetch: Some(fetched),
+            check: Some(check),
+            merge: None,
+            refused: None,
+        });
+    }
+
+    (hooks.on_merging)();
+    let merged = merge_ff(log, program, repo, rev)?;
+    Ok(FetchMergeOutcome {
+        fetch: Some(fetched),
+        check: Some(check),
+        merge: Some(merged),
+        refused: None,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,6 +1352,118 @@ mod tests {
                 Blocker::Dirty
             ]
         );
+    }
+
+    // --- 取ってきて取り込む（T-31）------------------------------------------
+
+    use super::{FetchMergeOutcome, FetchMergeRequest, FetchOutcome, FetchStatus, MergeCheck};
+
+    /// 早送りできる唯一の形。**ahead が 1 でもあれば通さない**（CLAUDE.md §1）。
+    #[test]
+    fn only_a_behind_branch_can_fast_forward() {
+        let can = MergeCheck {
+            ahead: 0,
+            behind: 3,
+            known: true,
+            detached: false,
+        };
+        assert!(can.can_fast_forward());
+
+        // 端まで並べる。**「ありそうな形」だけだと抜ける**（申し送り 3）。
+        for blocked in [
+            MergeCheck { ahead: 1, behind: 3, known: true, detached: false },
+            MergeCheck { ahead: 0, behind: 0, known: true, detached: false },
+            MergeCheck { ahead: 0, behind: 3, known: false, detached: false },
+            MergeCheck { ahead: 0, behind: 3, known: true, detached: true },
+            MergeCheck { ahead: u32::MAX, behind: u32::MAX, known: true, detached: false },
+        ] {
+            assert!(!blocked.can_fast_forward(), "通してはいけない: {blocked:?}");
+        }
+    }
+
+    /// 判定できなくても detached は落とさない。**言うべきことが変わる。**
+    #[test]
+    fn an_unknown_check_still_remembers_the_detached_head() {
+        assert!(!MergeCheck::unknown(true).can_fast_forward());
+        assert!(MergeCheck::unknown(true).detached);
+        assert!(!MergeCheck::unknown(false).detached);
+    }
+
+    /// フロントが送る JSON をそのまま食えること（CLAUDE.md §8 / 申し送り 2）。
+    ///
+    /// **綴りが違っても `serde(default)` は無い**ので、食えなければコマンドは
+    /// 1 度も走らない（T-18 で踏んだ）。
+    #[test]
+    fn the_fetch_merge_wire_format_matches_what_the_front_end_sends() {
+        let parsed: FetchMergeRequest = serde_json::from_str(
+            r#"{"repositoryId":"r1","rev":"refs/remotes/origin/main"}"#,
+        )
+        .expect("フロントの JSON を食えること");
+        assert_eq!(
+            parsed,
+            FetchMergeRequest {
+                repository_id: "r1".to_string(),
+                rev: "refs/remotes/origin/main".to_string(),
+            }
+        );
+
+        // スネークケースで来たら食えない（camelCase を落とすと静かに壊れる）。
+        assert!(
+            serde_json::from_str::<FetchMergeRequest>(
+                r#"{"repository_id":"r1","rev":"refs/heads/main"}"#
+            )
+            .is_err(),
+            "camelCase 以外を食ってはいけない",
+        );
+    }
+
+    /// 返す形がフロントの読む形であること（申し送り 2 の逆向き）。
+    ///
+    /// **走らなかった段は `null` で届く。** フロントはこの形から
+    /// 「どこで止まったか」を組み立てる（`lib/writeOps.ts` の `fetchMergeStage`）。
+    #[test]
+    fn the_fetch_merge_outcome_serializes_to_what_the_front_end_reads() {
+        let refused = FetchMergeOutcome {
+            fetch: None,
+            check: None,
+            merge: None,
+            refused: Some(WriteGuard {
+                blockers: vec![Blocker::Dirty],
+                untracked: 1,
+                changed: 2,
+            }),
+        };
+        let json = serde_json::to_value(&refused).expect("JSON にできること");
+        assert_eq!(json["fetch"], serde_json::Value::Null);
+        assert_eq!(json["check"], serde_json::Value::Null);
+        assert_eq!(json["merge"], serde_json::Value::Null);
+        assert_eq!(json["refused"]["blockers"][0], "dirty");
+        assert_eq!(json["refused"]["changed"], 2);
+
+        let skipped = FetchMergeOutcome {
+            fetch: Some(FetchOutcome {
+                status: FetchStatus::Success,
+                message: "fetch しました。".to_string(),
+                lines: vec!["From /tmp/x".to_string()],
+                duration_ms: 12,
+            }),
+            check: Some(MergeCheck {
+                ahead: 2,
+                behind: 3,
+                known: true,
+                detached: false,
+            }),
+            merge: None,
+            refused: None,
+        };
+        let json = serde_json::to_value(&skipped).expect("JSON にできること");
+        assert_eq!(json["fetch"]["status"], "success");
+        assert_eq!(json["fetch"]["durationMs"], 12);
+        assert_eq!(json["check"]["ahead"], 2);
+        assert_eq!(json["check"]["behind"], 3);
+        assert_eq!(json["check"]["known"], true);
+        assert_eq!(json["check"]["detached"], false);
+        assert_eq!(json["merge"], serde_json::Value::Null);
     }
 
     // --- clone（T-19）-----------------------------------------------------
