@@ -1,20 +1,28 @@
 /**
  * ブランチ / タグツリー（docs/DESIGN.md §6.4）。
  *
+ * 更新日で選び直すのと CSV への書き出しも同じ §6.4。**どちらも git を呼ばない。**
+ *
  * チェックを外すと**到達可能集合を計算し直して行と線が実際に減る**（§4.4）。
  * 淡色化ではない。切り替えのたびに `compute_lane_layout` を呼び直すが、
  * `git log` は走らない（Rust 側のメモリ上のグラフを引き直すだけ）。
  */
+import { save } from "@tauri-apps/plugin-dialog";
 import { useMemo, useState } from "react";
 
 import { ja } from "../../i18n/ja";
-import type { BranchStatus, HeadInfo, RefEntry, VisibleRefs } from "../../lib/ipc";
+import { branchCsvRows, csvExportState, csvFileName, toCsv } from "../../lib/branchCsv";
+import { exportText } from "../../lib/ipc";
+import type { BranchStatus, CommitMeta, HeadInfo, RefEntry, VisibleRefs } from "../../lib/ipc";
 import {
   branchNames,
+  branchesUpdatedSince,
   buildRefTree,
   checkStateOf,
+  commitTimes,
   excludedSet,
   onlyVisible,
+  startOfDay,
   withVisibility,
   type RefGroup,
 } from "../../lib/refTree";
@@ -25,6 +33,15 @@ import { RefTreeNodeView, type NodeCallbacks } from "./RefTreeNode";
 type Props = {
   refs: RefEntry[];
   head: HeadInfo;
+  /**
+   * 全件揃っているコミット（CLAUDE.md §3.4）。
+   *
+   * **ブランチの最終コミット時刻はここから引く。** git を呼び直さないので、
+   * 日付で選ぶのも CSV に書くのも、追加のコマンドは 1 つも走らない。
+   */
+  commits: CommitMeta[];
+  /** CSV の既定ファイル名に使う登録名。 */
+  repositoryName: string;
   /** 上流を持つローカルブランチだけが入る（docs/DESIGN.md §4.5）。 */
   branchStatus: BranchStatus[];
   visibleRefs: VisibleRefs;
@@ -47,6 +64,8 @@ type Props = {
 export function RefTree({
   refs,
   head,
+  commits,
+  repositoryName,
   branchStatus,
   visibleRefs,
   collapsed,
@@ -59,10 +78,19 @@ export function RefTree({
   onNotice,
 }: Props) {
   const [filter, setFilter] = useState("");
+  const [since, setSince] = useState("");
   const [menu, setMenu] = useState<{ entry: RefEntry; x: number; y: number } | null>(null);
 
   const groups = useMemo(() => buildRefTree(refs, filter), [refs, filter]);
   const excluded = useMemo(() => excludedSet(visibleRefs), [visibleRefs]);
+  const times = useMemo(() => commitTimes(commits), [commits]);
+  // **判定は純関数へ出す**（CLAUDE.md §6, §8）。ここは受け取った結果を描くだけ。
+  const sinceAt = useMemo(() => startOfDay(since), [since]);
+  const csvRows = useMemo(
+    () => branchCsvRows(refs, excluded, times),
+    [refs, excluded, times],
+  );
+  const csvState = csvExportState(csvRows);
   const collapsedSet = useMemo(() => new Set(collapsed), [collapsed]);
   const statusByRef = useMemo(() => {
     const map = new Map<string, BranchStatus>();
@@ -96,6 +124,32 @@ export function RefTree({
     }
     const all = branchNames(refs);
     onVisibleRefsChange(onlyVisible(all, keep === "none" ? [] : branchNames(refs, keep)));
+  };
+
+  /**
+   * 更新日でチェックを付け直す（T-33）。**プリセットと同じ一度きりの操作。**
+   *
+   * 結果は件数で知らせる。0 件のときに「壊れた」ではなく
+   * 「その日以降に動いたブランチが無い」と読めるようにするため。
+   */
+  const applySince = () => {
+    if (sinceAt === null) return;
+    const keep = branchesUpdatedSince(refs, sinceAt, times);
+    onVisibleRefsChange(onlyVisible(branchNames(refs), keep));
+    onNotice(ja.refTree.sinceApplied(keep.length));
+  };
+
+  /** チェックの入ったブランチを CSV に保存する（T-32）。 */
+  const saveCsv = async () => {
+    if (csvState.kind === "empty") return;
+    const path = await save({
+      title: ja.refTree.csv.saveTitle,
+      defaultPath: csvFileName(repositoryName, new Date()),
+      filters: [{ name: "CSV", extensions: ["csv"] }],
+    });
+    if (path === null) return;
+    await exportText(path, toCsv(csvRows));
+    onNotice(ja.refTree.csv.saved(path));
   };
 
   return (
@@ -145,6 +199,40 @@ export function RefTree({
           onClick={() => preset("remoteBranch")}
         >
           {ja.refTree.presetRemote}
+        </button>
+      </div>
+
+      <div className="reftree__since">
+        <input
+          type="date"
+          className="input"
+          value={since}
+          aria-label={ja.refTree.sinceLabel}
+          onChange={(event) => setSince(event.target.value)}
+        />
+        <button
+          type="button"
+          className="button button--small"
+          // **押せないときも消さず、理由を出す**（CLAUDE.md §6）。
+          title={sinceAt === null ? ja.refTree.sinceNoDate : ja.refTree.sinceHint}
+          disabled={sinceAt === null}
+          onClick={applySince}
+        >
+          {ja.refTree.sinceApply}
+        </button>
+        <div className="app__spacer" />
+        <button
+          type="button"
+          className="button button--small"
+          title={
+            csvState.kind === "ready"
+              ? ja.refTree.csv.saveHint(csvState.count)
+              : ja.refTree.csv.saveEmpty
+          }
+          disabled={csvState.kind === "empty"}
+          onClick={() => void saveCsv()}
+        >
+          {ja.refTree.csv.save}
         </button>
       </div>
 

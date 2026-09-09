@@ -11,7 +11,7 @@
 import { save } from "@tauri-apps/plugin-dialog";
 
 import { ja } from "../../i18n/ja";
-import { exportMarkdown } from "../../lib/ipc";
+import { exportText } from "../../lib/ipc";
 import type { LlmProfile } from "../../lib/ipc";
 import { markdownFileName, toMarkdown } from "../../lib/reviewMarkdown";
 import type { LineLookup } from "../../lib/reviewFindings";
@@ -67,7 +67,7 @@ export function ReviewDrawer({
       filters: [{ name: "Markdown", extensions: ["md"] }],
     });
     if (path === null) return;
-    await exportMarkdown(path, toMarkdown(state.stored, context));
+    await exportText(path, toMarkdown(state.stored, context));
     onNotice(ja.review.exported(path));
   };
 

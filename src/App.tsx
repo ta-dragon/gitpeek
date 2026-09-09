@@ -707,6 +707,8 @@ function RefTreePanel({
     <RefTree
       refs={data.refs}
       head={data.head}
+      commits={data.commits}
+      repositoryName={entry.name}
       branchStatus={snapshot.branchStatus}
       visibleRefs={snapshot.visibleRefs}
       collapsed={perRepository.collapsedTreeNodes}

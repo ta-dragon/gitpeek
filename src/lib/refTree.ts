@@ -7,7 +7,7 @@
  * 表示文言はここに書かない。グループの見出しは `kind` と `remote` から
  * 呼び出し側が `ja.ts` で決める。
  */
-import type { RefEntry, VisibleRefs } from "./ipc";
+import type { CommitMeta, RefEntry, VisibleRefs } from "./ipc";
 
 /**
  * 自動でフォルダに畳む最小件数。
@@ -259,4 +259,68 @@ export function checkStateOf(excluded: Set<string>, names: string[]): CheckState
   for (const name of names) if (excluded.has(name)) hidden += 1;
   if (hidden === 0) return "on";
   return hidden === names.length ? "off" : "partial";
+}
+
+/**
+ * sha → コミット時刻（Unix 秒）の索引。
+ *
+ * **git を呼び直さない。** コミットはリポジトリを選んだ時点で全件揃っているので
+ * （CLAUDE.md §3.4）、ブランチが指す sha を引くだけで最終コミット時刻が出る。
+ */
+export type CommitTimes = ReadonlyMap<string, number>;
+
+export function commitTimes(commits: CommitMeta[]): CommitTimes {
+  const times = new Map<string, number>();
+  for (const commit of commits) times.set(commit.sha, commit.commitTime);
+  return times;
+}
+
+/**
+ * `2026-09-01` を、その日の 00:00:00（ローカル）のミリ秒にする。読めなければ null。
+ *
+ * 踏んだ経緯は docs/DESIGN.md §17.1。
+ *
+ * **`new Date("2026-09-01")` を使わない。** 日付だけの ISO 文字列は UTC と解釈されるので、
+ * 日本時間では前日の 09:00 になる。**境目の日のブランチが 1 日ぶんずれて入る**という、
+ * 目で見ても気付きにくい形で外れる。年月日を数で渡して現地の 0 時を作る。
+ */
+export function startOfDay(text: string): number | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text.trim());
+  if (match === null) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day, 0, 0, 0, 0);
+
+  // 2026-02-30 のような日付は繰り上がってしまう。作り直した値と突き合わせて弾く。
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+  return date.getTime();
+}
+
+/**
+ * 最後のコミットが `sinceMs` 以降のブランチ（完全な ref 名）。**その日ちょうども入る。**
+ *
+ * **時刻を引けないブランチは選ばない。** グラフの外を指していると「以降」かどうか
+ * 言い切れないので、黙って混ぜるより落とす。タグは最初から対象外（チェックが無い）。
+ */
+export function branchesUpdatedSince(
+  refs: RefEntry[],
+  sinceMs: number,
+  times: CommitTimes,
+): string[] {
+  const since = Math.floor(sinceMs / 1000);
+  return refs
+    .filter((entry) => {
+      if (entry.kind === "tag") return false;
+      const time = times.get(entry.target);
+      return time !== undefined && time >= since;
+    })
+    .map((entry) => entry.name);
 }

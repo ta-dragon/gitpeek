@@ -280,6 +280,23 @@ body {
   padding: 0 8px 6px;
 }
 
+/* 更新日で選ぶ行と CSV 保存。**折り返す** — サイドバーは狭められる。 */
+.reftree__since {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 6px;
+}
+
+/* 日付欄は伸ばさない。伸ばすとボタンが次の行へ落ちるだけで、読める情報は増えない。 */
+.reftree__since .input {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--font-sans);
+}
+
 .reftree__body {
   flex: 1 1 0;
   min-height: 0;

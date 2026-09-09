@@ -1439,16 +1439,18 @@ fn load_review(
     store::reviews::load(state.store.paths()?, &repository_id, &file)
 }
 
-/// レビュー結果を Markdown として書き出す（DESIGN.md §12.4）。
+/// 利用者が保存ダイアログで選んだパスへ、組み立て済みのテキストを書く。
 ///
-/// **保存形式は JSON のままで、Markdown は出力専用。** 組み立てはフロントの
-/// 純関数（`lib/reviewMarkdown.ts`）で、ここは書くだけ。
+/// 用途は 2 つ。**レビュー結果の Markdown**（DESIGN.md §12.4）と
+/// **ブランチ一覧の CSV**（T-32）。どちらも**組み立てはフロントの純関数**で、
+/// ここは書くだけ（`lib/reviewMarkdown.ts` と `lib/branchCsv.ts`）。
 ///
 /// **`tauri-plugin-fs` は入れない。** 依存 2 つ（npm と Cargo）と引き換えに
-/// 得られるのは「任意のファイルを書く」機能で、要るのはこの 1 用途だけ。
-/// 行き先は利用者が保存ダイアログで選んだパスに限る。
+/// 得られるのは「任意のファイルを書く」機能で、要るのは書き出しだけ。
+/// **行き先は保存ダイアログで選ばれたパスに限る**（フロントが勝手に決めた
+/// パスは来ない。開く側の `open_repository_folder` と同じ考え方。CLAUDE.md §4）。
 #[tauri::command]
-async fn export_markdown(path: String, text: String) -> Result<(), String> {
+async fn export_text(path: String, text: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         store::json::write_atomic(&PathBuf::from(&path), &text)
     })
@@ -1671,7 +1673,7 @@ pub fn run() {
             cancel_review,
             list_reviews,
             load_review,
-            export_markdown,
+            export_text,
             set_repository_llm_profile,
             log_status,
             open_log_folder,

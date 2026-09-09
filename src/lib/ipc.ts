@@ -1367,13 +1367,17 @@ export function loadReview(repositoryId: string, file: string): Promise<StoredRe
 }
 
 /**
- * レビュー結果を Markdown として書き出す。
+ * 保存ダイアログで選ばれたパスへ、組み立て済みのテキストを書く。
  *
- * **`@tauri-apps/plugin-fs` は入れていない。** 要るのはこの 1 用途だけなので、
+ * 呼ぶのは**レビュー結果の Markdown** と**ブランチ一覧の CSV** の 2 か所。
+ * どちらも本文の組み立ては純関数側（`reviewMarkdown.ts` / `branchCsv.ts`）で、
+ * ここは渡すだけ。
+ *
+ * **`@tauri-apps/plugin-fs` は入れていない。** 要るのは書き出しだけなので、
  * 行き先は保存ダイアログで選んだパスに限り、書き込みは Rust 側で行う。
  */
-export function exportMarkdown(path: string, text: string): Promise<void> {
-  return invoke<void>("export_markdown", { path, text });
+export function exportText(path: string, text: string): Promise<void> {
+  return invoke<void>("export_text", { path, text });
 }
 
 /**

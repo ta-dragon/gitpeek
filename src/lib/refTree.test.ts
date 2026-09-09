@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import type { RefEntry } from "./ipc";
+import type { CommitMeta, RefEntry } from "./ipc";
 import {
   branchNames,
+  branchesUpdatedSince,
   buildRefTree,
   checkStateOf,
+  commitTimes,
   excludedSet,
   isHeadRef,
   onlyVisible,
+  startOfDay,
   withVisibility,
   type RefGroup,
   type RefTreeNode,
@@ -23,6 +26,19 @@ function ref(shortName: string, kind: RefEntry["kind"] = "localBranch"): RefEntr
     upstream: null,
     outOfGraph: false,
     orphan: false,
+  };
+}
+
+function commit(sha: string, commitTime: number): CommitMeta {
+  return {
+    sha,
+    shortSha: sha.slice(0, 7),
+    parents: [],
+    authorName: "t",
+    authorEmail: "t@example.com",
+    authorTime: commitTime,
+    commitTime,
+    subject: "s",
   };
 }
 
@@ -221,5 +237,79 @@ describe("HEAD が乗っている ref", () => {
 
   it("リモート追跡ブランチにも立たない", () => {
     expect(isHeadRef(ref("main", "remoteBranch"), "main")).toBe(false);
+  });
+});
+
+describe("startOfDay", () => {
+  it("その日の 0 時をローカル時刻で返す", () => {
+    // **`new Date("2026-09-01")` は UTC の 0 時**になる。日本時間ではその日の 09:00 で、
+    // 前日の夕方に積んだコミットが「9 月 1 日以降」に入ってしまう。
+    expect(startOfDay("2026-09-01")).toBe(new Date(2026, 8, 1).getTime());
+
+    const parsed = new Date(startOfDay("2026-09-01") ?? 0);
+    expect(parsed.getHours()).toBe(0);
+    expect(parsed.getDate()).toBe(1);
+  });
+
+  it("読めない日付は null", () => {
+    expect(startOfDay("")).toBeNull();
+    expect(startOfDay("2026-9-1")).toBeNull();
+    expect(startOfDay("きのう")).toBeNull();
+  });
+
+  it("存在しない日付は繰り上げずに null", () => {
+    // `new Date(2026, 1, 30)` は 3 月 2 日になる。黙って別の日で絞られる。
+    expect(startOfDay("2026-02-30")).toBeNull();
+  });
+});
+
+describe("branchesUpdatedSince", () => {
+  const since = new Date(2026, 8, 1).getTime();
+  const before = Math.floor(since / 1000) - 1;
+  const after = Math.floor(since / 1000) + 1;
+
+  it("その日ちょうどのブランチも選ぶ", () => {
+    const times = new Map([["sha-main", Math.floor(since / 1000)]]);
+
+    expect(branchesUpdatedSince([ref("main")], since, times)).toEqual(["refs/heads/main"]);
+  });
+
+  it("古いブランチは選ばない", () => {
+    const times = new Map([
+      ["sha-new", after],
+      ["sha-old", before],
+    ]);
+    const refs = [ref("new"), ref("old")];
+
+    expect(branchesUpdatedSince(refs, since, times)).toEqual(["refs/heads/new"]);
+  });
+
+  it("タグは選ばない", () => {
+    // タグにはチェックボックスが無いので、返しても付けようがない。
+    const times = new Map([["sha-v1.0", after]]);
+
+    expect(branchesUpdatedSince([ref("v1.0", "tag")], since, times)).toEqual([]);
+  });
+
+  it("時刻を引けないブランチは選ばない", () => {
+    // グラフの外を指していると、その日以降かどうか言い切れない。
+    expect(branchesUpdatedSince([ref("main")], since, new Map())).toEqual([]);
+  });
+
+  it("リモート追跡ブランチも選ぶ", () => {
+    const times = new Map([["sha-origin/main", after]]);
+    const refs = [ref("origin/main", "remoteBranch")];
+
+    expect(branchesUpdatedSince(refs, since, times)).toEqual(["refs/remotes/origin/main"]);
+  });
+});
+
+describe("commitTimes", () => {
+  it("sha からコミット時刻を引ける", () => {
+    const times = commitTimes([commit("a", 100), commit("b", 200)]);
+
+    expect(times.get("a")).toBe(100);
+    expect(times.get("b")).toBe(200);
+    expect(times.get("c")).toBeUndefined();
   });
 });
