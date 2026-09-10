@@ -230,7 +230,11 @@ npm run check:rust  # cargo clippy -D warnings    npm run typecheck   # tsc --no
   または `localhost` を外すこと。
 - **リリースは手元で作って上げる**（`npm run release` → `scripts/release.ps1`。GitLab.com に Windows の
   共有ランナーが無いため。DESIGN.md §2.3.2）。**トークンは環境変数 `GITLAB_TOKEN` から読むだけ**で、
-  スクリプトにもリポジトリにも置かない。**`.ps1` は UTF-8 BOM 付きで保存する** — Windows PowerShell 5.1 は
+  スクリプトにもリポジトリにも置かない。
+- **GitLab が本流、GitHub (`ta-dragon/gitpeek`) はバックアップ**（`npm run backup:github`）。
+  **GitHub へはビルドし直さず、本流へ上げた zip を SHA-256 で突き合わせてから同じものを写す。**
+  トークンは `GITHUB_TOKEN` から読むだけで、**remote URL にも `.git/config` にも書かない。**
+  **git への push は Basic**（Bearer は API 専用で、push だけ 401 になる。DESIGN.md §2.3.2）。**`.ps1` は UTF-8 BOM 付きで保存する** — Windows PowerShell 5.1 は
   BOM の無い `.ps1` を CP932 として読み、日本語のコメントが閉じ引用符を飲み込んで構文エラーになる。
 - **アイコンを変えたら `npm run tauri icon docs/images/app-icon.png` を実行し、`src-tauri/build.rs` を
   触ってから起動する**（元画像は 1024×1024 の透過 PNG）。**cargo は `src-tauri/icons/` を入力として
