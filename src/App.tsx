@@ -1027,7 +1027,7 @@ function CommitWorkspace({
     keys: viewingWorking ? workingList.map(entryKey) : [],
     selected: workingSelection === null ? null : entryKey(workingSelection),
     onSelect: (key) => setWorkingSelection(parseKey(key)),
-    bodyRef: files.bodyRef,
+    focusRef: files.focusRef,
   });
 
   const workingEntry =
@@ -1292,7 +1292,7 @@ function CommitWorkspace({
                   ? workingEntry.path
                   : null
               }
-              bodyRef={files.bodyRef}
+              focusRef={files.focusRef}
               ui={ui}
               findings={diffFindings}
               jumpTo={findingJump}

@@ -74,7 +74,12 @@ export function DiffBody({
   hits: Set<number>;
   /** 検索で動かす先の行。**`nonce` は押した回数**（同じ当たりへもう一度飛べる）。 */
   scrollTo: { row: number; nonce: number } | null;
-  /** スクロールしているのは `.dpane__body`。仮想化はその上で行う。 */
+  /**
+   * スクロールしているのは `.dpane__body`。仮想化はその上で行う。
+   *
+   * **フォーカス用の ref（外枠の `.dpane`）を渡さない。** 渡すと、スクロールしない要素を
+   * 見張ることになり、描く行が先頭で固まる（docs/DESIGN.md §17.1）。
+   */
   scrollRef: RefObject<HTMLDivElement | null>;
 }) {
   /** 飛んできた先の行。**印を残す** — 動いただけだとどれが目的の行か分からない。 */

@@ -59,8 +59,8 @@ export type CommitFiles = {
    */
   range: DiffRange | null;
   retry: () => void;
-  /** `Enter` でフォーカスを移す先（差分本体）に付ける。 */
-  bodyRef: React.RefObject<HTMLDivElement | null>;
+  /** `Enter` でフォーカスを移す先（差分ペインの外枠 `.dpane`）に付ける。**スクロール要素とは別。** */
+  focusRef: React.RefObject<HTMLDivElement | null>;
 };
 
 export function useCommitFiles({
@@ -100,7 +100,7 @@ export function useCommitFiles({
   /** 「もう一度試す」を押した回数。取得の依存に混ぜて再実行の合図にする。 */
   const [retryCount, setRetryCount] = useState(0);
 
-  const bodyRef = useRef<HTMLDivElement>(null);
+  const focusRef = useRef<HTMLDivElement>(null);
   const latest = useRef(0);
 
   const commitBySha = useMemo(() => {
@@ -173,7 +173,7 @@ export function useCommitFiles({
 
   // `Alt+↑` / `Alt+↓` と `Enter`（作業ツリーの一覧と同じものを使う）。
   const paths = useMemo(() => changes.map((change) => change.path), [changes]);
-  useFileNavigation({ keys: paths, selected: selectedFile, onSelect: onSelectFile, bodyRef });
+  useFileNavigation({ keys: paths, selected: selectedFile, onSelect: onSelectFile, focusRef });
 
   const parentsInGraph = useMemo(
     () => (detail?.parents ?? []).map((parent) => commitBySha.get(parent) ?? null),
@@ -195,7 +195,7 @@ export function useCommitFiles({
     parentsInGraph,
     range,
     retry,
-    bodyRef,
+    focusRef,
   };
 }
 

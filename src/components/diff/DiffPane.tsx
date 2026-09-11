@@ -47,8 +47,13 @@ type Props = {
   untrackedPath: string | null;
   /** 衝突しているファイルを選んでいるときのパス。 */
   conflictPath: string | null;
-  /** `Enter` でフォーカスを移す先。 */
-  bodyRef: React.RefObject<HTMLDivElement | null>;
+  /**
+   * `Enter` でフォーカスを移す先。**外枠の `.dpane` にだけ付ける**（`tabIndex` を持つのはここ）。
+   *
+   * **仮想スクロールに渡さない。** スクロールするのは内側の `.dpane__body` で、そちらは
+   * このペインが自前の `scrollRef` で持つ（docs/DESIGN.md §17.1）。
+   */
+  focusRef: React.RefObject<HTMLDivElement | null>;
   ui: UiSettings;
   /**
    * このファイルに付いた AI レビューの指摘（T-23）。無ければ空。
@@ -76,7 +81,7 @@ export function DiffPane({
   change,
   untrackedPath,
   conflictPath,
-  bodyRef,
+  focusRef,
   ui,
   findings,
   jumpTo,
@@ -86,6 +91,14 @@ export function DiffPane({
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * 差分本体のスクロール要素（`.dpane__body`）。**仮想スクロールはこれを見張る。**
+   *
+   * **`focusRef` と共有しない。** 1 本の ref を外枠と内側の両方に付けると、React は
+   * 親を後から付けるので**スクロールしない外枠が勝ち**、描く行が先頭の数十行で固まる
+   * （スクロールはできるのに、その先が空になる。2026-09-12 に踏んだ。docs/DESIGN.md §17.1）。
+   */
+  const scrollRef = useRef<HTMLDivElement>(null);
   /**
    * 文字コードの手動上書き。**永続化しない。**
    * ファイルごとの判断なので、別のファイルへ持ち越すと黙って化ける。
@@ -230,7 +243,7 @@ export function DiffPane({
 
   return (
     // `tabIndex` は `Enter` でここへフォーカスを移すため（キーボードだけで差分へ入れる）。
-    <div className="dpane" ref={bodyRef} tabIndex={-1}>
+    <div className="dpane" ref={focusRef} tabIndex={-1}>
       {change !== null && (
         <header className="dpane__head">
           <span className="dpane__path">{change.path}</span>
@@ -275,7 +288,7 @@ export function DiffPane({
         />
       )}
 
-      <div className="dpane__body" ref={bodyRef}>
+      <div className="dpane__body" ref={scrollRef}>
         <Body
           repositoryId={repositoryId}
           source={source}
@@ -292,7 +305,7 @@ export function DiffPane({
           hits={hitRows(hits)}
           scrollTo={scrollToRow}
           expanded={expanded}
-          scrollRef={bodyRef}
+          scrollRef={scrollRef}
           onExpand={() => setExpanded(true)}
           onRetry={() => {
             setError(null);

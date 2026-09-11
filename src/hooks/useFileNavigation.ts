@@ -16,14 +16,19 @@ export function useFileNavigation({
   keys,
   selected,
   onSelect,
-  bodyRef,
+  focusRef,
 }: {
   /** 並んでいる順の鍵。 */
   keys: string[];
   selected: string | null;
   onSelect: (key: string) => void;
-  /** `Enter` でフォーカスを移す先（差分本体）。 */
-  bodyRef: RefObject<HTMLDivElement | null>;
+  /**
+   * `Enter` でフォーカスを移す先（差分ペインの外枠 `.dpane`）。
+   *
+   * **スクロールする要素ではない。** 仮想スクロールは `.dpane__body` に付けた別の ref を見る
+   * （1 本を両方に付けると描く行が固まる。docs/DESIGN.md §17.1）。
+   */
+  focusRef: RefObject<HTMLDivElement | null>;
 }) {
   const step = useCallback(
     (delta: number) => {
@@ -52,7 +57,7 @@ export function useFileNavigation({
       }
 
       if (matches(event, "focusDiff")) {
-        const element = bodyRef.current;
+        const element = focusRef.current;
         if (element === null) return;
         event.preventDefault();
         element.focus();
@@ -61,5 +66,5 @@ export function useFileNavigation({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [step, bodyRef]);
+  }, [step, focusRef]);
 }
