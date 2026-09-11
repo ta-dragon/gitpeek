@@ -32,8 +32,8 @@ merge --ff-only を順に呼ぶだけで作ってある（DESIGN.md §8.6）。
 
 ### この一覧を変えるときは利用者に聞く
 
-**エージェントの判断で緩めてはいけない。** 必要だと思ったら、実装せずに聞くこと。緩めたのは 2 件で、
-**どちらも利用者が決めた**。緩め方も揃えてある — **禁止をやめたのではなく、「黙ってやらない」ほうを残して
+**エージェントの判断で緩めてはいけない。** 必要だと思ったら、実装せずに聞くこと。緩めたのは 3 件で、
+**どれも利用者が決めた**。緩め方も揃えてある — **禁止をやめたのではなく、「黙ってやらない」ほうを残して
 条件を付けた。** 同じ形が要るなら倣うこと。
 
 | いつ | 何を | 付けた条件 |
@@ -235,7 +235,8 @@ npm run check:rust  # cargo clippy -D warnings    npm run typecheck   # tsc --no
 - **GitLab が本流、GitHub (`ta-dragon/gitpeek`) はバックアップ**（`npm run backup:github`）。
   **GitHub へはビルドし直さず、本流へ上げた zip を SHA-256 で突き合わせてから同じものを写す。**
   トークンは `GITHUB_TOKEN` から読むだけで、**remote URL にも `.git/config` にも書かない。**
-  **git への push は Basic**（Bearer は API 専用で、push だけ 401 になる。DESIGN.md §2.3.2）。**`.ps1` は UTF-8 BOM 付きで保存する** — Windows PowerShell 5.1 は
+  **git への push は Basic**（Bearer は API 専用で、push だけ 401 になる。DESIGN.md §2.3.2）。
+- **`.ps1` は UTF-8 BOM 付きで保存する**（`release.ps1` も `backup-github.ps1` も）— Windows PowerShell 5.1 は
   BOM の無い `.ps1` を CP932 として読み、日本語のコメントが閉じ引用符を飲み込んで構文エラーになる。
 - **アイコンを変えたら `npm run tauri icon docs/images/app-icon.png` を実行し、`src-tauri/build.rs` を
   触ってから起動する**（元画像は 1024×1024 の透過 PNG）。**cargo は `src-tauri/icons/` を入力として
