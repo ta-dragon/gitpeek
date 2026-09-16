@@ -59,6 +59,9 @@ GIT_TERMINAL_PROMPT=0    GIT_SSH_COMMAND=ssh -o BatchMode=yes
   削除しない**（検出したら表示するだけ）。認証は git CLI へ完全委譲し、**パスワードもトークンも扱わない。**
 - 出力パースは機械可読形式だけに依存する。**`--raw` / `--numstat` の `-z` では、リネームとコピーだけパスを
   2 つ食う**（`git/diff.rs`）。**リネームの差分は pathspec に新旧両方のパスを渡す**（新だけだと全行追加になる）。
+- **コミット検索の引数は `git/search.rs` だけが組み立てる**（フロントから git のフラグを受け取らない）。
+  値は `--grep=<値>` の **1 引数の形**で渡す。**`--author` を 2 つ並べない** — `--all-match` を付けても
+  OR のままで、絞ったつもりが広がる（`--grep` の 2 つは `--all-match` で AND になる。DESIGN.md §6.6, §17.1）。
 - **ルートコミットに `git diff` を使わない。** `diff-tree --root --no-commit-id -r`（patch は `-p`）。空ツリーの
   SHA を定数で埋め込まない（SHA-256 リポジトリで変わる）。
 - ahead/behind は `rev-list --count` を呼ばず**メモリ上のグラフから計算**する。**`%s` は最初の段落を 1 行に

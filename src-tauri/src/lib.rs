@@ -24,6 +24,7 @@ use git::ops::{FetchOutcome, MergeCheck};
 use git::status::{WorkingFile, WorkingTree};
 use git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
 use git::repo::{RepositoryEntry, RepositoryProbe};
+use git::search::{CommitQuery, CommitSearchOutcome};
 use git::snapshot::SnapshotCache;
 use graph::reach::BranchStatus;
 use graph::{GraphOrder, LaneLayout};
@@ -719,6 +720,54 @@ async fn load_commit_detail(
             return Err(format!("フォルダが見つかりません: {}", path.display()));
         }
         git::diff::commit_detail(&EmittingLog::new(&handle, &log), &program, &path, &sha)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// コミットを探す（T-35。docs/DESIGN.md §6.6）。
+///
+/// **探すのは git。** 一覧が持っている `%s` は要約 1 行なので、手元で探すと本文に
+/// 書いた語が黙って当たらない。起点 ref は全件取得と同じで、`--all` は使わない（§4.2）。
+///
+/// スナップショットを引くのは、**コミット 0 件（unborn）かどうかを知るため**
+/// （`HEAD` を渡すと git log 全体が失敗する）。ref の指紋が変わっていなければ
+/// `git log` は走らないので、探すたびに全件を読み直すことにはならない。
+#[tauri::command]
+async fn search_commits(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    query: CommitQuery,
+) -> Result<CommitSearchOutcome, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let cache = state.snapshots.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        let sink = EmittingLog::new(&handle, &log);
+        let snapshot = git::snapshot::load_cached(
+            &sink,
+            &program,
+            &path,
+            &cache,
+            &repository.id,
+            false,
+            &Reporting::silent(),
+        )?;
+        git::search::search(
+            &sink,
+            &program,
+            &path,
+            &query,
+            snapshot.head.sha.is_some(),
+        )
     })
     .await
     .map_err(|error| error.to_string())?
@@ -1642,6 +1691,7 @@ pub fn run() {
             compute_branch_status,
             load_commit_detail,
             load_commit_message,
+            search_commits,
             load_changed_files,
             load_file_diff,
             load_working_tree,

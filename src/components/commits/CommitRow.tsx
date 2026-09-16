@@ -24,6 +24,10 @@ type Props = {
   selected: boolean;
   /** 2 点比較の**比較元**の行（T-15）。比較先は `selected` のほう。 */
   compareFrom: boolean;
+  /** コミット検索で当たった行（T-35）。**文字は塗らず、行の背を変えるだけ。** */
+  hit: boolean;
+  /** 当たりのうち、いま辿っている 1 件。上から囲む（差分内検索と同じ見せ方）。 */
+  hitCurrent: boolean;
   columns: ColumnWidths;
   dateFormat: UiSettings["dateFormat"];
   /** グラフ列の幅。行の左端に空ける。 */
@@ -42,6 +46,8 @@ export const CommitRow = memo(function CommitRow({
   detachedHead,
   selected,
   compareFrom,
+  hit,
+  hitCurrent,
   columns,
   dateFormat,
   graphWidth,
@@ -55,7 +61,7 @@ export const CommitRow = memo(function CommitRow({
     <div
       className={`crow${selected ? " crow--selected" : ""}${
         compareFrom ? " crow--compare-from" : ""
-      }`}
+      }${hit ? " crow--hit" : ""}${hitCurrent ? " crow--hit-current" : ""}`}
       // **Ctrl（Mac は Cmd）で 2 点比較**（docs/DESIGN.md §10.3）。
       onClick={(event) => onSelect(commit.sha, event.ctrlKey || event.metaKey)}
       // **右クリックでも行を選ぶ。** メニューの対象と選択中の行がずれると、

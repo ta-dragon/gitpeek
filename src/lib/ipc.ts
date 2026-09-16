@@ -2,6 +2,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
+import type { CommitQuery } from "./commitQuery";
+
 /** `src-tauri/src/commandlog.rs` の `CommandLogEntry` に対応。 */
 export type CommandLogEntry = {
   id: number;
@@ -601,6 +603,35 @@ export function loadCommitDetail(
  */
 export function loadCommitMessage(repositoryId: string, sha: string): Promise<string> {
   return invoke<string>("load_commit_message", { repositoryId, sha });
+}
+
+/* ---------- コミット検索（`src-tauri/src/git/search.rs`）---------- */
+
+/**
+ * 探した結果。
+ *
+ * **並びに意味は無い。** 画面での順は行の並び（`LaneLayout.rows`）が決めるので、
+ * 行番号へ落とすのは `lib/commitSearch.ts` の仕事。
+ */
+export type CommitSearchOutcome = {
+  shas: string[];
+  elapsedMs: number;
+};
+
+/**
+ * コミットを探す（T-35。docs/DESIGN.md §6.6）。
+ *
+ * **探すのは git。** 一覧が持っている `subject` は要約 1 行（`%s`）なので、手元で
+ * 探すと**本文に書いた語が黙って当たらない**。起点 ref は全件取得と同じで、
+ * タグだけが指すコミットには当たらない（§4.2）。
+ *
+ * **渡すのは構造体だけ。** git のフラグはフロントで組み立てない（CLAUDE.md §4）。
+ */
+export function searchCommits(
+  repositoryId: string,
+  query: CommitQuery,
+): Promise<CommitSearchOutcome> {
+  return invoke<CommitSearchOutcome>("search_commits", { repositoryId, query });
 }
 
 export function loadChangedFiles(

@@ -392,6 +392,34 @@ export const ja = {
     // 全文は長いので、通知には字数だけ出す。
     copiedMessage: (lines: number) => `コミットメッセージをコピーしました（${lines} 行）`,
     copyFailed: "クリップボードへコピーできませんでした。",
+
+    // コミット検索（T-35。docs/DESIGN.md §6.6）。
+    // **隣の SHA 欄と見分けが付くよう、書き出しを分けてある**（「SHA」と「ことば」）。
+    searchLabel: "ことばで探す",
+    searchPlaceholder: "メッセージか作者から探す",
+    searchHint:
+      "そのまま打つと、メッセージか作者のどちらかに入っているコミットを探します。" +
+      "message: / author: / code: を付けると、その指定どうしを重ねて絞り込めます。" +
+      "空白を含めたいときは引用符で囲みます。",
+    searchRun: "探す",
+    searchClear: "やめる",
+    searchPrev: "前へ",
+    searchNext: "次へ",
+    searchRunning: "探しています…",
+    // 何件目を見ているか。件数だけだと、辿っている途中かどうかが読めない。
+    searchPosition: (current: number, total: number) => `${current} / ${total} 件`,
+    searchNone: "当たりませんでした。",
+    // 可視 ref の絞り込みで行が無いもの。**黙って落とすと「探したのに出ない」になる。**
+    searchHidden: (n: number) =>
+      `いま表示していないブランチの側に ${n} 件あります（ブランチ / タグの一覧でチェックを付けると出ます）。`,
+    searchDuplicate: (key: string) => `${key} が 2 つあったので、後のほうだけ使いました。`,
+    searchEmptyValue: (key: string) => `${key} のあとが空なので、この指定は使っていません。`,
+    // T-36 で実装する。**黙って無視しない。**
+    searchCodeUnsupported:
+      "コード内容（code:）はまだ探せません。いまはメッセージと作者だけ探せます。",
+    searchFailed: "探せませんでした。",
+    // 当たりが無いときの「次へ / 前へ」。押せない形で残し、理由を出す（CLAUDE.md §6）。
+    searchNothingToStep: "まだ当たりがありません。",
   },
 
   refTree: {
@@ -1165,6 +1193,7 @@ export const ja = {
     openReview: "AI レビューを開く（実行はしない）",
     openSettings: "設定を開く",
     findInDiff: "差分の中を探す",
+    findCommits: "コミットをことばで探す",
     reload: "履歴と作業ツリーを読み直す",
     gotoHead: "HEAD のコミットへ移動する",
     commitDown: "1 つ下のコミットへ",

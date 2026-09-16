@@ -21,6 +21,7 @@ export type Action =
   | "openReview"
   | "openSettings"
   | "findInDiff"
+  | "findCommits"
   | "reload"
   | "gotoHead"
   | "commitDown"
@@ -72,6 +73,7 @@ export const SHORTCUTS: Binding[] = [
   { action: "openReview", keys: ["a"], ctrl: true, shift: true, label: "Ctrl+Shift+A" },
   { action: "openSettings", keys: [","], ctrl: true, label: "Ctrl+," },
   { action: "findInDiff", keys: ["f"], ctrl: true, label: "Ctrl+F" },
+  { action: "findCommits", keys: ["f"], ctrl: true, shift: true, label: "Ctrl+Shift+F" },
   { action: "reload", keys: ["F5"], label: "F5" },
   { action: "gotoHead", keys: ["h"], ctrl: true, label: "Ctrl+H" },
   { action: "commitDown", keys: ["ArrowDown", "j"], label: "↓ / j" },

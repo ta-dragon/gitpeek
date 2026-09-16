@@ -25,6 +25,8 @@
 #   detached       detached HEAD
 #   messages       複数行メッセージ（subject と本文の切れ目）
 #   tags           軽量タグ・注釈付きタグ・グラフ外のタグ
+#   search         コミット検索用（T-35 / T-36）。要約だけ / 本文だけに書いた語、
+#                  別の作者、コード内容だけに現れる語、到達できないタグ
 #   bare.git       bare リポジトリ
 #   cloned         bare.git のクローン（リモート追跡ブランチと upstream）
 #   upstream.git   diverged の上流（bare）
@@ -228,6 +230,37 @@ git_ -C "$repo" tag -a v2.0 -m "注釈付きタグ"
 git_ -C "$repo" checkout --quiet -b throwaway
 commit orphan.txt "消えるブランチのコミット"
 git_ -C "$repo" tag v0.9-orphan
+git_ -C "$repo" checkout --quiet main
+git_ -C "$repo" branch --quiet -D throwaway
+
+# --- コミット検索 -----------------------------------------------------------
+# 要約と本文に別々の語を書き分ける。**手元の %s は要約 1 行しか持たない**ので、
+# 「本文にしか無い語で当たる」ことが、git に聞いている証拠になる（docs/DESIGN.md §6.6）。
+new_repo search
+commit a.txt "subjectonly の要約"
+echo "2 行目" >>"$repo/a.txt"
+git_ -C "$repo" add -A
+printf 'ふつうの要約
+
+bodyonly は本文にしか書かない。
+' | git_ -C "$repo" commit --quiet -F -
+# 値が `-` で始まってもフラグとして食われないことの材料。
+commit b.txt "オプション --pretty の説明を直す"
+# 別の作者。committer は変えず author だけ変える（--author で引ける相手）。
+git_ -C "$repo" commit --quiet --allow-empty \
+  --author="Hanako Example <hanako@example.invalid>" -m "別の作者のコミット"
+# コード内容の検索用（T-36）。足したコミットと消したコミットの 2 つができる。
+# **メッセージには書かない** — コード側だけで当たることを確かめるため。
+printf 'const NEEDLE_CODE = 1;\n' >"$repo/code.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "設定を足す"
+printf 'const other = 2;\n' >"$repo/code.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "設定を消す"
+# どのブランチからも到達できないコミット。タグは起点 ref にしないので当たってはいけない（§4.2）。
+git_ -C "$repo" checkout --quiet -b throwaway
+commit d.txt "tagonly のコミット"
+git_ -C "$repo" tag search-only
 git_ -C "$repo" checkout --quiet main
 git_ -C "$repo" branch --quiet -D throwaway
 

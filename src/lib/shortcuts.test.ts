@@ -103,6 +103,7 @@ describe("SHORTCUTS", () => {
       "openReview",
       "openSettings",
       "findInDiff",
+      "findCommits",
       "reload",
       "gotoHead",
       "commitDown",

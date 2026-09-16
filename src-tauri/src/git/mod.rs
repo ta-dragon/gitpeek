@@ -7,5 +7,6 @@ pub mod ops;
 pub mod progress;
 pub mod refs;
 pub mod repo;
+pub mod search;
 pub mod snapshot;
 pub mod status;

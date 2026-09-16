@@ -1245,6 +1245,7 @@ function CommitWorkspace({
           }
           first={
             <CommitList
+              repositoryId={entry.id}
               commits={data.commits}
               layout={layout}
               refs={data.refs}

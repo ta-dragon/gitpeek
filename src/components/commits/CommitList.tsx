@@ -17,6 +17,9 @@ import { CommitGraph } from "../graph/CommitGraph";
 import type { WorkingSummary } from "../../lib/workingTree";
 import { WorkingTreeRow } from "./WorkingTreeRow";
 import { useCommitNavigation } from "../../hooks/useCommitNavigation";
+import { useCommitSearch } from "../../hooks/useCommitSearch";
+import { hitRows, rowOf, searchView, type SearchNote } from "../../lib/commitSearch";
+import { isTyping, matches } from "../../lib/shortcuts";
 import { ja } from "../../i18n/ja";
 import { graphWidth, ROW_HEIGHT } from "../../lib/graphPath";
 import type {
@@ -47,6 +50,8 @@ const OVERSCAN = 12;
 const HEAD_HEIGHT = 26;
 
 type Props = {
+  /** 探すときに Rust へ渡す（T-35）。行の材料としては使わない。 */
+  repositoryId: string;
   /** 読み込んだ全コミット。**並べる順と件数を決めるのは `layout.rows`。** */
   commits: CommitMeta[];
   layout: LaneLayout;
@@ -95,6 +100,7 @@ type Props = {
 };
 
 export function CommitList({
+  repositoryId,
   commits,
   layout,
   refs,
@@ -251,6 +257,48 @@ export function CommitList({
   /** HEAD の行。読み込んだ範囲に無ければ `undefined`（unborn / 可視 ref で外れた）。 */
   const headRow = head.sha === null ? undefined : indexBySha.get(head.sha);
 
+  /**
+   * コミット検索（T-35。docs/DESIGN.md §6.6）。
+   *
+   * 当たりを行に落とすのは `lib/commitSearch.ts` の純関数で、ここは**呼んで描くだけ**。
+   * 渡す並びは `shown`（＝ `LaneLayout.rows` から作ったもの）。**`commits` を渡すと
+   * 絞り込みや date 表示で印が 1 行ずつずれる。**
+   */
+  const shownShas = useMemo(() => shown.map((commit) => commit.sha), [shown]);
+  const selectedRow = selectedSha === null ? null : (indexBySha.get(selectedSha) ?? null);
+  const search = useCommitSearch(repositoryId, shownShas, selectedRow);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const searchHits = useMemo(() => hitRows(search.hits), [search.hits]);
+  /** ツールバーの出し分け。**判定は `searchView` にあり、ここは描くだけ。** */
+  const view = searchView(search);
+  const currentHitRow = rowOf(search.hits, search.current);
+
+  // 当たりへ飛ぶ。**連番が変わったときだけ動く**（`jumpTo` と同じ作り）。
+  const handledFocus = useRef(0);
+  useEffect(() => {
+    const focus = search.focus;
+    if (focus === null || focus.nonce === handledFocus.current) return;
+    handledFocus.current = focus.nonce;
+    const commit = shown[focus.row];
+    if (commit === undefined) return;
+    selectOnly(commit.sha);
+    reveal(focus.row);
+  }, [search.focus, shown, selectOnly, reveal]);
+
+  // `Ctrl+Shift+F` で検索欄へ。**キーの形は `lib/shortcuts.ts` の表だけが持つ。**
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!matches(event, "findCommits")) return;
+      // 入力欄で打っている最中でも、この組み合わせは奪ってよい（文字が打てなくならない）。
+      if (isTyping(event.target) && event.target !== searchInput.current) return;
+      event.preventDefault();
+      searchInput.current?.focus();
+      searchInput.current?.select();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   /** SHA ジャンプ。前方一致で最初に当たった行へ飛ぶ。 */
   const runJump = () => {
     const needle = jump.trim().toLowerCase();
@@ -308,6 +356,70 @@ export function CommitList({
           />
         </label>
         {jumpMissed && <span className="commits__missed">{ja.commits.jumpNotFound}</span>}
+
+        {/* **ことばで探す**（T-35。docs/DESIGN.md §6.6）。隣の SHA 欄とは
+            書き出しで見分ける（「SHA」と「ことば」）。探すのは押されたときだけで、
+            打つたびには走らせない。 */}
+        <label className="commits__search">
+          {ja.commits.searchLabel}
+          <input
+            ref={searchInput}
+            className="input"
+            value={search.input}
+            placeholder={ja.commits.searchPlaceholder}
+            title={ja.commits.searchHint}
+            onChange={(event) => search.setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") search.run();
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className="button button--small"
+          disabled={search.running}
+          onClick={search.run}
+        >
+          {search.running ? ja.commits.searchRunning : ja.commits.searchRun}
+        </button>
+
+        {/* 当たりが無いときも**押せない形で残す**（CLAUDE.md §6）。理由はホバーで出す。 */}
+        <button
+          type="button"
+          className="button button--small"
+          disabled={!view.canStep}
+          title={view.canStep ? undefined : ja.commits.searchNothingToStep}
+          onClick={() => search.step(-1)}
+        >
+          {ja.commits.searchPrev}
+        </button>
+        <button
+          type="button"
+          className="button button--small"
+          disabled={!view.canStep}
+          title={view.canStep ? undefined : ja.commits.searchNothingToStep}
+          onClick={() => search.step(1)}
+        >
+          {ja.commits.searchNext}
+        </button>
+        {view.position !== null && (
+          <span className="commits__note">
+            {ja.commits.searchPosition(view.position.current, view.position.total)}
+          </span>
+        )}
+        {view.canClear && (
+          <button type="button" className="button button--small" onClick={search.clear}>
+            {ja.commits.searchClear}
+          </button>
+        )}
+        {view.notes.map((note) => (
+          <span
+            key={noteKey(note)}
+            className={note.kind === "failed" ? "commits__searchError" : "commits__searchNote"}
+          >
+            {noteText(note)}
+          </span>
+        ))}
 
         {/* **HEAD へ戻る道を見えるところに置く**（T-18）。checkout で HEAD が動くと
             選択行が遠くに取り残されるので、`Ctrl+H` を知らなくても戻れるようにする。
@@ -413,6 +525,8 @@ export function CommitList({
                     detachedHead={head.detached && head.sha === commit.sha}
                     selected={selectedSha === commit.sha}
                     compareFrom={compareSha === commit.sha}
+                    hit={searchHits.has(item.index - extra)}
+                    hitCurrent={currentHitRow === item.index - extra}
                     columns={columns}
                     dateFormat={dateFormat}
                     graphWidth={width}
@@ -581,4 +695,26 @@ function Header({
       <div className="commits__grip" onPointerDown={onResize} />
     </div>
   );
+}
+
+/** 知らせの種類 → 文言。**どれを出すかは `searchView` が決めてある**ので、ここは引くだけ。 */
+function noteText(note: SearchNote): string {
+  switch (note.kind) {
+    case "none":
+      return ja.commits.searchNone;
+    case "hidden":
+      return ja.commits.searchHidden(note.count);
+    case "codeUnsupported":
+      return ja.commits.searchCodeUnsupported;
+    case "failed":
+      return `${ja.commits.searchFailed}${note.detail}`;
+    case "duplicate":
+      return ja.commits.searchDuplicate(`${note.key}:`);
+    case "emptyValue":
+      return ja.commits.searchEmptyValue(`${note.key}:`);
+  }
+}
+
+function noteKey(note: SearchNote): string {
+  return "key" in note ? `${note.kind}-${note.key}` : note.kind;
 }
