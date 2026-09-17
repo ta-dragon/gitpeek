@@ -109,7 +109,22 @@ pub fn run(
     repo: Option<&Path>,
     args: &[&str],
 ) -> Result<GitOutput, String> {
-    let mut command = build(program, repo, args);
+    run_with_env(log, program, repo, args, &[])
+}
+
+/// [`run`] に、**その実行だけの環境変数**を足したもの（T-37）。
+///
+/// 使うのは `git merge-tree --write-tree` だけで、**書き込み先をリポジトリの外の一時フォルダへ
+/// 逸らす**ため（`GIT_OBJECT_DIRECTORY` / `GIT_ALTERNATE_OBJECT_DIRECTORIES`。docs/DESIGN.md §7.6、
+/// CLAUDE.md §1 の 4 件目）。**固定の環境変数は上書きできない**（[`build`] が後から付ける）。
+pub fn run_with_env(
+    log: &dyn LogSink,
+    program: &str,
+    repo: Option<&Path>,
+    args: &[&str],
+    env: &[(&str, &std::ffi::OsStr)],
+) -> Result<GitOutput, String> {
+    let mut command = build(program, repo, args, env);
 
     let started = Instant::now();
     let result = command.output();
@@ -155,7 +170,7 @@ pub fn run_streaming(
     cancel: Option<&Cancel>,
     on_stdout: &mut dyn FnMut(&[u8]),
 ) -> Result<GitOutput, String> {
-    let mut command = build(program, repo, args);
+    let mut command = build(program, repo, args, &[]);
     let started = Instant::now();
 
     let child = match command.spawn() {
@@ -322,7 +337,7 @@ pub fn run_progress(
     cancel: &Cancel,
     on_stderr: &mut dyn FnMut(&[u8]),
 ) -> Result<GitOutput, String> {
-    let mut command = build(program, repo, args);
+    let mut command = build(program, repo, args, &[]);
     let started = Instant::now();
 
     let child = match command.spawn() {
@@ -431,15 +446,25 @@ pub fn run_progress(
 
 /// 固定オプションと固定環境変数を付けた `Command` を組み立てる。
 ///
-/// **[`run`] / [`run_streaming`] / [`run_progress`] のすべてがここを通る。** 一部だけに
+/// **[`run`]（[`run_with_env`]）/ [`run_streaming`] / [`run_progress`] のすべてがここを通る。** 一部だけに
 /// 付け足すと、経路によって挙動が変わる（日本語パスが化ける、認証で固まる）。
-fn build(program: &str, repo: Option<&Path>, args: &[&str]) -> Command {
+fn build(
+    program: &str,
+    repo: Option<&Path>,
+    args: &[&str],
+    env: &[(&str, &std::ffi::OsStr)],
+) -> Command {
     let mut command = Command::new(program);
     command.args(FIXED_ARGS);
     if let Some(repo) = repo {
         command.arg("-C").arg(repo);
     }
     command.args(args);
+
+    // 呼び出しごとの環境変数は**固定のものより先に**付ける。同じ名前なら固定のほうが勝つ。
+    for (name, value) in env {
+        command.env(name, value);
+    }
 
     // 認証が必要な場面で端末入力を待ってハングするのを防ぐ（docs/DESIGN.md §3.2）。
     command.env("GIT_TERMINAL_PROMPT", "0");

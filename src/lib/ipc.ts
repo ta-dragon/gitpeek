@@ -34,7 +34,7 @@ export type GitStatus = {
  * バックエンドに到達できず `GitStatus` を取得できなかったときの表示用。
  * `src-tauri/src/git/detect.rs` の `MIN_MAJOR`/`MIN_MINOR` と一致させること。
  */
-export const MIN_VERSION_FALLBACK = "2.20";
+export const MIN_VERSION_FALLBACK = "2.38";
 
 /** アプリを先へ進めてよい状態か。 */
 export function isGitUsable(status: GitStatus): boolean {

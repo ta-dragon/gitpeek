@@ -1,3 +1,4 @@
+pub mod contained;
 pub mod detect;
 pub mod diff;
 pub mod exec;
@@ -7,6 +8,7 @@ pub mod ops;
 pub mod progress;
 pub mod refs;
 pub mod repo;
+pub mod scratch;
 pub mod search;
 pub mod snapshot;
 pub mod status;

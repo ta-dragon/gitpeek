@@ -813,6 +813,46 @@ async fn cancel_commit_search(state: State<'_, AppState>) -> Result<(), String> 
     Ok(())
 }
 
+/// ブランチが相手に取り込まれているか（T-37。docs/DESIGN.md §7.6）。
+///
+/// `branch` と `target` は**完全な ref 名**。SHA やパスはフロントから受け取らず、
+/// スナップショットの ref から引く（CLAUDE.md §4）。**リポジトリへは書かない** —
+/// `merge-tree` の書き込みは一時フォルダへ逸らす（CLAUDE.md §1 の 4 件目）。
+#[tauri::command]
+async fn check_containment(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    branch: String,
+    target: String,
+) -> Result<git::contained::ContainmentOutcome, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let cache = state.snapshots.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        let sink = EmittingLog::new(&handle, &log);
+        let snapshot = git::snapshot::load_cached(
+            &sink,
+            &program,
+            &path,
+            &cache,
+            &repository.id,
+            false,
+            &Reporting::silent(),
+        )?;
+        git::contained::check(&sink, &program, &path, &snapshot, &branch, &target)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// コミットメッセージをそのまま（`%B`）。**コピー用**。
 ///
 /// `load_commit_detail` の `subject` + `body` から組み直さない。`%s` は最初の段落を
@@ -1706,6 +1746,14 @@ pub fn run() {
             // settings.json / state.json が生成される。
             let store = Store::init(app.handle());
             let log_status = start_logging(app.handle(), &store);
+            // 前回落ちて残った merge-tree の一時フォルダを消す（T-37）。**古いものだけ**なので、
+            // 横で動いている別の GitPeek が使用中のフォルダには触らない。起動を待たせない。
+            std::thread::spawn(|| {
+                let removed = git::scratch::sweep_leftovers();
+                if removed > 0 {
+                    log::info!("前回の一時フォルダを {removed} 個消しました");
+                }
+            });
             app.manage(AppState {
                 log: Arc::new(CommandLog::default()),
                 git_path: Mutex::new(None),
@@ -1734,6 +1782,7 @@ pub fn run() {
             load_commit_message,
             search_commits,
             cancel_commit_search,
+            check_containment,
             load_changed_files,
             load_file_diff,
             load_working_tree,

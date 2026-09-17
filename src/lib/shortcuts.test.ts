@@ -26,6 +26,21 @@ describe("matches", () => {
     expect(matches(withShift, "fetchCurrent")).toBe(false);
   });
 
+  /**
+   * **`Ctrl+F`（差分の中）と `Ctrl+Shift+F`（コミットを探す）も別の動作**（T-35）。
+   * 緩く見ると、コミットを探そうとして差分の検索欄が開く。Shift を押すと
+   * `key` が大文字の `F` で届くことにも耐える。
+   */
+  it("Shift の有無で差分の中の検索とコミット検索が分かれる", () => {
+    const withShift = press("F", { ctrlKey: true, shiftKey: true });
+    const without = press("f", { ctrlKey: true });
+
+    expect(matches(without, "findInDiff")).toBe(true);
+    expect(matches(without, "findCommits")).toBe(false);
+    expect(matches(withShift, "findCommits")).toBe(true);
+    expect(matches(withShift, "findInDiff")).toBe(false);
+  });
+
   it("Alt の有無でコミット移動とファイル移動が分かれる", () => {
     const alt = press("ArrowDown", { altKey: true });
     const plain = press("ArrowDown");

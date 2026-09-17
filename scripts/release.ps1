@@ -151,7 +151,7 @@ Windows 10 / 11 向けのポータブル版です。zip を展開して ``GitPee
 |---|---|
 | ファイル | ``$fileName``（$size MB）|
 | SHA-256 | ``$sha`` |
-| 必要なもの | git が PATH にあること、WebView2 Runtime（Windows 11 は標準）|
+| 必要なもの | git **2.38 以上**が PATH にあること、WebView2 Runtime（Windows 11 は標準）|
 
 コード署名はしていないので、初回起動時に SmartScreen の警告が出ます。
 「詳細情報」→「実行」で進めてください。

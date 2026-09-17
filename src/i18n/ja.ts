@@ -250,8 +250,9 @@ export const ja = {
     notFoundBody:
       "GitPeek は git が無いと動きません。git を入れるか、実行ファイルのフルパスを指定してください。",
     tooOldTitle: "git のバージョンが古すぎます",
+    // 下限は 2.38（T-37）。**なぜその版なのか**を書く — 数字だけだと、更新してよいのか迷う。
     tooOldBody: (found: string, min: string) =>
-      `見つかったのは ${found} でした。GitPeek には ${min} 以上が要ります。git を更新してください。`,
+      `見つかったのは ${found} でした。GitPeek には ${min} 以上が要ります（ブランチが取り込まれているかを調べるのに、この版から入った機能を使います）。git を更新してください。`,
     unreadableTitle: "git のバージョンを判定できません",
     installLabel: "Git for Windows をダウンロード",
     installUrl: "https://git-scm.com/download/win",

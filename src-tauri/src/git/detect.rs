@@ -9,8 +9,12 @@ use crate::commandlog::LogSink;
 use crate::git::exec;
 
 /// 要求する最低バージョン。
+///
+/// **2.38 は `git merge-tree --write-tree` が入った版**（T-37。ブランチが取り込まれているかを
+/// 調べるのに使う。docs/DESIGN.md §3.4, §7.6）。2026-09-18 に 2.20 から上げた。**足りなければ
+/// 起動画面で止める**（利用者の判断。②だけで判定する逃げ道は作らない）。
 pub const MIN_MAJOR: u32 = 2;
-pub const MIN_MINOR: u32 = 20;
+pub const MIN_MINOR: u32 = 38;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -125,9 +129,19 @@ mod tests {
     #[test]
     fn compares_against_minimum() {
         assert!(meets_minimum("2.43.0.windows.1"));
-        assert!(meets_minimum("2.20.0"));
         assert!(meets_minimum("3.0.0"));
         assert!(!meets_minimum("2.19.9"));
         assert!(!meets_minimum("1.9.5"));
+    }
+
+    /// **2.38 は `merge-tree --write-tree` が入った版**（T-37）。境目の両側を固定する。
+    /// 2.20 は以前の下限で、いまは足りない。
+    #[test]
+    fn requires_the_version_that_has_merge_tree_write_tree() {
+        assert!(meets_minimum("2.38.0"));
+        assert!(meets_minimum("2.38.0.windows.1"));
+        assert!(!meets_minimum("2.37.9"));
+        assert!(!meets_minimum("2.37.1.windows.1"));
+        assert!(!meets_minimum("2.20.0"));
     }
 }

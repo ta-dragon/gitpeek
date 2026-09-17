@@ -249,7 +249,7 @@ Windows 10 / 11 向けのポータブル版です。zip を展開して ``GitPee
 |---|---|
 | ファイル | ``$($item.FileName)``（$($item.SizeMB) MB）|
 | SHA-256 | ``$($item.Hash)`` |
-| 必要なもの | git が PATH にあること、WebView2 Runtime（Windows 11 は標準）|
+| 必要なもの | git **2.38 以上**が PATH にあること、WebView2 Runtime（Windows 11 は標準）|
 
 **本流と同じ zip です**（SHA-256 を突き合わせてから上げています）。
 

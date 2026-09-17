@@ -261,6 +261,11 @@ describe("learnedRate", () => {
     expect(learnedRate(codeOnly, { elapsedMs: 5_000, cancelled: true }, 20_285)).toBeNull();
   });
 
+  it("ちょうど 1 秒の実行は覚える（境目）", () => {
+    expect(learnedRate(codeOnly, { elapsedMs: 999, cancelled: false }, 2_000)).toBeNull();
+    expect(learnedRate(codeOnly, { elapsedMs: 1_000, cancelled: false }, 2_000)).toBe(2_000);
+  });
+
   it("短すぎる実行は覚えない", () => {
     // 起動にかかる時間が大半で、レートが実際より大きく出る。
     expect(learnedRate(codeOnly, { elapsedMs: 300, cancelled: false }, 500)).toBeNull();

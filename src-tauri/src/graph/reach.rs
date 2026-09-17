@@ -58,6 +58,11 @@ impl<'a> CommitIndex<'a> {
         self.by_sha.contains_key(sha)
     }
 
+    /// SHA からコミットを引く。手元に無ければ `None`。
+    pub fn get(&self, sha: &str) -> Option<&'a CommitMeta> {
+        self.by_sha.get(sha).map(|&i| &self.commits[i])
+    }
+
     /// `tips` から親を辿って届くコミット全部（`tips` 自身を含む）。
     ///
     /// 第一親・第二親を区別しない。**ブランチ表示 ON/OFF はこの集合の差**であり、

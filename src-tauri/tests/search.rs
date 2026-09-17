@@ -127,6 +127,38 @@ fn a_bare_word_narrows_a_named_one() {
 }
 
 #[test]
+fn a_bare_word_narrowing_an_author_ignores_letter_case() {
+    // 作者を 2 つ求める回は、片方を git に渡さず Rust で絞る（git は OR してしまう）。
+    // **そちらでも大文字小文字を区別しない**こと（git に任せた側と揃える）。
+    let query = CommitQuery {
+        any: Some("HANAKO".to_string()),
+        author: Some("example.invalid".to_string()),
+        ..CommitQuery::default()
+    };
+    assert_eq!(subjects_of("search", &query), ["別の作者のコミット"]);
+}
+
+#[test]
+fn a_commit_found_by_both_runs_is_returned_once() {
+    // 「e」はメッセージにも、全員の作者（メール）にも入っている。2 回の実行の両方で当たる。
+    let path = fixtures().join("search");
+    let found =
+        search::search(&log(), "git", &path, &bare("e"), true, &Cancel::new()).expect("探せません");
+    let unique: std::collections::HashSet<&String> = found.shas.iter().collect();
+    assert!(!found.shas.is_empty());
+    assert_eq!(unique.len(), found.shas.len(), "同じコミットが二重に返った");
+}
+
+#[test]
+fn a_folder_that_is_not_a_repository_is_an_error() {
+    // git が失敗したら、黙って 0 件にしない（「当たりませんでした」と取り違える）。
+    let dir = tempfile::tempdir().expect("一時ディレクトリ");
+    let error = search::search(&log(), "git", dir.path(), &message("x"), false, &Cancel::new())
+        .expect_err("リポジトリでないフォルダは失敗にする");
+    assert!(!error.is_empty());
+}
+
+#[test]
 fn a_value_that_starts_with_a_dash_is_not_a_flag() {
     // `--grep` と値を別の引数に割ると、git がフラグとして食って落ちる。
     assert_eq!(

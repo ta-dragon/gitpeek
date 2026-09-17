@@ -27,6 +27,9 @@
 #   tags           軽量タグ・注釈付きタグ・グラフ外のタグ
 #   search         コミット検索用（T-35 / T-36）。要約だけ / 本文だけに書いた語、
 #                  別の作者、コード内容だけに現れる語、到達できないタグ
+#   squash         ブランチが取り込まれているかの判定用（T-37）。普通のマージ / squash /
+#                  squash 後にブランチへ足した / squash 後に相手で書き換えた / 未マージ / orphan /
+#                  同じファイルを触る囮 / cherry-pick で取り込み / 途中で相手をマージしてから squash
 #   bare.git       bare リポジトリ
 #   cloned         bare.git のクローン（リモート追跡ブランチと upstream）
 #   upstream.git   diverged の上流（bare）
@@ -232,6 +235,125 @@ commit orphan.txt "消えるブランチのコミット"
 git_ -C "$repo" tag v0.9-orphan
 git_ -C "$repo" checkout --quiet main
 git_ -C "$repo" branch --quiet -D throwaway
+
+# --- ブランチが取り込まれているか -------------------------------------------
+# squash マージは新しいコミットを作るので、元のブランチのコミットは main の祖先にならない。
+# 「中身は入っている」を git merge-tree と差分の突き合わせで見分けられるかを確かめる
+# （docs/DESIGN.md §7.6）。相手は main（と、同じ行を書き換えた main-rewritten）。
+new_repo squash
+printf 'a
+b
+c
+d
+e
+' >"$repo/f.txt"
+printf 'x
+' >"$repo/other.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "base"
+
+# 普通のマージ。main の祖先になる。
+git_ -C "$repo" checkout --quiet -b merged-normally
+printf 'm
+' >"$repo/merged.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "普通にマージするコミット"
+git_ -C "$repo" checkout --quiet main
+git_ -C "$repo" merge --quiet --no-ff --no-edit merged-normally
+
+# squash されるブランチ（3 コミット）。
+git_ -C "$repo" checkout --quiet -b squashed
+sed -i 's/^b$/B1/' "$repo/f.txt"
+git_ -C "$repo" commit --quiet -am "squashed 1"
+sed -i 's/^d$/D2/' "$repo/f.txt"
+git_ -C "$repo" commit --quiet -am "squashed 2"
+printf 'new
+' >"$repo/n.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "squashed 3"
+
+# 取り込まれないブランチ。
+git_ -C "$repo" checkout --quiet -b unmerged main
+printf 'u
+' >"$repo/u.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "取り込まれないコミット"
+
+# main は別のファイルで進んでから squash を受け取り、さらに進む。
+git_ -C "$repo" checkout --quiet main
+printf 'y
+' >>"$repo/other.txt"
+git_ -C "$repo" commit --quiet -am "main が進む"
+git_ -C "$repo" merge --quiet --squash squashed >/dev/null
+git_ -C "$repo" commit --quiet -m "Squashed: squashed"
+printf 'z
+' >>"$repo/other.txt"
+git_ -C "$repo" commit --quiet -am "main がさらに進む"
+
+# squash のあと、ブランチに 1 つ足した（4 コミット中 3 つまで入っている）。
+git_ -C "$repo" checkout --quiet -b grown squashed
+printf 'late
+' >"$repo/late.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "squash のあとに足したコミット"
+
+# squash のあと、相手側で同じ行をさらに書き換えた（merge-tree は衝突し、差分の突き合わせだけが当たる）。
+git_ -C "$repo" checkout --quiet -b main-rewritten main
+sed -i 's/^B1$/B9/' "$repo/f.txt"
+git_ -C "$repo" commit --quiet -am "同じ行を書き換える"
+
+# 履歴を共有しないブランチ。merge-tree は「無関係な履歴」で断るので、走らせる前に決める。
+git_ -C "$repo" checkout --quiet --orphan lonely
+git_ -C "$repo" rm -rf --quiet .
+printf 'alone
+' >"$repo/alone.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "履歴を共有しないコミット"
+git_ -C "$repo" checkout --quiet main
+# タグは起点 ref ではないので、相手にも調べる対象にもしない。断られることを確かめる材料。
+git_ -C "$repo" tag squash-tag main
+
+# 触ったファイルの組が squash と同じで、中身が違うコミットを相手の一番新しいところに置く。
+# **ファイルの組だけで決めてしまう**と、こちらを squash と取り違える。
+git_ -C "$repo" checkout --quiet -b main-decoy main
+sed -i 's/^e$/E/' "$repo/f.txt"
+printf 'decoy
+' >>"$repo/n.txt"
+git_ -C "$repo" commit --quiet -am "同じファイルを触る別の変更"
+
+# 1 つずつ cherry-pick で取り込まれたブランチ。中身は入っているが、squash したコミットは無い。
+git_ -C "$repo" checkout --quiet -b picked main
+printf 'p1
+' >"$repo/p1.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "picked 1"
+printf 'p2
+' >"$repo/p2.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "picked 2"
+git_ -C "$repo" checkout --quiet -b main-picked main
+git_ -C "$repo" cherry-pick -x --quiet picked~1 picked >/dev/null
+
+# 途中で相手をマージしてから squash されたブランチ。分岐点が squash 前の相手の位置へずれる。
+git_ -C "$repo" checkout --quiet -b refreshed main
+printf 'r1
+' >"$repo/r.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "refreshed 1"
+git_ -C "$repo" checkout --quiet -b main-refreshed main
+printf 'm1
+' >"$repo/other2.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "相手が先に進む"
+git_ -C "$repo" checkout --quiet refreshed
+git_ -C "$repo" merge --quiet --no-edit main-refreshed
+printf 'r2
+' >>"$repo/r.txt"
+git_ -C "$repo" commit --quiet -am "refreshed 2"
+git_ -C "$repo" checkout --quiet main-refreshed
+git_ -C "$repo" merge --quiet --squash refreshed >/dev/null
+git_ -C "$repo" commit --quiet -m "Squashed: refreshed"
+git_ -C "$repo" checkout --quiet main
 
 # --- コミット検索 -----------------------------------------------------------
 # 要約と本文に別々の語を書き分ける。**手元の %s は要約 1 行しか持たない**ので、

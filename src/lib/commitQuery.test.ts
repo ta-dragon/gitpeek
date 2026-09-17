@@ -45,6 +45,18 @@ describe("parseQuery", () => {
     expect(of('"ほげ ふが"').any).toBe("ほげ ふが");
   });
 
+  it("全角の空白でも区切る", () => {
+    // 日本語入力のまま打つと空白は全角になる。区切れないと「ほげ　author:x」全体が 1 つのことばになる。
+    const query = of("ほげ　author:tatsuno");
+    expect(query.any).toBe("ほげ");
+    expect(query.author).toBe("tatsuno");
+  });
+
+  it("閉じていない引用符は、最後まで 1 つの値として読む", () => {
+    // 打ちかけの状態で探しても、壊れずに探せること。
+    expect(of('message:"2 つの').message).toBe("2 つの");
+  });
+
   it("指定語の大文字小文字は問わない", () => {
     expect(of("Message:ほげ").message).toBe("ほげ");
   });
