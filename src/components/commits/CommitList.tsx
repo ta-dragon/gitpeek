@@ -266,7 +266,7 @@ export function CommitList({
    */
   const shownShas = useMemo(() => shown.map((commit) => commit.sha), [shown]);
   const selectedRow = selectedSha === null ? null : (indexBySha.get(selectedSha) ?? null);
-  const search = useCommitSearch(repositoryId, shownShas, selectedRow);
+  const search = useCommitSearch(repositoryId, shownShas, selectedRow, commits.length);
   const searchInput = useRef<HTMLInputElement>(null);
   const searchHits = useMemo(() => hitRows(search.hits), [search.hits]);
   /** ツールバーの出し分け。**判定は `searchView` にあり、ここは描くだけ。** */
@@ -402,6 +402,19 @@ export function CommitList({
         >
           {ja.commits.searchNext}
         </button>
+        {/* コード内容を探している間だけ（T-36）。**中止ボタンは走っている間しか出さない。** */}
+        {view.progress !== null && (
+          <span className="commits__note">
+            {view.progress.kind === "estimate"
+              ? ja.commits.searchEstimate(view.progress.seconds, view.progress.elapsed)
+              : ja.commits.searchOverdue(view.progress.elapsed)}
+          </span>
+        )}
+        {view.canCancel && (
+          <button type="button" className="button button--small" onClick={search.cancel}>
+            {ja.commits.searchCancel}
+          </button>
+        )}
         {view.position !== null && (
           <span className="commits__note">
             {ja.commits.searchPosition(view.position.current, view.position.total)}
@@ -704,8 +717,8 @@ function noteText(note: SearchNote): string {
       return ja.commits.searchNone;
     case "hidden":
       return ja.commits.searchHidden(note.count);
-    case "codeUnsupported":
-      return ja.commits.searchCodeUnsupported;
+    case "cancelled":
+      return ja.commits.searchCancelled;
     case "failed":
       return `${ja.commits.searchFailed}${note.detail}`;
     case "duplicate":

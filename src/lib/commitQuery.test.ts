@@ -102,10 +102,14 @@ describe("planSearch", () => {
     expect(planSearch("   ").kind).toBe("clear");
   });
 
-  it("code: が入っていたら、ほかの指定があっても走らせない", () => {
-    // 一部だけ探して「当たらなかった」と見せると、code: が効いたように読める。
-    expect(planSearch("code:NEEDLE").kind).toBe("refuse");
-    expect(planSearch("ほげ code:NEEDLE").kind).toBe("refuse");
+  it("code: が入っていれば、重い検索として探す", () => {
+    // 目安の時間と中止ボタンを出すのはこのときだけ（T-36）。
+    const plan = planSearch("ほげ code:NEEDLE");
+    expect(plan.kind).toBe("search");
+    if (plan.kind === "search") {
+      expect(plan.slow).toBe(true);
+      expect(plan.query.code).toBe("NEEDLE");
+    }
   });
 
   it("メッセージと作者だけなら探す", () => {
@@ -114,6 +118,8 @@ describe("planSearch", () => {
     if (plan.kind === "search") {
       expect(plan.query.any).toBe("ほげ");
       expect(plan.query.author).toBe("tatsuno");
+      // メッセージと作者は一瞬で終わるので、目安も中止も出さない。
+      expect(plan.slow).toBe(false);
     }
   });
 

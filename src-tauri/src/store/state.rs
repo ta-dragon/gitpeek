@@ -99,6 +99,10 @@ pub struct RepositoryUiState {
     /// 初期値はタググループだけ（`refTree.ts` の `TAG_GROUP_ID`）。
     pub collapsed_tree_nodes: Vec<String>,
     pub column_widths: ColumnWidths,
+    /// コード内容の検索（`log -S`）が 1 秒に見たコミット数の実測（T-36。docs/DESIGN.md §6.6）。
+    /// **完了までの目安の時間を出すためだけ**の値なので、無ければ既定で見積もる。
+    /// 失っても困らないので `state.json` 側に置く。
+    pub code_search_rate: Option<f64>,
 }
 
 impl Default for RepositoryUiState {
@@ -113,6 +117,7 @@ impl Default for RepositoryUiState {
             // タグは数千本になることがあるので、最初は畳んでおく（docs/DESIGN.md §6.4）。
             collapsed_tree_nodes: vec!["tag".to_string()],
             column_widths: ColumnWidths::default(),
+            code_search_rate: None,
         }
     }
 }
@@ -323,6 +328,20 @@ mod tests {
         save(&paths, &state).unwrap();
 
         assert_eq!(load(&paths), state);
+    }
+
+    /// **T-36 より前に書かれた `state.json` を読めること。** 欄が無ければ既定（`None`）で、
+    /// 捨てて作り直さない（捨てると列幅や選択まで消える）。フロントが書く綴りも固定する。
+    #[test]
+    fn reads_a_repository_state_written_before_code_search_rate() {
+        let old: super::RepositoryUiState =
+            serde_json::from_str(r#"{ "lastCommitCount": 20285 }"#).expect("古い形を読めること");
+        assert_eq!(old.last_commit_count, Some(20285));
+        assert_eq!(old.code_search_rate, None);
+
+        let written: super::RepositoryUiState =
+            serde_json::from_str(r#"{ "codeSearchRate": 1190.5 }"#).expect("フロントの綴りを読めること");
+        assert_eq!(written.code_search_rate, Some(1190.5));
     }
 
     #[test]

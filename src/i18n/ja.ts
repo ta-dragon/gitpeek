@@ -414,9 +414,15 @@ export const ja = {
       `いま表示していないブランチの側に ${n} 件あります（ブランチ / タグの一覧でチェックを付けると出ます）。`,
     searchDuplicate: (key: string) => `${key} が 2 つあったので、後のほうだけ使いました。`,
     searchEmptyValue: (key: string) => `${key} のあとが空なので、この指定は使っていません。`,
-    // T-36 で実装する。**黙って無視しない。**
-    searchCodeUnsupported:
-      "コード内容（code:）はまだ探せません。いまはメッセージと作者だけ探せます。",
+    // コード内容（code:）を探している間（T-36）。**目安と分かる書き方にする。**
+    searchEstimate: (seconds: number, elapsed: number) =>
+      `コード内容を探しています。およそ ${seconds} 秒かかります（${elapsed} 秒経過）`,
+    // 目安を超えたら**残り時間を言わない**（「あと 0 秒」のまま待たせ続けない）。
+    searchOverdue: (elapsed: number) =>
+      `コード内容を探しています。見込みより時間がかかっています（${elapsed} 秒経過）`,
+    searchCancel: "中止",
+    // 中止しても当たったぶんは残す。**0 件でも「当たりませんでした」とは言わない。**
+    searchCancelled: "中止しました。出ている当たりは途中までのもので、全部ではありません。",
     searchFailed: "探せませんでした。",
     // 当たりが無いときの「次へ / 前へ」。押せない形で残し、理由を出す（CLAUDE.md §6）。
     searchNothingToStep: "まだ当たりがありません。",

@@ -10,6 +10,7 @@
 mod common;
 
 use gitpeek_lib::commandlog::CommandLog;
+use gitpeek_lib::git::exec::Cancel;
 use gitpeek_lib::git::search::{self, CommitQuery};
 use gitpeek_lib::git::snapshot;
 
@@ -20,7 +21,7 @@ fn subjects_of(repo: &str, query: &CommitQuery) -> Vec<String> {
     let path = fixtures().join(repo);
     let snapshot = snapshot::load(&log(), "git", &path)
         .unwrap_or_else(|error| panic!("{repo} を読めません: {error}"));
-    let found = search::search(&log(), "git", &path, query, snapshot.head.sha.is_some())
+    let found = search::search(&log(), "git", &path, query, snapshot.head.sha.is_some(), &Cancel::new())
         .unwrap_or_else(|error| panic!("探せません: {error}"));
 
     found
@@ -156,7 +157,7 @@ fn nothing_matching_is_not_an_error() {
 fn an_empty_query_does_not_run_git() {
     let recorded = CommandLog::default();
     let path = fixtures().join("search");
-    let error = search::search(&recorded, "git", &path, &CommitQuery::default(), true)
+    let error = search::search(&recorded, "git", &path, &CommitQuery::default(), true, &Cancel::new())
         .expect_err("空のクエリは実行してはいけない");
     assert!(!error.is_empty());
     assert!(recorded.entries().is_empty(), "git を走らせている");
@@ -169,7 +170,7 @@ fn a_repository_without_commits_does_not_pass_head() {
     let snapshot = snapshot::load(&log(), "git", &path).expect("空のリポジトリを読めない");
     assert!(snapshot.head.sha.is_none());
 
-    let found = search::search(&log(), "git", &path, &message("なんでも"), false)
+    let found = search::search(&log(), "git", &path, &message("なんでも"), false, &Cancel::new())
         .expect("コミット 0 件でも失敗してはいけない");
     assert!(found.shas.is_empty());
 }
@@ -180,11 +181,11 @@ fn a_bare_word_runs_git_twice_and_a_named_one_once() {
     // **回数が増えていないこと**も併せて見る（CLAUDE.md §2）。
     let twice = CommandLog::default();
     let path = fixtures().join("search");
-    search::search(&twice, "git", &path, &bare("要約"), true).expect("探せません");
+    search::search(&twice, "git", &path, &bare("要約"), true, &Cancel::new()).expect("探せません");
     assert_eq!(count_log_runs(&twice), 2);
 
     let once = CommandLog::default();
-    search::search(&once, "git", &path, &message("要約"), true).expect("探せません");
+    search::search(&once, "git", &path, &message("要約"), true, &Cancel::new()).expect("探せません");
     assert_eq!(count_log_runs(&once), 1);
 }
 
@@ -193,4 +194,108 @@ fn count_log_runs(log: &CommandLog) -> usize {
         .iter()
         .filter(|entry| entry.args.first().is_some_and(|arg| arg == "log"))
         .count()
+}
+
+fn code(word: &str) -> CommitQuery {
+    CommitQuery {
+        code: Some(word.to_string()),
+        ..CommitQuery::default()
+    }
+}
+
+#[test]
+fn code_finds_the_commit_that_added_it_and_the_one_that_removed_it() {
+    // `-S` は「その語の出現回数が変わったコミット」。足したほうも消したほうも当たる。
+    // **メッセージには書いていない語**なので、コード側で当たっている。
+    let mut found = subjects_of("search", &code("NEEDLE_CODE"));
+    let mut expected = vec!["設定を足す".to_string(), "設定を消す".to_string()];
+    found.sort();
+    expected.sort();
+    assert_eq!(found, expected);
+}
+
+#[test]
+fn the_case_of_the_letters_does_not_matter_for_code_either() {
+    // **`-i` は `-S` にも効く**（git 2.43 で実測。docs/DESIGN.md §6.6）。
+    // 効かない git だと、ここが黙って 0 件になる。
+    assert_eq!(subjects_of("search", &code("needle_code")).len(), 2);
+}
+
+#[test]
+fn code_and_message_are_asked_in_one_run() {
+    // 同じ 1 回にまとめると、grep で落ちたコミットの差分を git が取らない
+    // （onyx で 17.1 秒 → 5.9 秒）。**分けて和や積を取る形にしない。**
+    let recorded = CommandLog::default();
+    let path = fixtures().join("search");
+    let query = CommitQuery {
+        message: Some("足す".to_string()),
+        code: Some("NEEDLE_CODE".to_string()),
+        ..CommitQuery::default()
+    };
+    let found =
+        search::search(&recorded, "git", &path, &query, true, &Cancel::new()).expect("探せません");
+    assert_eq!(count_log_runs(&recorded), 1);
+    assert_eq!(found.shas.len(), 1, "AND になっていない");
+}
+
+#[test]
+fn a_cancelled_search_is_not_a_failure_and_stops_there() {
+    // **中止は失敗ではない。** 落とされた git は非ゼロで終わるので、成否を先に見ると
+    // 利用者自身の操作を「探せませんでした」と報告してしまう。
+    let recorded = CommandLog::default();
+    let path = fixtures().join("search");
+    let cancel = Cancel::new();
+    cancel.cancel();
+
+    // 素のことばは 2 回に割れる。中止したら 2 回目へ進まない。
+    let outcome = search::search(&recorded, "git", &path, &bare("要約"), true, &cancel)
+        .expect("中止してもエラーにしない");
+    assert!(outcome.cancelled);
+    assert_eq!(count_log_runs(&recorded), 1, "中止したのに次の実行へ進んでいる");
+}
+
+#[test]
+fn a_search_that_was_not_cancelled_says_so() {
+    let found = search::search(
+        &log(),
+        "git",
+        &fixtures().join("search"),
+        &message("要約"),
+        true,
+        &Cancel::new(),
+    )
+    .expect("探せません");
+    assert!(!found.cancelled);
+}
+
+/// **本当に長い `-S` を途中で落とせること**（T-36）。
+///
+/// 生成するリポジトリは小さく、`-S` が一瞬で終わるので、見張りスレッドが子を落とす経路を
+/// 通せない。手元に onyx（20,285 コミット、`-S` で 17 秒）があるときだけ流す。
+/// `cargo test --test search -- --ignored` で手動実行する。
+#[test]
+#[ignore = "手元の onyx（C:/Gitwork/onyx）が要る。手動で流す"]
+fn a_long_code_search_can_be_stopped_midway() {
+    let path = std::path::PathBuf::from("C:/Gitwork/onyx");
+    assert!(path.is_dir(), "onyx がありません");
+
+    let cancel = Cancel::new();
+    let stopper = cancel.clone();
+    let started = std::time::Instant::now();
+    let stopper_thread = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(1_500));
+        stopper.cancel();
+    });
+
+    let outcome = search::search(&log(), "git", &path, &code("def get_session"), true, &cancel)
+        .expect("中止してもエラーにしない");
+    stopper_thread.join().expect("止め役のスレッド");
+
+    let elapsed = started.elapsed();
+    assert!(outcome.cancelled);
+    // 見張りは 100ms 刻み。落とせていなければ 17 秒近くかかる。
+    assert!(
+        elapsed < std::time::Duration::from_secs(4),
+        "中止が効いていない: {elapsed:?}",
+    );
 }

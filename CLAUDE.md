@@ -45,7 +45,7 @@ merge --ff-only を順に呼ぶだけで作ってある（DESIGN.md §8.6）。
 ## 2. git 実行の不変条件（破ると静かに壊れる）
 
 **すべての git 実行は `src-tauri/src/git/exec.rs` を通す。** ここ以外で `Command::new("git")` を書かない。
-入口は `run`（完了を待つ）/ `run_streaming`（**stdout** を読みながら全件ダンプ）/ `run_progress`（**stderr** を
+入口は `run`（完了を待つ）/ `run_streaming`（**stdout** を読みながら。全件ダンプ ＋ 中止も渡せる。コミット検索）/ `run_progress`（**stderr** を
 読みながら ＋ 中止できる。fetch / clone）の 3 つ。**3 つとも `build()` で下を付ける。新しい入口も `build()` を
 通す**（一部だけに足すと、経路によって日本語パスが化けたり認証で固まったりする。DESIGN.md §3.1）。
 

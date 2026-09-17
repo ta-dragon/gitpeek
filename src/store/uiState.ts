@@ -28,6 +28,7 @@ export const DEFAULT_UI_STATE: UiState = {
 export const DEFAULT_REPOSITORY_UI_STATE: RepositoryUiState = {
   lastOpenedAt: null,
   lastCommitCount: null,
+  codeSearchRate: null,
   selectedCommit: null,
   compareCommit: null,
   scrollOffset: 0,

@@ -18,7 +18,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::commandlog::LogSink;
-use crate::git::exec;
+use crate::git::exec::{self, Cancel};
 
 /// SHA と作者を NUL 区切りで出す。本文は取らない。
 ///
@@ -61,6 +61,8 @@ impl CommitQuery {
 pub struct CommitSearchOutcome {
     pub shas: Vec<String>,
     pub elapsed_ms: u64,
+    /// 中止した（T-36）。**`shas` はそこまでに見つかったぶんで、全部ではない。**
+    pub cancelled: bool,
 }
 
 /// 実行 1 回ぶん。
@@ -160,8 +162,15 @@ pub struct Found {
 }
 
 /// `-z --format=%H%x1f%an%x1f%ae` の出力を分解する。**壊れたレコードは飛ばす。**
+///
+/// **NUL で閉じていない最後のレコードは読まない。** 中止すると出力が途中で切れ、
+/// SHA の前半だけが残ることがある（それを当たりとして返すと、どの行にも当たらない）。
 pub fn parse(stdout: &str) -> Vec<Found> {
-    stdout
+    let complete = match stdout.rfind('\0') {
+        Some(end) => &stdout[..end],
+        None => "",
+    };
+    complete
         .split('\0')
         .filter_map(|record| {
             let record = record.trim_matches('\n');
@@ -181,12 +190,16 @@ pub fn parse(stdout: &str) -> Vec<Found> {
 }
 
 /// 探して、当たったコミットの SHA を返す。
+///
+/// **中止は失敗ではない**（T-36）。落とされた git は非ゼロで終わるので、成否より先に
+/// 旗を見る。中止したら**そこまでに見つかったぶんを返し**、残りの実行には進まない。
 pub fn search(
     log: &dyn LogSink,
     program: &str,
     path: &Path,
     query: &CommitQuery,
     include_head: bool,
+    cancel: &Cancel,
 ) -> Result<CommitSearchOutcome, String> {
     if query.is_empty() {
         return Err("探すことばがありません".to_string());
@@ -196,10 +209,19 @@ pub fn search(
     let mut shas: Vec<String> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
+    let mut cancelled = false;
     for run in runs(query, include_head) {
         let borrowed: Vec<&str> = run.args.iter().map(String::as_str).collect();
-        let output = exec::run_streaming(log, program, Some(path), &borrowed, &mut |_chunk| {})?;
-        if !output.ok() {
+        let output = exec::run_streaming(
+            log,
+            program,
+            Some(path),
+            &borrowed,
+            Some(cancel),
+            &mut |_chunk| {},
+        )?;
+        cancelled = cancel.is_cancelled();
+        if !cancelled && !output.ok() {
             return Err(output.failure("コミットを探せませんでした"));
         }
         let narrow = run.author_contains.map(|word| word.to_lowercase());
@@ -213,11 +235,15 @@ pub fn search(
                 shas.push(found.sha);
             }
         }
+        if cancelled {
+            break;
+        }
     }
 
     Ok(CommitSearchOutcome {
         shas,
         elapsed_ms: started.elapsed().as_millis() as u64,
+        cancelled,
     })
 }
 
@@ -366,6 +392,15 @@ mod tests {
     }
 
     #[test]
+    fn a_record_cut_off_by_cancelling_is_not_read() {
+        // 中止すると出力が途中で切れる。SHA の前半を当たりとして返してはいけない。
+        let stdout = format!("{}\u{1f}N\u{1f}m\0{}", "a".repeat(40), "b".repeat(17));
+        let found = parse(&stdout);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].sha, "a".repeat(40));
+    }
+
+    #[test]
     fn ignores_incomplete_records() {
         assert!(parse("").is_empty());
         assert!(parse("\0\0").is_empty());
@@ -394,10 +429,12 @@ mod tests {
         let outcome = super::CommitSearchOutcome {
             shas: vec!["a".repeat(40)],
             elapsed_ms: 12,
+            cancelled: true,
         };
         let json = serde_json::to_value(&outcome).expect("JSON にできること");
         assert_eq!(json["shas"][0], "a".repeat(40));
         // スネークケースのまま返すとフロントが読めない。
         assert_eq!(json["elapsedMs"], 12);
+        assert_eq!(json["cancelled"], true);
     }
 }

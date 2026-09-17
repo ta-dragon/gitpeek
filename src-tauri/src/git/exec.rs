@@ -134,24 +134,31 @@ pub fn run(
     }
 }
 
-/// stdout を読みながら `on_stdout` に渡しつつ実行する。
+/// stdout を読みながら `on_stdout` に渡しつつ実行する。**中止の旗も渡せる。**
 ///
 /// [`run`] と違い**完了を待たずに読み進める**ので、長い出力の途中経過を報告できる。
 /// 全件ダンプは 100 万コミット級で 300MB・十数秒に達し、終わるまで何も言えないと
 /// 「固まった」ようにしか見えないため（docs/DESIGN.md §4.6）。
 ///
-/// 蓄積した stdout は [`run`] と同じく `GitOutput` に入って返る。
+/// `cancel` を渡すと、**旗を見張る別スレッドから子プロセスを落とす**（[`run_progress`] と
+/// 同じ作り）。コード内容の検索（`log -S`）は**当たるまで何も出さない**ので、読み取りの
+/// 合間の判定だけでは止まらない（T-36。docs/DESIGN.md §6.6）。中止したかどうかは
+/// 呼び出し側が旗で見ること — 落とされた git は非ゼロで終わるので、成否を先に見ると
+/// **利用者自身の中止を「失敗」と報告してしまう。**
+///
+/// 蓄積した stdout は [`run`] と同じく `GitOutput` に入って返る（中止したときは途中まで）。
 pub fn run_streaming(
     log: &dyn LogSink,
     program: &str,
     repo: Option<&Path>,
     args: &[&str],
+    cancel: Option<&Cancel>,
     on_stdout: &mut dyn FnMut(&[u8]),
 ) -> Result<GitOutput, String> {
     let mut command = build(program, repo, args);
     let started = Instant::now();
 
-    let mut child = match command.spawn() {
+    let child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
             let message = error.to_string();
@@ -161,9 +168,16 @@ pub fn run_streaming(
         }
     };
 
+    let child = Arc::new(Mutex::new(child));
+
+    // パイプを先に取り出す。ここだけ短く lock する（見張りと奪い合わないように）。
+    let (stdout_pipe, mut stderr_pipe) = {
+        let mut guard = child.lock().expect("子プロセスの lock");
+        (guard.stdout.take(), guard.stderr.take())
+    };
+
     // stderr は**別スレッドで**吸い出す。stdout だけ読んでいると、stderr のパイプが
     // 埋まった時点で git 側が書き込みで止まり、双方待ち合わせて固まる。
-    let mut stderr_pipe = child.stderr.take();
     let stderr_reader = std::thread::spawn(move || {
         let mut buffer = Vec::new();
         if let Some(pipe) = stderr_pipe.as_mut() {
@@ -172,9 +186,29 @@ pub fn run_streaming(
         buffer
     });
 
+    // 中止の見張り。**旗を渡されたときだけ**立てる（全件ダンプは中止しない）。
+    let finished = Arc::new(AtomicBool::new(false));
+    let watchdog = cancel.map(|cancel| {
+        let child = Arc::clone(&child);
+        let finished = Arc::clone(&finished);
+        let cancel = cancel.clone();
+        std::thread::spawn(move || {
+            while !finished.load(Ordering::SeqCst) {
+                if cancel.is_cancelled() {
+                    if let Ok(mut guard) = child.lock() {
+                        let _ = guard.kill();
+                    }
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        })
+    });
+    let cancelled = || cancel.is_some_and(Cancel::is_cancelled);
+
     let mut stdout = Vec::new();
     let mut read_error = None;
-    if let Some(pipe) = child.stdout.as_mut() {
+    if let Some(mut pipe) = stdout_pipe {
         let mut chunk = vec![0u8; 64 * 1024];
         loop {
             match pipe.read(&mut chunk) {
@@ -182,16 +216,35 @@ pub fn run_streaming(
                 Ok(read) => {
                     stdout.extend_from_slice(&chunk[..read]);
                     on_stdout(&chunk[..read]);
+                    if cancelled() {
+                        break;
+                    }
                 }
                 Err(error) => {
-                    read_error = Some(error.to_string());
+                    // 見張りに落とされるとパイプが切れて読み取りが失敗することがある。
+                    // **中止した結果であって、読み取りの失敗ではない。**
+                    if !cancelled() {
+                        read_error = Some(error.to_string());
+                    }
                     break;
                 }
             }
         }
     }
 
-    let status = child.wait();
+    // **`wait()` より先に見張りを畳む。** `wait()` は lock を握ったまま子の終了を待つので、
+    // その間に見張りが lock を取りに来ると、二者が待ち合って固まる。
+    if cancelled() {
+        if let Ok(mut guard) = child.lock() {
+            let _ = guard.kill();
+        }
+    }
+    finished.store(true, Ordering::SeqCst);
+    if let Some(watchdog) = watchdog {
+        let _ = watchdog.join();
+    }
+
+    let status = child.lock().expect("子プロセスの lock").wait();
     let stderr = stderr_reader
         .join()
         .map(|buffer| redact(&String::from_utf8_lossy(&buffer)))
@@ -237,6 +290,11 @@ impl Cancel {
 
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
+    }
+
+    /// 同じ旗を指しているか。**終わった実行が、後から始まった実行の旗を片付けない**ために使う。
+    pub fn is_same(&self, other: &Cancel) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
 }
 

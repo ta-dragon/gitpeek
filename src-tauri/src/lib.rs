@@ -90,6 +90,11 @@ pub struct AppState {
     /// **fetch と別に持つ。** 同じ枠を使い回すと、clone の最中に fetch を始めた
     /// 瞬間に clone 側の合図が捨てられ、中止ボタンが効かなくなる。
     pub clone_cancel: Mutex<Option<git::exec::Cancel>>,
+    /// 実行中のコミット検索を止めるための合図（T-36）。実行していなければ `None`。
+    ///
+    /// fetch / clone と**別に持つ**のは同じ理由。コード内容の検索は 2 万コミットで
+    /// 17 秒かかるので（docs/DESIGN.md §6.6）、その間の fetch で合図を失わないようにする。
+    pub search_cancel: Mutex<Option<git::exec::Cancel>>,
     /// 実行中の AI レビューを止めるための合図（T-22）。
     ///
     /// fetch / clone と**別に持つ**のは同じ理由。レビューは分単位で走るので、
@@ -746,7 +751,17 @@ async fn search_commits(
     let cache = state.snapshots.clone();
     let handle = app.clone();
 
-    tauri::async_runtime::spawn_blocking(move || {
+    // 中止の合図を置く。前の検索がまだ走っていたら、**その合図はここで止める**
+    // （画面は新しい検索しか見ていないので、古い検索に CPU を使わせる理由が無い）。
+    let cancel = git::exec::Cancel::new();
+    if let Ok(mut slot) = state.search_cancel.lock() {
+        if let Some(previous) = slot.replace(cancel.clone()) {
+            previous.cancel();
+        }
+    }
+    let running = cancel.clone();
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
         let path = PathBuf::from(&repository.path);
         if !path.is_dir() {
             return Err(format!("フォルダが見つかりません: {}", path.display()));
@@ -767,10 +782,35 @@ async fn search_commits(
             &path,
             &query,
             snapshot.head.sha.is_some(),
+            &running,
         )
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|error| error.to_string());
+
+    // **自分の合図のときだけ外す。** 後から始まった検索の合図を消すと、
+    // そちらの中止ボタンが効かなくなる。
+    if let Ok(mut slot) = state.search_cancel.lock() {
+        if slot.as_ref().is_some_and(|current| current.is_same(&cancel)) {
+            *slot = None;
+        }
+    }
+
+    outcome?
+}
+
+/// 実行中のコミット検索を止める（T-36）。走っていなければ何もしない。
+///
+/// **止めても結果は捨てない。** そこまでに見つかったぶんを「全部ではない」と
+/// 明記して返す（fetch と同じ考え方。docs/DESIGN.md §8.3）。
+#[tauri::command]
+async fn cancel_commit_search(state: State<'_, AppState>) -> Result<(), String> {
+    if let Ok(slot) = state.search_cancel.lock() {
+        if let Some(cancel) = slot.as_ref() {
+            cancel.cancel();
+        }
+    }
+    Ok(())
 }
 
 /// コミットメッセージをそのまま（`%B`）。**コピー用**。
@@ -1673,6 +1713,7 @@ pub fn run() {
                 snapshots: Arc::new(SnapshotCache::new()),
                 fetch_cancel: Mutex::new(None),
                 clone_cancel: Mutex::new(None),
+                search_cancel: Mutex::new(None),
                 review_cancel: Mutex::new(None),
                 log_status,
             });
@@ -1692,6 +1733,7 @@ pub fn run() {
             load_commit_detail,
             load_commit_message,
             search_commits,
+            cancel_commit_search,
             load_changed_files,
             load_file_diff,
             load_working_tree,

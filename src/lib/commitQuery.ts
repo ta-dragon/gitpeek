@@ -137,7 +137,10 @@ export function isEmptyQuery(query: CommitQuery): boolean {
   );
 }
 
-/** コード内容を探そうとしているか。**T-35 ではまだ探せない**ので画面で断る。 */
+/**
+ * コード内容を探そうとしているか。**重い**（`git log -S` は 2 万コミットで 17 秒）ので、
+ * このときだけ完了までの目安を出し、中止ボタンを出す（T-36。docs/DESIGN.md §6.6）。
+ */
 export function wantsCode(query: CommitQuery): boolean {
   return query.code !== null && query.code.trim() !== "";
 }
@@ -146,19 +149,16 @@ export function wantsCode(query: CommitQuery): boolean {
  * 打ったことばで何をするか。**フックに分岐を書かないために、ここで決める。**
  *
  * - `clear` … 何も打っていない。結果を捨てて「まだ探していない」に戻す
- * - `refuse` … `code:` が打たれた。**T-35 ではまだ探せない**ので走らせずに断る
- * - `search` … Rust へ渡して探す
+ * - `search` … Rust へ渡して探す。`slow` はコード内容を含むとき（目安と中止を出す）
  *
- * どの場合も `notices`（効かなかった打ち方）は画面へ出す。
+ * どちらの場合も `notices`（効かなかった打ち方）は画面へ出す。
  */
 export type SearchPlan =
   | { kind: "clear"; notices: QueryNotice[] }
-  | { kind: "refuse"; notices: QueryNotice[] }
-  | { kind: "search"; query: CommitQuery; notices: QueryNotice[] };
+  | { kind: "search"; query: CommitQuery; slow: boolean; notices: QueryNotice[] };
 
 export function planSearch(input: string): SearchPlan {
   const { query, notices } = parseQuery(input);
   if (isEmptyQuery(query)) return { kind: "clear", notices };
-  if (wantsCode(query)) return { kind: "refuse", notices };
-  return { kind: "search", query, notices };
+  return { kind: "search", query, slow: wantsCode(query), notices };
 }

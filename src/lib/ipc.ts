@@ -616,6 +616,8 @@ export function loadCommitMessage(repositoryId: string, sha: string): Promise<st
 export type CommitSearchOutcome = {
   shas: string[];
   elapsedMs: number;
+  /** 中止した（T-36）。**`shas` はそこまでに見つかったぶんで、全部ではない。** */
+  cancelled: boolean;
 };
 
 /**
@@ -632,6 +634,16 @@ export function searchCommits(
   query: CommitQuery,
 ): Promise<CommitSearchOutcome> {
   return invoke<CommitSearchOutcome>("search_commits", { repositoryId, query });
+}
+
+/**
+ * 実行中のコミット検索を止める（T-36）。走っていなければ何もしない。
+ *
+ * 止めても `searchCommits` はエラーにならず、**そこまでに見つかったぶんを
+ * `cancelled: true` で返す**。
+ */
+export function cancelCommitSearch(): Promise<void> {
+  return invoke<void>("cancel_commit_search");
 }
 
 export function loadChangedFiles(
@@ -946,6 +958,11 @@ export type RepositoryUiState = {
   lastOpenedAt: string | null;
   /** 前回読み込んだコミット数。進捗の割合表示の分母にするだけの概算値。 */
   lastCommitCount: number | null;
+  /**
+   * コード内容の検索が 1 秒に見たコミット数の実測（T-36）。**目安の時間を出すためだけ**の値。
+   * 無ければ `lib/commitSearch.ts` の既定で見積もる。
+   */
+  codeSearchRate: number | null;
   selectedCommit: string | null;
   /** 2 点比較の**比較元**（T-15）。null なら比較していない。比較先は `selectedCommit`。 */
   compareCommit: string | null;

@@ -52,7 +52,7 @@ pub fn load(
 
     let mut seen = 0_u64;
     let mut last_report = Instant::now();
-    let output = exec::run_streaming(log, program, Some(path), &args, &mut |chunk| {
+    let output = exec::run_streaming(log, program, Some(path), &args, None, &mut |chunk| {
         // レコードは NUL 終端。数えるだけならパースを待たなくてよい。
         seen += bytecount(chunk, 0);
         if last_report.elapsed().as_millis() >= REPORT_INTERVAL_MS {
