@@ -355,6 +355,19 @@ git_ -C "$repo" merge --quiet --squash refreshed >/dev/null
 git_ -C "$repo" commit --quiet -m "Squashed: refreshed"
 git_ -C "$repo" checkout --quiet main
 
+# 「取り込んでいる可能性があるブランチ」の候補から外れるもの（T-38）。
+# 先端が squashed より古いブランチ。**取り込んだのなら先端は後にできる**ので候補にしない。
+git_ -C "$repo" checkout --quiet -b stale main
+printf 'old
+' >"$repo/stale.txt"
+git_ -C "$repo" add -A
+GIT_AUTHOR_DATE="2025-01-01T09:00:00+09:00" GIT_COMMITTER_DATE="2025-01-01T09:00:00+09:00" \
+  git_ -C "$repo" commit --quiet -m "先端が古いブランチ"
+# squashed を上流にしているブランチ。中身は入っているが「自分に自分が入っている」だけなので候補にしない。
+git_ -C "$repo" branch --quiet follows-squashed grown
+git_ -C "$repo" branch --quiet --set-upstream-to=squashed follows-squashed >/dev/null
+git_ -C "$repo" checkout --quiet main
+
 # --- コミット検索 -----------------------------------------------------------
 # 要約と本文に別々の語を書き分ける。**手元の %s は要約 1 行しか持たない**ので、
 # 「本文にしか無い語で当たる」ことが、git に聞いている証拠になる（docs/DESIGN.md §6.6）。

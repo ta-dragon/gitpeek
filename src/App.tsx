@@ -33,6 +33,7 @@ import {
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
 import { SplitPane } from "./components/common/SplitPane";
+import { ContainersDialog } from "./components/common/ContainersDialog";
 import { RefTree } from "./components/sidebar/RefTree";
 import { RepositoryList, type SortMode } from "./components/sidebar/RepositoryList";
 import { Sidebar } from "./components/sidebar/Sidebar";
@@ -88,6 +89,8 @@ import {
   updateSettings,
   useSettings,
 } from "./store/settings";
+import { closeContainers, pump, useContainment } from "./store/containment";
+import { autoCheckBranches, squashJump } from "./lib/containment";
 import * as snapshots from "./store/snapshot";
 import { useSnapshot } from "./store/snapshot";
 import {
@@ -597,6 +600,10 @@ export default function App() {
         />
       )}
 
+      {/* 取り込まれているか（T-38。docs/DESIGN.md §7.6）。**ローカルブランチを 1 本ずつ調べる。** */}
+      <ContainmentRunner />
+      <ContainersHost onJump={revealCommit} onNotice={setMessage} />
+
       {/* clone（T-19。docs/DESIGN.md §8.4）。**成功したら黙って閉じて開く。** */}
       {cloning.open && (
         <CloneDialog
@@ -673,6 +680,60 @@ export default function App() {
  * 開閉は `state.json` の `collapsedTreeNodes` に、どちらもリポジトリごとに残る。
  * 履歴を読み終えるまでは ref 一覧が無いので何も出さない。
  */
+/**
+ * 取り込まれているかを調べる列を流す（T-38）。**描くものは無い。**
+ *
+ * スナップショット・結果のどちらかが変わるたびに 1 本ぶん進める。相手は幹だけ。
+ * 判断は `lib/containment.ts`、列と結果は `store/containment.ts`。
+ */
+function ContainmentRunner() {
+  const snapshot = useSnapshot();
+  const containment = useContainment();
+  const repositoryId = snapshot.repositoryId;
+  const data = snapshot.data;
+
+  useEffect(() => {
+    // 読み直しの間（fetch のあとなど）は data が空になるが、**覚えた結果は捨てない**
+    // （捨てるのはリポジトリを切り替えたときだけ。鍵が先端の組なので、動いたものだけ調べ直しになる）。
+    const refs = data?.refs ?? [];
+    const target = data?.defaultBranch ?? null;
+    pump(repositoryId, refs, target, autoCheckBranches(refs, target));
+  }, [repositoryId, data, containment]);
+
+  return null;
+}
+
+/** 「このブランチを取り込んでいる可能性があるブランチを調べる…」の置き場所（T-38）。開くのはストアの `openContainers`。 */
+function ContainersHost({
+  onJump,
+  onNotice,
+}: {
+  onJump: (sha: string) => void;
+  onNotice: (message: string) => void;
+}) {
+  const snapshot = useSnapshot();
+  const containment = useContainment();
+  const data = snapshot.data;
+  if (containment.containersFor === null || data === null || snapshot.repositoryId === null) {
+    return null;
+  }
+
+  return (
+    <ContainersDialog
+      // 対象が変わったら結果を持ち越さない（調べ直す）。
+      key={containment.containersFor.name}
+      repositoryId={snapshot.repositoryId}
+      branch={containment.containersFor}
+      refs={data.refs}
+      onJumpCommit={(sha) => {
+        if (squashJump(sha, snapshots.currentShownShas()) === "go") onJump(sha);
+        else onNotice(ja.containment.squashHidden);
+      }}
+      onClose={closeContainers}
+    />
+  );
+}
+
 function RefTreePanel({
   entry,
   onJump,

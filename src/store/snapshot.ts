@@ -312,6 +312,24 @@ export function currentHeadSha(): string | null {
   return snapshot.data?.head.sha ?? null;
 }
 
+let shownCache: { layout: LaneLayout | null; shas: Set<string> } = { layout: null, shas: new Set() };
+
+/**
+ * いまグラフに出している行の SHA。**購読していない場所から読む用。**
+ *
+ * 取り込まれているかの印から squash コミットへ飛ぶとき（T-38）、相手をグラフから外していて
+ * 行が無いことを知るのに使う。レーンが変わるまで同じ集合を使い回す。
+ */
+export function currentShownShas(): ReadonlySet<string> {
+  if (shownCache.layout !== snapshot.layout) {
+    shownCache = {
+      layout: snapshot.layout,
+      shas: new Set(snapshot.layout?.rows.map((row) => row.sha) ?? []),
+    };
+  }
+  return shownCache.shas;
+}
+
 /** 表示中のリポジトリを読み直す。fetch / checkout の後に使う（T-17 / T-18）。 */
 export function reload(): Promise<void> {
   return load(snapshot.repositoryId, true, true);

@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use gitpeek_lib::git::contained::{self, Containment, ContainmentOutcome};
+use gitpeek_lib::git::exec::Cancel;
 use gitpeek_lib::git::snapshot;
 use gitpeek_lib::model::RepositorySnapshot;
 
@@ -225,4 +226,156 @@ fn loose_objects(repo: &Path) -> u64 {
         .find_map(|line| line.strip_prefix("count: "))
         .and_then(|count| count.trim().parse().ok())
         .expect("count: の行があること")
+}
+
+/* ---------- 取り込んでいる可能性があるブランチを探す（T-38）---------- */
+
+fn names(list: &[String]) -> Vec<&str> {
+    list.iter().map(String::as_str).collect()
+}
+
+#[test]
+fn candidates_leave_out_what_cannot_be_a_container() {
+    let snapshot = load();
+    let candidates = contained::container_candidates(&snapshot, "refs/heads/squashed")
+        .expect("候補を出せること");
+    let listed = names(&candidates);
+
+    // 取り込んでいるものも、いないものも候補には入る（調べてみないと分からない）。
+    for name in ["refs/heads/main", "refs/heads/grown", "refs/heads/unmerged"] {
+        assert!(listed.contains(&name), "{name} が候補に無い: {listed:?}");
+    }
+    // 自分自身・タグ・先端が古いもの・自分を上流にしているものは外す。
+    for name in [
+        "refs/heads/squashed",
+        "refs/tags/squash-tag",
+        "refs/heads/stale",
+        "refs/heads/follows-squashed",
+    ] {
+        assert!(!listed.contains(&name), "{name} が候補に入っている: {listed:?}");
+    }
+    // **外した理由が別のものになっていないこと**: stale は中身を持っている（main から分かれた）ので、
+    // 候補にすれば見つかる。外れたのは先端が古いからだけ。
+    assert_eq!(
+        check("squashed", "stale"),
+        Containment::Contained {
+            squash: Some(sha_of("Squashed: squashed")),
+        }
+    );
+    assert_eq!(check("squashed", "follows-squashed"), Containment::Ancestor);
+
+    // 逆向き: follows-squashed から見ると、上流の squashed は候補にしない。
+    let reverse = contained::container_candidates(&snapshot, "refs/heads/follows-squashed")
+        .expect("候補を出せること");
+    assert!(!names(&reverse).contains(&"refs/heads/squashed"), "{reverse:?}");
+    // 上流でなければ候補になる（外れたのが上流だからだと確かめる）。
+    assert!(names(&reverse).contains(&"refs/heads/main"), "{reverse:?}");
+}
+
+#[test]
+fn candidates_come_local_first_then_by_name() {
+    let candidates =
+        contained::container_candidates(&load(), "refs/heads/squashed").expect("候補を出せること");
+    let mut sorted = candidates.clone();
+    sorted.sort_by_key(|name| (!name.starts_with("refs/heads/"), name.clone()));
+    assert_eq!(candidates, sorted);
+}
+
+#[test]
+fn every_container_of_a_squashed_branch_is_found() {
+    let snapshot = load();
+    let scratch = tempfile::tempdir().expect("一時ディレクトリ");
+    let mut calls = Vec::new();
+    let search = contained::find_containers_in(
+        &log(),
+        "git",
+        &repo(),
+        &snapshot,
+        "refs/heads/squashed",
+        &Cancel::new(),
+        &mut |done, total, found| calls.push((done, total, found)),
+        scratch.path(),
+    )
+    .expect("調べられること");
+
+    let found = |name: &str| {
+        search
+            .found
+            .iter()
+            .find(|outcome| outcome.target == name)
+            .map(|outcome| outcome.containment.clone())
+    };
+    let squash = sha_of("Squashed: squashed");
+    assert_eq!(
+        found("refs/heads/main"),
+        Some(Containment::Contained {
+            squash: Some(squash.clone()),
+        })
+    );
+    assert_eq!(found("refs/heads/grown"), Some(Containment::Ancestor));
+    assert_eq!(
+        found("refs/heads/main-rewritten"),
+        Some(Containment::SquashedThenChanged { squash })
+    );
+    // 入っていないものは載せない。
+    for name in ["refs/heads/unmerged", "refs/heads/merged-normally", "refs/heads/lonely"] {
+        assert_eq!(found(name), None, "{name} が見つかったことになっている");
+    }
+
+    assert!(!search.cancelled);
+    assert!(search.failures.is_empty(), "{:?}", search.failures);
+    assert_eq!(search.checked, search.total);
+    // 進み具合は 0 から始まり、1 本ごとに 1 つ進んで、最後は全部。
+    assert_eq!(calls.first(), Some(&(0, search.total, 0)));
+    assert_eq!(calls.len() as u32, search.total + 1);
+    assert_eq!(
+        calls.last(),
+        Some(&(search.total, search.total, search.found.len() as u32))
+    );
+    // 一時フォルダは残らない。
+    assert_eq!(std::fs::read_dir(scratch.path()).expect("読めること").count(), 0);
+}
+
+#[test]
+fn a_cancelled_search_stops_and_says_so() {
+    let snapshot = load();
+    let scratch = tempfile::tempdir().expect("一時ディレクトリ");
+    let cancel = Cancel::new();
+    let mut seen = 0;
+    let search = contained::find_containers_in(
+        &log(),
+        "git",
+        &repo(),
+        &snapshot,
+        "refs/heads/squashed",
+        &cancel,
+        // 1 本調べたところで止める。
+        &mut |done, _, _| {
+            seen = done;
+            if done == 1 {
+                cancel.cancel();
+            }
+        },
+        scratch.path(),
+    )
+    .expect("中止しても失敗にはしない");
+    assert!(search.cancelled);
+    assert_eq!(search.checked, 1, "止めたのに調べ続けた");
+    assert!(search.total > 1);
+    assert_eq!(seen, 1);
+}
+
+#[test]
+fn searching_from_a_tag_is_refused() {
+    let snapshot = load();
+    assert!(contained::container_candidates(&snapshot, "refs/tags/squash-tag").is_err());
+    assert!(contained::container_candidates(&snapshot, "refs/heads/nothing").is_err());
+}
+
+#[test]
+fn a_branch_merged_into_this_one_does_not_count_as_taking_it_in() {
+    // squashed は merged-normally を取り込んだ main から分かれた。squashed の一番古いコミットは
+    // その**マージコミット**で、中身は merged-normally にある。それだけで「4 個中 1 個まで入っている」と
+    // 答えてはいけない（ブランチ自身の変更は 1 つも入っていない）。
+    assert_eq!(check("squashed", "merged-normally"), Containment::NotContained);
 }

@@ -7,6 +7,7 @@
 import { ja } from "../../i18n/ja";
 import type { RefEntry } from "../../lib/ipc";
 import { isHeadRef } from "../../lib/refTree";
+import { ContainmentMark } from "../common/ContainmentMark";
 
 /** 1 行に出すチップの上限。これを超えたぶんは `+N` に畳む。 */
 export const MAX_CHIPS = 3;
@@ -16,6 +17,7 @@ export function RefChips({
   headBranch,
   detachedHead,
   onContextMenu,
+  onJumpSquash,
 }: {
   refs: RefEntry[];
   /** HEAD が乗っているローカルブランチの**短い名前**。detached なら null。 */
@@ -29,6 +31,8 @@ export function RefChips({
    * `+N` に畳まれたぶんは対象にしない（どれを指しているか決まらない）。
    */
   onContextMenu: (entry: RefEntry, x: number, y: number) => void;
+  /** 取り込まれているかの印のクリック（T-38）。squash コミットへ飛ぶ。 */
+  onJumpSquash: (sha: string) => void;
 }) {
   if (refs.length === 0 && !detachedHead) return null;
 
@@ -57,6 +61,10 @@ ${ja.commits.orphanHint}` : entry.name}
         >
           {/* 幹と繋がっていない履歴。グラフではその島のルートで線が止まる。 */}
           {entry.orphan && <span className="chip__mark">{ja.commits.orphanMark}</span>}
+          {/* 取り込まれているか（T-38）。`+N` に畳まれたぶんには付けない。 */}
+          {entry.kind !== "tag" && (
+            <ContainmentMark entry={entry} variant="chip" onJumpSquash={onJumpSquash} />
+          )}
           {entry.shortName}
         </span>
       ))}

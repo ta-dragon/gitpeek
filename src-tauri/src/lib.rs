@@ -95,6 +95,9 @@ pub struct AppState {
     /// fetch / clone と**別に持つ**のは同じ理由。コード内容の検索は 2 万コミットで
     /// 17 秒かかるので（docs/DESIGN.md §6.6）、その間の fetch で合図を失わないようにする。
     pub search_cancel: Mutex<Option<git::exec::Cancel>>,
+    /// 「このブランチを取り込んでいる可能性があるブランチ」を調べるのを止める合図（T-38）。
+    /// 検索と別に持つのは同じ理由（onyx では数分かかる。その間の検索で合図を失わない）。
+    pub containers_cancel: Mutex<Option<git::exec::Cancel>>,
     /// 実行中の AI レビューを止めるための合図（T-22）。
     ///
     /// fetch / clone と**別に持つ**のは同じ理由。レビューは分単位で走るので、
@@ -851,6 +854,109 @@ async fn check_containment(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+/// 「このブランチを取り込んでいる可能性があるブランチ」の途中経過（T-38）。
+const CONTAINERS_PROGRESS_EVENT: &str = "containers-progress";
+
+/// 途中経過に**どのリポジトリのどのブランチのものか**を添える（閉じてすぐ別のを始めると、
+/// 前の走りの残りが後から届く）。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContainersProgressEvent<'a> {
+    repository_id: &'a str,
+    branch: &'a str,
+    done: u32,
+    total: u32,
+    found: u32,
+}
+
+/// `branch` を取り込んでいる可能性があるブランチをすべて調べる（T-38。T-39 を取り込んだ。
+/// docs/DESIGN.md §7.6.1）。**逐次で、時間がかかってよい**（利用者の指定）。
+///
+/// スナップショットは 1 度だけ引く（1 本ごとに `check_containment` を呼ぶと、そのたびに ref を
+/// 読み直して git が数千回走る）。**止めても結果は捨てない** — そこまでに見つかったぶんを
+/// 「全部ではない」と明記して返す（コミット検索と同じ。docs/DESIGN.md §6.6.1）。
+#[tauri::command]
+async fn find_containers(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    branch: String,
+) -> Result<git::contained::ContainerSearch, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let cache = state.snapshots.clone();
+    let handle = app.clone();
+
+    // 前の走りがまだ動いていたら止める（画面は新しいほうしか見ていない）。
+    let cancel = git::exec::Cancel::new();
+    if let Ok(mut slot) = state.containers_cancel.lock() {
+        if let Some(previous) = slot.replace(cancel.clone()) {
+            previous.cancel();
+        }
+    }
+    let running = cancel.clone();
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        let sink = EmittingLog::new(&handle, &log);
+        let snapshot = git::snapshot::load_cached(
+            &sink,
+            &program,
+            &path,
+            &cache,
+            &repository.id,
+            false,
+            &Reporting::silent(),
+        )?;
+        git::contained::find_containers(
+            &sink,
+            &program,
+            &path,
+            &snapshot,
+            &branch,
+            &running,
+            &mut |done, total, found| {
+                let _ = handle.emit(
+                    CONTAINERS_PROGRESS_EVENT,
+                    ContainersProgressEvent {
+                        repository_id: &repository.id,
+                        branch: &branch,
+                        done,
+                        total,
+                        found,
+                    },
+                );
+            },
+        )
+    })
+    .await
+    .map_err(|error| error.to_string());
+
+    // **自分の合図のときだけ外す**（後から始まった走りの中止ボタンを効かなくしない）。
+    if let Ok(mut slot) = state.containers_cancel.lock() {
+        if slot.as_ref().is_some_and(|current| current.is_same(&cancel)) {
+            *slot = None;
+        }
+    }
+
+    outcome?
+}
+
+/// [`find_containers`] を止める。走っていなければ何もしない。**相手 1 本ぶんの判定が終わった時点で効く。**
+#[tauri::command]
+async fn cancel_find_containers(state: State<'_, AppState>) -> Result<(), String> {
+    if let Ok(slot) = state.containers_cancel.lock() {
+        if let Some(cancel) = slot.as_ref() {
+            cancel.cancel();
+        }
+    }
+    Ok(())
 }
 
 /// コミットメッセージをそのまま（`%B`）。**コピー用**。
@@ -1762,6 +1868,7 @@ pub fn run() {
                 fetch_cancel: Mutex::new(None),
                 clone_cancel: Mutex::new(None),
                 search_cancel: Mutex::new(None),
+                containers_cancel: Mutex::new(None),
                 review_cancel: Mutex::new(None),
                 log_status,
             });
@@ -1783,6 +1890,8 @@ pub fn run() {
             search_commits,
             cancel_commit_search,
             check_containment,
+            find_containers,
+            cancel_find_containers,
             load_changed_files,
             load_file_diff,
             load_working_tree,

@@ -28,6 +28,10 @@ import {
 } from "../../lib/refTree";
 import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
 import { fetchMergeItem } from "../common/refMenu";
+import { containmentMenuItems } from "../common/containmentText";
+import { refLabel, squashJump } from "../../lib/containment";
+import { useContainment } from "../../store/containment";
+import { currentShownShas, useSnapshot } from "../../store/snapshot";
 import { RefTreeNodeView, type NodeCallbacks } from "./RefTreeNode";
 
 type Props = {
@@ -80,6 +84,11 @@ export function RefTree({
   const [filter, setFilter] = useState("");
   const [since, setSince] = useState("");
   const [menu, setMenu] = useState<{ entry: RefEntry; x: number; y: number } | null>(null);
+  const containment = useContainment();
+  const containmentTarget =
+    containment.target === null
+      ? null
+      : { name: containment.target, label: refLabel(refs, containment.target) };
 
   const groups = useMemo(() => buildRefTree(refs, filter), [refs, filter]);
   const excluded = useMemo(() => excludedSet(visibleRefs), [visibleRefs]);
@@ -110,6 +119,11 @@ export function RefTree({
       onVisibleRefsChange(withVisibility(visibleRefs, names, show)),
     onJump: (entry) => {
       if (!entry.outOfGraph) onJump(entry.target);
+    },
+    // **相手をグラフから外していると行が無い。** 黙って何も起きないと壊れたように見える。
+    onJumpSquash: (sha) => {
+      if (squashJump(sha, currentShownShas()) === "go") onJump(sha);
+      else onNotice(ja.containment.squashHidden);
     },
     onContextMenu: (entry, x, y) => setMenu({ entry, x, y }),
     // **ダブルクリックで checkout**（docs/DESIGN.md §8.1）。確認は必ず出る。
@@ -159,6 +173,8 @@ export function RefTree({
         <div className="app__spacer" />
         <span className="reftree__count">{refs.length}</span>
       </header>
+
+      <ContainmentStatus refs={refs} />
 
       <div className="reftree__filter">
         <input
@@ -269,10 +285,38 @@ export function RefTree({
             onCheckout,
             onMerge,
             onFetchMerge,
+            containmentTarget,
           })}
         />
       )}
     </section>
+  );
+}
+
+/**
+ * 取り込まれているかを調べている間の一行と、相手についての注記（T-38）。
+ *
+ * **何も起きていないように見せない。** 調べ終わったら消える。相手（幹）が決まらないときは、
+ * 調べていないことを出す（黙って印が付かないと「どれも入っていない」と読める）。
+ */
+function ContainmentStatus({ refs }: { refs: RefEntry[] }) {
+  const containment = useContainment();
+  const snapshot = useSnapshot();
+  if (containment.repositoryId !== snapshot.repositoryId) return null;
+
+  const target = containment.target;
+  if (target === null) {
+    return <p className="reftree__containment">{ja.containment.noTarget}</p>;
+  }
+  if (containment.running === null) return null;
+  return (
+    <p className="reftree__containment" title={ja.containment.progressHint}>
+      {ja.containment.progress(
+        refLabel(refs, target),
+        containment.progress.done,
+        containment.progress.total,
+      )}
+    </p>
   );
 }
 
@@ -370,6 +414,7 @@ function menuItems(
     onCheckout: (entry: RefEntry) => void;
     onMerge: (entry: RefEntry) => void;
     onFetchMerge: (entry: RefEntry) => void;
+    containmentTarget: { name: string; label: string } | null;
   },
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
@@ -394,6 +439,9 @@ function menuItems(
       onSelect: () => actions.onVisibleRefsChange(onlyVisible(branchNames(refs), [entry.name])),
     });
   }
+
+  // 取り込まれているか（T-38）。**チップのメニューにも同じものを出す**（`containmentText.ts`）。
+  items.push(...containmentMenuItems(entry, actions.containmentTarget));
 
   items.push({
     label: ja.refTree.jump,

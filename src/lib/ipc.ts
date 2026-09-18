@@ -646,6 +646,94 @@ export function cancelCommitSearch(): Promise<void> {
   return invoke<void>("cancel_commit_search");
 }
 
+/* ---------- 取り込まれているか（`src-tauri/src/git/contained.rs`）---------- */
+
+/**
+ * 判定の種類（T-37）。**文言は持たない**（画面が `lib/containment.ts` を通して引く）。
+ *
+ * `squash` は squash したコミットの SHA。見つからなければ null。
+ */
+export type Containment =
+  | { kind: "ancestor" }
+  | { kind: "contained"; squash: string | null }
+  | { kind: "partial"; upto: number; total: number; squash: string | null }
+  | { kind: "squashedThenChanged"; squash: string }
+  | { kind: "notContained" };
+
+/** 判定の結果。**先端を添えて返る**ので、画面は「先端の組」で覚える（T-38）。 */
+export type ContainmentOutcome = {
+  branch: string;
+  target: string;
+  branchTip: string;
+  targetTip: string;
+  containment: Containment;
+  elapsedMs: number;
+};
+
+/**
+ * `branch` が `target` に取り込まれているか（T-37 / T-38。docs/DESIGN.md §7.6）。
+ *
+ * **どちらも完全な ref 名。SHA は渡さない**（Rust がスナップショットから引く）。
+ * タグ・同じ名前・グラフ外は断られる。
+ */
+export function checkContainment(
+  repositoryId: string,
+  branch: string,
+  target: string,
+): Promise<ContainmentOutcome> {
+  return invoke<ContainmentOutcome>("check_containment", { repositoryId, branch, target });
+}
+
+/** 相手 1 本ぶんの失敗。**1 本の失敗で全体を止めない。** */
+export type ContainerFailure = { target: string; reason: string };
+
+/** `src-tauri/src/git/contained.rs` の `ContainerSearch`。 */
+export type ContainerSearch = {
+  branch: string;
+  /** 調べる相手の数。 */
+  total: number;
+  /** 調べ終えた数。中止すると `total` より少ない。 */
+  checked: number;
+  /** **入っていた相手だけ**（入っていないものは載らない）。 */
+  found: ContainmentOutcome[];
+  failures: ContainerFailure[];
+  /** 中止した。**`found` はそこまでに見つかったぶんで、全部ではない。** */
+  cancelled: boolean;
+  elapsedMs: number;
+};
+
+/**
+ * `branch` を取り込んでいる可能性があるブランチをすべて調べる（T-38。docs/DESIGN.md §7.6.1）。
+ *
+ * 相手を選ぶのは Rust（先端が古くないブランチ。タグ・自分・先端が同じもの・上流の組は除く）。
+ * **逐次で、時間がかかってよい。** 途中経過は `onContainersProgress` で届く。
+ */
+export function findContainers(repositoryId: string, branch: string): Promise<ContainerSearch> {
+  return invoke<ContainerSearch>("find_containers", { repositoryId, branch });
+}
+
+/** 止める。**相手 1 本ぶんの判定が終わった時点で効き**、そこまでの結果が返る。 */
+export function cancelFindContainers(): Promise<void> {
+  return invoke<void>("cancel_find_containers");
+}
+
+/** `containers-progress` の中身。**どのリポジトリのどのブランチのものか**が付く。 */
+export type ContainersProgress = {
+  repositoryId: string;
+  branch: string;
+  done: number;
+  total: number;
+  found: number;
+};
+
+const CONTAINERS_PROGRESS_EVENT = "containers-progress";
+
+export function onContainersProgress(
+  handler: (progress: ContainersProgress) => void,
+): Promise<UnlistenFn> {
+  return listen<ContainersProgress>(CONTAINERS_PROGRESS_EVENT, (event) => handler(event.payload));
+}
+
 export function loadChangedFiles(
   repositoryId: string,
   sha: string,

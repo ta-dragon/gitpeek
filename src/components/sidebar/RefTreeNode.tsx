@@ -8,6 +8,7 @@
 import { ja } from "../../i18n/ja";
 import type { BranchStatus, RefEntry } from "../../lib/ipc";
 import { checkStateOf, isHeadRef, type CheckState, type RefTreeNode } from "../../lib/refTree";
+import { ContainmentMark } from "../common/ContainmentMark";
 
 /** 1 段ぶんの字下げ幅（px）。狭いサイドバーで深いパスも読めるよう控えめにする。 */
 const INDENT = 12;
@@ -19,6 +20,8 @@ export type NodeCallbacks = {
   /** チェックの一括切り替え。フォルダなら配下すべて。 */
   onToggleVisible: (names: string[], show: boolean) => void;
   onJump: (entry: RefEntry) => void;
+  /** 取り込まれているかの印のクリック（T-38）。squash コミットへ飛ぶ。 */
+  onJumpSquash: (sha: string) => void;
   onContextMenu: (entry: RefEntry, x: number, y: number) => void;
   /** ダブルクリック。**checkout の確認を出す**（T-18。docs/DESIGN.md §8.1）。 */
   onActivate: (entry: RefEntry) => void;
@@ -144,6 +147,10 @@ export function RefTreeNodeView({
         )}
         {status !== undefined && status.behind > 0 && (
           <span className="reftree__behind">{ja.refTree.behind(status.behind)}</span>
+        )}
+        {/* 取り込まれているか（T-38）。タグには付かない（調べる対象にしない）。 */}
+        {entry.kind !== "tag" && (
+          <ContainmentMark entry={entry} variant="tree" onJumpSquash={callbacks.onJumpSquash} />
         )}
       </div>
     </li>

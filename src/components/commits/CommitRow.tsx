@@ -37,6 +37,8 @@ type Props = {
   onContextMenu: (sha: string, x: number, y: number) => void;
   /** ref チップの右クリック（T-18）。**行とは別のメニュー**。 */
   onRefContextMenu: (entry: RefEntry, x: number, y: number) => void;
+  /** 取り込まれているかの印のクリック（T-38）。 */
+  onJumpSquash: (sha: string) => void;
 };
 
 export const CommitRow = memo(function CommitRow({
@@ -54,6 +56,7 @@ export const CommitRow = memo(function CommitRow({
   onSelect,
   onContextMenu,
   onRefContextMenu,
+  onJumpSquash,
 }: Props) {
   const absolute = absoluteTimeDetailed(commit.commitTime);
 
@@ -81,6 +84,7 @@ export const CommitRow = memo(function CommitRow({
           headBranch={headBranch}
           detachedHead={detachedHead}
           onContextMenu={onRefContextMenu}
+          onJumpSquash={onJumpSquash}
         />
         <span className="crow__text" title={commit.subject}>
           {commit.subject === "" ? ja.commits.emptySubject : commit.subject}

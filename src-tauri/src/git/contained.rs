@@ -18,7 +18,7 @@ use std::time::Instant;
 use serde::Serialize;
 
 use crate::commandlog::LogSink;
-use crate::git::exec;
+use crate::git::exec::{self, Cancel};
 use crate::git::scratch::ScratchDir;
 use crate::graph::reach::CommitIndex;
 use crate::model::{CommitMeta, RefKind, RepositorySnapshot};
@@ -86,21 +86,182 @@ pub fn check_in(
     target: &str,
     scratch_parent: &Path,
 ) -> Result<ContainmentOutcome, String> {
+    let index = CommitIndex::new(&snapshot.commits);
+    check_indexed(log, program, path, snapshot, &index, branch, target, scratch_parent)
+}
+
+/// [`check_in`] の本体。**索引は呼ぶ側が 1 度だけ作る**（[`find_containers`] は数千本と比べるので、
+/// 1 本ごとに 2 万コミットの索引を作り直さない）。
+#[allow(clippy::too_many_arguments)]
+fn check_indexed(
+    log: &dyn LogSink,
+    program: &str,
+    path: &Path,
+    snapshot: &RepositorySnapshot,
+    index: &CommitIndex<'_>,
+    branch: &str,
+    target: &str,
+    scratch_parent: &Path,
+) -> Result<ContainmentOutcome, String> {
     let started = Instant::now();
     if branch == target {
         return Err(format!("同じブランチどうしは比べられません: {branch}"));
     }
     let branch_tip = tip_of(snapshot, branch)?;
     let target_tip = tip_of(snapshot, target)?;
-    let index = CommitIndex::new(&snapshot.commits);
 
-    let containment = judge(log, program, path, &index, &branch_tip, &target_tip, scratch_parent)?;
+    let containment = judge(log, program, path, index, &branch_tip, &target_tip, scratch_parent)?;
     Ok(ContainmentOutcome {
         branch: branch.to_string(),
         target: target.to_string(),
         branch_tip,
         target_tip,
         containment,
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    })
+}
+
+/* ---------- 取り込んでいる可能性があるブランチを探す（T-38。T-39 を取り込んだ）---------- */
+
+/// 相手 1 本ぶんの失敗。**1 本の失敗で全体を止めない**（残りは調べる）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContainerFailure {
+    pub target: String,
+    pub reason: String,
+}
+
+/// 「このブランチを取り込んでいる可能性があるブランチ」を調べた結果。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContainerSearch {
+    pub branch: String,
+    /// 調べる相手の数（[`container_candidates`] の数）。
+    pub total: u32,
+    /// 調べ終えた数。中止すると `total` より少ない。
+    pub checked: u32,
+    /// **入っていた相手だけ**（`NotContained` は載せない）。候補の順のまま。
+    pub found: Vec<ContainmentOutcome>,
+    pub failures: Vec<ContainerFailure>,
+    /// 中止した。**`found` はそこまでに見つかったぶんで、全部ではない。**
+    pub cancelled: bool,
+    pub elapsed_ms: u64,
+}
+
+/// `branch` を取り込んでいる可能性がある相手（完全な ref 名）。ローカル → リモートの順、それぞれ名前順。
+///
+/// **先端のコミット時刻が `branch` の先端より古くないもの**だけ（取り込んだのなら、取り込んだ
+/// コミットはブランチの先端より後にできる）。除くもの — タグ（起点 ref ではない）／ 読み込んだ履歴の外 ／
+/// 自分自身 ／ **先端が同じもの**（調べるまでもない）／ **自分の上流と、自分を上流にしているもの**
+/// （同じブランチの手元と向こう。入っていても「自分に自分が入っている」だけ）。
+pub fn container_candidates(
+    snapshot: &RepositorySnapshot,
+    branch: &str,
+) -> Result<Vec<String>, String> {
+    let tip = tip_of(snapshot, branch)?;
+    let entry = snapshot
+        .refs
+        .iter()
+        .find(|entry| entry.name == branch)
+        .ok_or_else(|| format!("ブランチが見つかりません: {branch}"))?;
+    let index = CommitIndex::new(&snapshot.commits);
+    let time = index
+        .get(&tip)
+        .map(|commit| commit.commit_time)
+        .ok_or("読み込んだ履歴に無いコミットです")?;
+
+    let mut candidates: Vec<&crate::model::RefEntry> = snapshot
+        .refs
+        .iter()
+        .filter(|other| {
+            other.kind != RefKind::Tag
+                && !other.out_of_graph
+                && other.name != branch
+                && other.target != tip
+                && other.upstream.as_deref() != Some(branch)
+                && entry.upstream.as_deref() != Some(other.name.as_str())
+                && index
+                    .get(&other.target)
+                    .is_some_and(|commit| commit.commit_time >= time)
+        })
+        .collect();
+    candidates.sort_by(|a, b| {
+        (a.kind != RefKind::LocalBranch, &a.name).cmp(&(b.kind != RefKind::LocalBranch, &b.name))
+    });
+    Ok(candidates.into_iter().map(|other| other.name.clone()).collect())
+}
+
+/// `branch` を取り込んでいる可能性がある相手を**逐次に**調べる（時間がかかってよい — 利用者の指定）。
+///
+/// **相手ごとに中止を見る。** 止めたら、そこまでに見つかったものを `cancelled` 付きで返す。
+/// 1 本ごとに `on_progress(調べ終えた数, 全部の数, 見つかった数)` を呼ぶ。
+pub fn find_containers(
+    log: &dyn LogSink,
+    program: &str,
+    path: &Path,
+    snapshot: &RepositorySnapshot,
+    branch: &str,
+    cancel: &Cancel,
+    on_progress: &mut dyn FnMut(u32, u32, u32),
+) -> Result<ContainerSearch, String> {
+    find_containers_in(
+        log,
+        program,
+        path,
+        snapshot,
+        branch,
+        cancel,
+        on_progress,
+        &std::env::temp_dir(),
+    )
+}
+
+/// [`find_containers`] の一時フォルダの置き場所を渡せるもの（テストで「残らない」ことを見る）。
+#[allow(clippy::too_many_arguments)]
+pub fn find_containers_in(
+    log: &dyn LogSink,
+    program: &str,
+    path: &Path,
+    snapshot: &RepositorySnapshot,
+    branch: &str,
+    cancel: &Cancel,
+    on_progress: &mut dyn FnMut(u32, u32, u32),
+    scratch_parent: &Path,
+) -> Result<ContainerSearch, String> {
+    let started = Instant::now();
+    let candidates = container_candidates(snapshot, branch)?;
+    let index = CommitIndex::new(&snapshot.commits);
+    let total = candidates.len() as u32;
+
+    let mut found = Vec::new();
+    let mut failures = Vec::new();
+    let mut checked = 0;
+    let mut cancelled = false;
+    on_progress(0, total, 0);
+    for target in &candidates {
+        if cancel.is_cancelled() {
+            cancelled = true;
+            break;
+        }
+        match check_indexed(log, program, path, snapshot, &index, branch, target, scratch_parent) {
+            Ok(outcome) if outcome.containment != Containment::NotContained => found.push(outcome),
+            Ok(_) => {}
+            Err(reason) => failures.push(ContainerFailure {
+                target: target.clone(),
+                reason,
+            }),
+        }
+        checked += 1;
+        on_progress(checked, total, found.len() as u32);
+    }
+
+    Ok(ContainerSearch {
+        branch: branch.to_string(),
+        total,
+        checked,
+        found,
+        failures,
+        cancelled,
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
 }
@@ -172,6 +333,13 @@ fn judge(
     //    （squash の後にブランチへ足した場合。全体の差分は squash と一致しないので 3. では外れる）。
     let chain = first_parent_chain(index, branch_tip, target_tip);
     if let Some(found) = first_contained(chain.len(), |i| probe.contains(&chain[i].sha))? {
+        // **入っているのがマージコミットだけなら、ブランチ自身の変更は 1 つも入っていない。**
+        // 相手の側をブランチへ取り込んだマージは、中身が相手にあるので当然「入っている」になる
+        // （squashed が merged-normally を取り込んだ後なら、merged-normally は「4 個中 1 個まで」を
+        // 持っていることになってしまう。T-38 で全ブランチと比べて踏んだ。docs/DESIGN.md §17.1）。
+        if chain[found..].iter().all(|commit| commit.parents.len() > 1) {
+            return Ok(Containment::NotContained);
+        }
         return Ok(Containment::Partial {
             upto: (chain.len() - found) as u32,
             total: chain.len() as u32,
@@ -494,7 +662,10 @@ fn file_key(rest: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{first_contained, parse_candidates, signature, Containment, ContainmentOutcome};
+    use super::{
+        first_contained, parse_candidates, signature, ContainerFailure, ContainerSearch, Containment,
+        ContainmentOutcome,
+    };
 
     #[test]
     fn finds_the_first_contained_commit_by_bisecting() {
@@ -620,5 +791,28 @@ mod tests {
             serde_json::to_value(Containment::NotContained).unwrap()["kind"],
             "notContained"
         );
+    }
+
+    /// 「取り込んでいる可能性があるブランチ」の結果も、**フロントが読む綴り**で出ること（`lib/ipc.ts`）。
+    #[test]
+    fn the_container_search_is_sent_in_the_shape_the_screen_reads() {
+        let search = ContainerSearch {
+            branch: "refs/heads/a".to_string(),
+            total: 5,
+            checked: 2,
+            found: vec![],
+            failures: vec![ContainerFailure {
+                target: "refs/heads/b".to_string(),
+                reason: "x".to_string(),
+            }],
+            cancelled: true,
+            elapsed_ms: 7,
+        };
+        let json = serde_json::to_value(&search).expect("JSON にできること");
+        assert_eq!(json["checked"], 2);
+        assert_eq!(json["cancelled"], true);
+        assert_eq!(json["elapsedMs"], 7);
+        assert_eq!(json["failures"][0]["target"], "refs/heads/b");
+        assert!(json["found"].is_array());
     }
 }

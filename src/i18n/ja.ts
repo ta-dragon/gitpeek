@@ -530,6 +530,94 @@ export const ja = {
     copyFailed: "クリップボードへコピーできませんでした。",
   },
 
+  // ブランチが取り込まれているか（T-38。docs/DESIGN.md §7.6）。
+  //
+  // **「マージされました」と言わない。** 中身で判断しているので、squash でも cherry-pick でも、
+  // 同じ変更を手で書き直した場合でも当たる。言うのは「〈相手〉に入っています」。
+  containment: {
+    // ブランチ一覧の印。**種類の違いは書き出しに置く**（CLAUDE.md §6）。
+    mark: {
+      merged: "マージ済み",
+      contained: "入っている",
+      partial: (upto: number, total: number) => `${upto}/${total} まで`,
+      changed: "入った後に変更",
+      failed: "調べられず",
+    },
+    // チップの中の印。幅が無いので記号だけにし、違いは色とホバーで出す。
+    chipMark: {
+      merged: "✓",
+      contained: "✓",
+      partial: "◐",
+      changed: "✓",
+      failed: "?",
+    },
+    // ホバーの根拠。1 行目に結論、2 行目以降に何で分かったか。
+    merged: (target: string) =>
+      `${target} に入っています。\nふつうにマージされています（このブランチの先端が ${target} の履歴にあります）。`,
+    contained: (target: string, squash: string) =>
+      `${target} に入っています。\n${squash} と同じ変更です（squash してマージされたとみられます）。`,
+    containedNoSquash: (target: string) =>
+      `${target} に入っています。\n仮に ${target} へマージしても中身が変わりません。まとめて入れたコミットは見つかりませんでした（cherry-pick などで少しずつ入ったとみられます）。`,
+    partial: (target: string, upto: number, total: number) =>
+      `${target} に入っているのは、${total} 個のコミットのうち古いほうから ${upto} 個目までです。\n残りの ${total - upto} 個は入っていません。`,
+    partialSquash: (squash: string) => `入っているぶんは ${squash} と同じ変更です。`,
+    changed: (target: string, squash: string) =>
+      `${target} に入っています。\n${squash} として入ったあと、${target} で同じ所がさらに書き換えられています。`,
+    failed: (target: string, reason: string) =>
+      `${target} に入っているか調べられませんでした。\n${reason}`,
+    // 限界（DESIGN.md §7.6）。どの根拠にも添える。
+    byContent:
+      "中身で判断しています。同じ変更を別に書き直した場合も「入っている」になります。",
+    jumpHint: (squash: string) => `クリックで ${squash} へ移動します。`,
+    squashHidden:
+      "移動先のコミットはいまグラフに出していません。ブランチ一覧で相手のブランチにチェックを付けると出ます。",
+
+    // 調べている間（ブランチ一覧の見出しの下）。
+    progress: (target: string, done: number, total: number) =>
+      `${target} に入っているかを調べています（${done} / ${total}）`,
+    progressHint:
+      "ローカルブランチを 1 本ずつ調べています。調べ終わったものから印が付きます。",
+    noTarget:
+      "比べる相手が決まらないので、取り込まれているかは調べていません（既定ブランチが見つかりません）。",
+
+    // 右クリック。**方向を名前で書く**（CLAUDE.md §6）。
+    check: (target: string) => `${target} に入っているか調べる`,
+    checkNoTarget: "取り込まれているか調べる",
+    checkHint: "結果はブランチ一覧とチップに印で出ます。",
+    // **何が起きるかで書く。** 全部のブランチと比べるので時間がかかることも言っておく。
+    findContainers: "このブランチを取り込んでいる可能性があるブランチを調べる…",
+    findContainersHint:
+      "このブランチより後に動いたブランチを 1 本ずつ調べ、中身が入っているものを並べます。ブランチが多いと数分かかります（途中で止められます）。",
+    whyTag: "タグはグラフの起点ではないので、比べる対象にしていません。",
+    whyOutOfGraph: "読み込んだコミットの外を指しているので調べられません。",
+    whyIsTarget: "比べる相手そのものです。",
+    whyNoTarget: "既定ブランチが見つからないので、比べる相手が決まりません。「取り込んでいる可能性があるブランチを調べる…」なら調べられます。",
+
+    // 取り込んでいる可能性があるブランチ（T-38）。結果はこの画面にだけ出す（印にはしない）。
+    containersTitle: (branch: string) => `${branch} を取り込んでいる可能性があるブランチ`,
+    containersLead:
+      "このブランチより後に動いたブランチを 1 本ずつ調べています。中身で判断するので、squash や cherry-pick で入ったものも見つかります。",
+    containersProgress: (done: number, total: number, found: number) =>
+      `${total} 本のうち ${done} 本を調べました（見つかったのは ${found} 本）`,
+    containersRemaining: (seconds: number) =>
+      seconds < 60 ? `（残り 約 ${seconds} 秒）` : `（残り 約 ${Math.ceil(seconds / 60)} 分）`,
+    containersStarting: "調べる相手を数えています…",
+    containersStop: "止める",
+    containersStopping: "止めています（いま調べている 1 本が終わるまで待ちます）…",
+    containersNoCandidates:
+      "このブランチより後に動いたブランチがありません。取り込んでいるブランチは無いとみられます。",
+    containersNone: (checked: number) =>
+      `${checked} 本を調べましたが、このブランチを取り込んでいるブランチは見つかりませんでした。`,
+    containersFound: (count: number, checked: number) =>
+      `${checked} 本を調べ、${count} 本に入っていました。`,
+    containersCancelled: (count: number, checked: number, total: number) =>
+      `途中で止めました。${total} 本のうち ${checked} 本までで、${count} 本に入っていました（全部ではありません）。`,
+    containersFailures: (n: number) => `${n} 本は調べられませんでした（ホバーで理由）。`,
+    containersJumpBranch: "ブランチへ移動",
+    containersJumpSquash: (squash: string) => `${squash} へ移動`,
+    close: "閉じる",
+  },
+
 
   // checkout と FF マージ（T-18。docs/DESIGN.md §8.1, §8.2）。
   //

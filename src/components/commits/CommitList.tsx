@@ -13,6 +13,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
 import { fetchMergeItem } from "../common/refMenu";
+import { containmentMenuItems } from "../common/containmentText";
+import { refLabel } from "../../lib/containment";
+import { useContainment } from "../../store/containment";
 import { CommitGraph } from "../graph/CommitGraph";
 import type { WorkingSummary } from "../../lib/workingTree";
 import { WorkingTreeRow } from "./WorkingTreeRow";
@@ -232,6 +235,13 @@ export function CommitList({
   /** ジャンプとキーボード操作は**常に 1 点選択**（比較は Ctrl+クリックだけ）。 */
   const selectOnly = useCallback((sha: string) => onSelect(sha, false), [onSelect]);
 
+  // 右クリックの「〈相手〉に入っているか調べる」の相手（T-38）。
+  const containment = useContainment();
+  const containmentTarget =
+    containment.target === null
+      ? null
+      : { name: containment.target, label: refLabel(refs, containment.target) };
+
   // ブランチツリーからのジャンプ。処理済みの連番を覚えておき、再描画では動かない。
   const handledJump = useRef(0);
   useEffect(() => {
@@ -242,6 +252,21 @@ export function CommitList({
     selectOnly(jumpTo.sha);
     reveal(row);
   }, [jumpTo, indexBySha, selectOnly, reveal]);
+
+  // 取り込まれているかの印から squash コミットへ（T-38）。
+  // **相手をグラフから外していると行が無い。** 黙って何も起きないと壊れたように見える。
+  const jumpSquash = useCallback(
+    (sha: string) => {
+      const row = indexBySha.get(sha);
+      if (row === undefined) {
+        onNotice(ja.containment.squashHidden);
+        return;
+      }
+      selectOnly(sha);
+      reveal(row);
+    },
+    [indexBySha, onNotice, selectOnly, reveal],
+  );
 
   const { choice, closeChoice } = useCommitNavigation({
     commits: shown,
@@ -549,6 +574,7 @@ export function CommitList({
                       onSelect(commit.sha, false);
                       setChipMenu({ entry, sha: commit.sha, x, y });
                     }}
+                    onJumpSquash={jumpSquash}
                   />
                 </div>
               );
@@ -592,6 +618,7 @@ export function CommitList({
             onMergeRef,
             onFetchMergeRef,
             onCheckoutCommit,
+            containmentTarget,
           })}
           onClose={() => setChipMenu(null)}
         />
@@ -619,6 +646,7 @@ function chipMenuItems(
     onMergeRef: (entry: RefEntry) => void;
     onFetchMergeRef: (entry: RefEntry) => void;
     onCheckoutCommit: (sha: string) => void;
+    containmentTarget: { name: string; label: string } | null;
   },
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
@@ -641,6 +669,9 @@ function chipMenuItems(
     // **ref ツリーと同じ項目を出す。** 片方だけにあると、どこから辿れるのか読めない。
     items.push(fetchMergeItem(entry, headBranch, actions.onFetchMergeRef));
   }
+
+  // 取り込まれているか（T-38）。**ブランチ一覧と同じ項目**（`containmentText.ts`）。
+  items.push(...containmentMenuItems(entry, actions.containmentTarget));
 
   items.push({
     label: ja.commits.checkoutHere,

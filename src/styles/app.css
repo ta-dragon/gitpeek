@@ -3402,3 +3402,91 @@ body {
   flex: 1 1 0;
   min-height: 0;
 }
+
+/* ---------- 取り込まれているかの印（T-38。DESIGN.md §7.6） ---------- */
+
+/* ブランチ一覧とチップの中。**ボタンの既定の見た目を消す**（印であって操作の主役ではない）。 */
+.containment {
+  flex: none;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-faint);
+  font: inherit;
+  font-size: 10px;
+  line-height: 14px;
+  cursor: default;
+}
+
+.containment[data-jumpable="true"] {
+  cursor: pointer;
+}
+
+.containment--tree {
+  margin-left: 4px;
+}
+
+/* チップの中は枠を付けない（チップ自身に枠がある）。 */
+.containment--chip {
+  margin-right: 3px;
+  padding: 0;
+  border: none;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* 種類は色でも分ける。**普通のマージは控えめ、中身で入ったものを目立たせる**（今回取り違えたほう）。 */
+.containment--merged {
+  color: var(--text-faint);
+}
+
+.containment--contained {
+  color: var(--ok);
+}
+
+.containment--partial,
+.containment--changed {
+  color: var(--warning);
+}
+
+.containment--failed {
+  color: var(--danger);
+}
+
+/* HEAD のチップは地が塗られているので、地の上の文字色に揃える。 */
+.chip--head .containment--chip {
+  color: inherit;
+}
+
+/* 調べている間の一行（ブランチ一覧の見出しの下）。 */
+.reftree__containment {
+  margin: 0 8px 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* 取り込んでいる可能性があるブランチの一覧（T-38）。 */
+.containers__list {
+  max-height: 320px;
+  margin: 6px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.containers__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.containers__name {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
