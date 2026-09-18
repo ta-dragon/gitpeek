@@ -1,6 +1,6 @@
 [package]
 name = "gitpeek"
-version = "0.2.0"
+version = "0.2.1"
 description = "個人用 Git ビューワー"
 authors = ["tatsunoko"]
 edition = "2021"
