@@ -587,7 +587,7 @@ export const ja = {
     // **何が起きるかで書く。** 全部のブランチと比べるので時間がかかることも言っておく。
     findContainers: "このブランチを取り込んでいる可能性があるブランチを調べる…",
     findContainersHint:
-      "このブランチより後に動いたブランチを 1 本ずつ調べ、中身が入っているものを並べます。ブランチが多いと数分かかります（途中で止められます）。",
+      "このブランチより後に動いたブランチを調べ、中身が入っているものを並べます。ブランチが数千本あると数分かかります（途中で止められます）。",
     whyTag: "タグはグラフの起点ではないので、比べる対象にしていません。",
     whyOutOfGraph: "読み込んだコミットの外を指しているので調べられません。",
     whyIsTarget: "比べる相手そのものです。",
@@ -596,7 +596,7 @@ export const ja = {
     // 取り込んでいる可能性があるブランチ（T-38）。結果はこの画面にだけ出す（印にはしない）。
     containersTitle: (branch: string) => `${branch} を取り込んでいる可能性があるブランチ`,
     containersLead:
-      "このブランチより後に動いたブランチを 1 本ずつ調べています。中身で判断するので、squash や cherry-pick で入ったものも見つかります。",
+      "このブランチより後に動いたブランチを調べています。中身で判断するので、squash や cherry-pick で入ったものも見つかります。",
     containersProgress: (done: number, total: number, found: number) =>
       `${total} 本のうち ${done} 本を調べました（見つかったのは ${found} 本）`,
     containersRemaining: (seconds: number) =>

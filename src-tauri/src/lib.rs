@@ -921,7 +921,7 @@ async fn find_containers(
             &snapshot,
             &branch,
             &running,
-            &mut |done, total, found| {
+            &|done, total, found| {
                 let _ = handle.emit(
                     CONTAINERS_PROGRESS_EVENT,
                     ContainersProgressEvent {

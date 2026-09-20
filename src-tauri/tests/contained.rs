@@ -11,6 +11,8 @@ mod common;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 
 use gitpeek_lib::git::contained::{self, Containment, ContainmentOutcome};
 use gitpeek_lib::git::exec::Cancel;
@@ -281,22 +283,32 @@ fn candidates_come_local_first_then_by_name() {
     assert_eq!(candidates, sorted);
 }
 
-#[test]
-fn every_container_of_a_squashed_branch_is_found() {
+/// 「取り込んでいる可能性があるブランチ」を調べる。**進み具合の呼び出しも全部受け取る。**
+fn find_containers(branch: &str, workers: usize) -> (contained::ContainerSearch, Vec<(u32, u32, u32)>) {
     let snapshot = load();
     let scratch = tempfile::tempdir().expect("一時ディレクトリ");
-    let mut calls = Vec::new();
+    let calls = Mutex::new(Vec::new());
     let search = contained::find_containers_in(
         &log(),
         "git",
         &repo(),
         &snapshot,
-        "refs/heads/squashed",
+        branch,
         &Cancel::new(),
-        &mut |done, total, found| calls.push((done, total, found)),
+        // **並列に走るので共有する。** 呼ぶ順は調べ終えた順。
+        &|done, total, found| calls.lock().expect("記録できること").push((done, total, found)),
         scratch.path(),
+        workers,
     )
     .expect("調べられること");
+    // 一時フォルダは残らない（**並列でも**）。
+    assert_eq!(std::fs::read_dir(scratch.path()).expect("読めること").count(), 0);
+    (search, calls.into_inner().expect("記録を取り出せること"))
+}
+
+#[test]
+fn every_container_of_a_squashed_branch_is_found() {
+    let (search, calls) = find_containers("refs/heads/squashed", 4);
 
     let found = |name: &str| {
         search
@@ -325,15 +337,39 @@ fn every_container_of_a_squashed_branch_is_found() {
     assert!(!search.cancelled);
     assert!(search.failures.is_empty(), "{:?}", search.failures);
     assert_eq!(search.checked, search.total);
-    // 進み具合は 0 から始まり、1 本ごとに 1 つ進んで、最後は全部。
+    // 進み具合は 0 から始まり、1 本ごとに 1 つ進んで、最後は全部になる
+    // （**並列なので呼ぶ順は調べ終えた順**。数だけを見る）。
     assert_eq!(calls.first(), Some(&(0, search.total, 0)));
     assert_eq!(calls.len() as u32, search.total + 1);
+    let mut counts: Vec<u32> = calls.iter().map(|(done, _, _)| *done).collect();
+    counts.sort_unstable();
+    assert_eq!(counts, (0..=search.total).collect::<Vec<u32>>());
     assert_eq!(
-        calls.last(),
-        Some(&(search.total, search.total, search.found.len() as u32))
+        calls.iter().map(|(_, _, found)| *found).max(),
+        Some(search.found.len() as u32)
     );
-    // 一時フォルダは残らない。
-    assert_eq!(std::fs::read_dir(scratch.path()).expect("読めること").count(), 0);
+}
+
+/// **並列にしても答えは変わらない**（T-38。2026-09-20 に速くした）。
+///
+/// 相手ごとに独立した一時フォルダで judge するので、並べる順も結果も 1 本のときと同じになる。
+#[test]
+fn running_in_parallel_gives_the_same_answer_as_one_at_a_time() {
+    let (one, _) = find_containers("refs/heads/squashed", 1);
+    let (many, _) = find_containers("refs/heads/squashed", 8);
+    assert_eq!(one.total, many.total);
+    assert_eq!(one.checked, many.checked);
+    assert!(one.failures.is_empty() && many.failures.is_empty());
+    let names = |search: &contained::ContainerSearch| {
+        search
+            .found
+            .iter()
+            .map(|outcome| (outcome.target.clone(), outcome.containment.clone()))
+            .collect::<Vec<_>>()
+    };
+    // **並び順まで同じ**（候補の順に戻して返している）。
+    assert_eq!(names(&one), names(&many));
+    assert!(!one.found.is_empty());
 }
 
 #[test]
@@ -341,7 +377,9 @@ fn a_cancelled_search_stops_and_says_so() {
     let snapshot = load();
     let scratch = tempfile::tempdir().expect("一時ディレクトリ");
     let cancel = Cancel::new();
-    let mut seen = 0;
+    let seen = AtomicU32::new(0);
+    // **1 本ずつ走らせて確かめる。** 並列だと、止めた時点で走っていたぶんは終わるまで進むので、
+    // 「次の 1 本へ進まない」ことがここでは見られない（止まる速さは本数で変わる）。
     let search = contained::find_containers_in(
         &log(),
         "git",
@@ -350,19 +388,45 @@ fn a_cancelled_search_stops_and_says_so() {
         "refs/heads/squashed",
         &cancel,
         // 1 本調べたところで止める。
-        &mut |done, _, _| {
-            seen = done;
+        &|done, _, _| {
+            seen.store(done, Ordering::Relaxed);
             if done == 1 {
                 cancel.cancel();
             }
         },
         scratch.path(),
+        1,
     )
     .expect("中止しても失敗にはしない");
     assert!(search.cancelled);
     assert_eq!(search.checked, 1, "止めたのに調べ続けた");
     assert!(search.total > 1);
-    assert_eq!(seen, 1);
+    assert_eq!(seen.load(Ordering::Relaxed), 1);
+}
+
+/// **並列でも、止めれば残りの相手には手を付けない。**
+#[test]
+fn cancelling_a_parallel_search_leaves_most_candidates_untouched() {
+    let snapshot = load();
+    let scratch = tempfile::tempdir().expect("一時ディレクトリ");
+    let cancel = Cancel::new();
+    cancel.cancel(); // 走り出す前に止める。
+    let search = contained::find_containers_in(
+        &log(),
+        "git",
+        &repo(),
+        &snapshot,
+        "refs/heads/squashed",
+        &cancel,
+        &|_, _, _| {},
+        scratch.path(),
+        8,
+    )
+    .expect("中止しても失敗にはしない");
+    assert!(search.cancelled);
+    assert_eq!(search.checked, 0, "止めてあるのに調べた");
+    assert!(search.total > 1);
+    assert!(search.found.is_empty());
 }
 
 #[test]

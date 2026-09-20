@@ -10,9 +10,11 @@
 //! ③で「入っているか」、②で「どこで入ったか」を見る。**片方が外れる場面をもう片方が拾う** —
 //! ブランチに後から足した場合は③の二分探索が、相手で同じ行をさらに書き換えた場合は②が当たる。
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::OsStr;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 use std::time::Instant;
 
 use serde::Serialize;
@@ -28,6 +30,30 @@ use crate::model::{CommitMeta, RefKind, RepositorySnapshot};
 /// 触ったファイルの組で絞った後なので、ふつうは 0〜2 件。`CHANGELOG.md` だけを触る
 /// ブランチのように、同じ組のコミットが相手に何百もある場合の歯止め。
 const MAX_CANDIDATES: usize = 100;
+
+/// `git log` へ渡すファイル名の上限（T-38）。これを超えたら pathspec を付けない。
+const MAX_PATHSPEC: usize = 50;
+
+/// 差分の指紋の覚え書き（T-38。2026-09-20）。
+///
+/// **同じ 2 点の差分を何度も取らない。** 数千本と比べるとき、分岐点が同じ相手が多いので
+/// 「分岐点 → ブランチの先端」の差分が何百回も同じものになる。1 回の探索の中だけで持つ。
+#[derive(Default)]
+pub struct SignatureCache {
+    entries: Mutex<HashMap<(String, String), Signature>>,
+}
+
+impl SignatureCache {
+    fn get(&self, key: &(String, String)) -> Option<Signature> {
+        self.entries.lock().ok()?.get(key).cloned()
+    }
+
+    fn put(&self, key: (String, String), value: &Signature) {
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.insert(key, value.clone());
+        }
+    }
+}
 
 /// 判定の種類。**文言は持たない**（画面が種類から引く）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -87,7 +113,19 @@ pub fn check_in(
     scratch_parent: &Path,
 ) -> Result<ContainmentOutcome, String> {
     let index = CommitIndex::new(&snapshot.commits);
-    check_indexed(log, program, path, snapshot, &index, branch, target, scratch_parent)
+    let objects = objects_dir(log, program, path)?;
+    check_indexed(
+        log,
+        program,
+        path,
+        snapshot,
+        &index,
+        branch,
+        target,
+        scratch_parent,
+        &objects,
+        &SignatureCache::default(),
+    )
 }
 
 /// [`check_in`] の本体。**索引は呼ぶ側が 1 度だけ作る**（[`find_containers`] は数千本と比べるので、
@@ -102,6 +140,10 @@ fn check_indexed(
     branch: &str,
     target: &str,
     scratch_parent: &Path,
+    // オブジェクトの置き場所（objects_dir）。**相手ごとに引き直さない。**
+    objects: &str,
+    // 差分の指紋の覚え書き。**1 回の探索の中だけ**で使い回す。
+    cache: &SignatureCache,
 ) -> Result<ContainmentOutcome, String> {
     let started = Instant::now();
     if branch == target {
@@ -110,7 +152,17 @@ fn check_indexed(
     let branch_tip = tip_of(snapshot, branch)?;
     let target_tip = tip_of(snapshot, target)?;
 
-    let containment = judge(log, program, path, index, &branch_tip, &target_tip, scratch_parent)?;
+    let containment = judge(
+        log,
+        program,
+        path,
+        index,
+        &branch_tip,
+        &target_tip,
+        scratch_parent,
+        objects,
+        cache,
+    )?;
     Ok(ContainmentOutcome {
         branch: branch.to_string(),
         target: target.to_string(),
@@ -191,18 +243,26 @@ pub fn container_candidates(
     Ok(candidates.into_iter().map(|other| other.name.clone()).collect())
 }
 
-/// `branch` を取り込んでいる可能性がある相手を**逐次に**調べる（時間がかかってよい — 利用者の指定）。
+/// **同時に走らせる git の本数の上限**（T-38。2026-09-20 に利用者の指摘で並列にした）。
+///
+/// 1 本の判定は git を 4〜5 回起動して待つだけなので、逐次だと CPU が空いたまま時間だけかかる。
+/// **機械の並列度まで使い、ここで頭打ちにする。** 実測（16 スレッドの機械。docs/DESIGN.md §7.6.1）:
+/// 候補 78 本で 13.4 秒 → 2.0 秒、onyx の 1,896 本で 8 本並列 202 秒 → 16 本並列 148 秒。
+const MAX_WORKERS: usize = 16;
+
+/// `branch` を取り込んでいる可能性がある相手を調べる（時間がかかってよい — 利用者の指定）。
 ///
 /// **相手ごとに中止を見る。** 止めたら、そこまでに見つかったものを `cancelled` 付きで返す。
-/// 1 本ごとに `on_progress(調べ終えた数, 全部の数, 見つかった数)` を呼ぶ。
+/// 1 本終わるたびに `on_progress(調べ終えた数, 全部の数, 見つかった数)` を呼ぶ
+/// （**並列に走るので、呼ぶ順は調べ終えた順**。数は増える一方）。
 pub fn find_containers(
-    log: &dyn LogSink,
+    log: &(dyn LogSink + Sync),
     program: &str,
     path: &Path,
     snapshot: &RepositorySnapshot,
     branch: &str,
     cancel: &Cancel,
-    on_progress: &mut dyn FnMut(u32, u32, u32),
+    on_progress: &(dyn Fn(u32, u32, u32) + Sync),
 ) -> Result<ContainerSearch, String> {
     find_containers_in(
         log,
@@ -213,46 +273,105 @@ pub fn find_containers(
         cancel,
         on_progress,
         &std::env::temp_dir(),
+        workers(),
     )
 }
 
-/// [`find_containers`] の一時フォルダの置き場所を渡せるもの（テストで「残らない」ことを見る）。
+/// 何本まで同時に走らせるか。機械の並列度に合わせ、[`MAX_WORKERS`] で頭打ちにする。
+fn workers() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().min(MAX_WORKERS))
+        .unwrap_or(1)
+        .max(1)
+}
+
+/// [`find_containers`] の一時フォルダと本数を渡せるもの（テストで「残らない」ことと、
+/// **1 本でも同じ結果になる**ことを見る）。
 #[allow(clippy::too_many_arguments)]
 pub fn find_containers_in(
-    log: &dyn LogSink,
+    log: &(dyn LogSink + Sync),
     program: &str,
     path: &Path,
     snapshot: &RepositorySnapshot,
     branch: &str,
     cancel: &Cancel,
-    on_progress: &mut dyn FnMut(u32, u32, u32),
+    on_progress: &(dyn Fn(u32, u32, u32) + Sync),
     scratch_parent: &Path,
+    workers: usize,
 ) -> Result<ContainerSearch, String> {
     let started = Instant::now();
     let candidates = container_candidates(snapshot, branch)?;
     let index = CommitIndex::new(&snapshot.commits);
+    let objects = objects_dir(log, program, path)?;
+    // **分岐点が同じ相手が多い**ので、ブランチ側の差分は使い回せる。
+    let cache = SignatureCache::default();
     let total = candidates.len() as u32;
+    on_progress(0, total, 0);
+
+    // **結果は候補の番号のまま置く。** 並列に終わるので、後で並べ直さないと
+    // 「ローカル → リモート、名前順」が崩れる。
+    let slots: Vec<Mutex<Option<Result<ContainmentOutcome, String>>>> =
+        candidates.iter().map(|_| Mutex::new(None)).collect();
+    let next = AtomicUsize::new(0);
+    let done = AtomicUsize::new(0);
+    let hits = AtomicUsize::new(0);
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers.max(1) {
+            scope.spawn(|| loop {
+                if cancel.is_cancelled() {
+                    return;
+                }
+                let at = next.fetch_add(1, Ordering::Relaxed);
+                let Some(target) = candidates.get(at) else {
+                    return;
+                };
+                let result = check_indexed(
+                    log,
+                    program,
+                    path,
+                    snapshot,
+                    &index,
+                    branch,
+                    target,
+                    scratch_parent,
+                    &objects,
+                    &cache,
+                );
+                if matches!(&result, Ok(outcome) if outcome.containment != Containment::NotContained)
+                {
+                    hits.fetch_add(1, Ordering::Relaxed);
+                }
+                if let Ok(mut slot) = slots[at].lock() {
+                    *slot = Some(result);
+                }
+                let checked = done.fetch_add(1, Ordering::Relaxed) + 1;
+                on_progress(checked as u32, total, hits.load(Ordering::Relaxed) as u32);
+            });
+        }
+    });
 
     let mut found = Vec::new();
     let mut failures = Vec::new();
     let mut checked = 0;
-    let mut cancelled = false;
-    on_progress(0, total, 0);
-    for target in &candidates {
-        if cancel.is_cancelled() {
-            cancelled = true;
-            break;
+    for (at, slot) in slots.iter().enumerate() {
+        let taken = slot.lock().map_err(|_| "判定の結果を取り出せません")?.take();
+        match taken {
+            None => continue,
+            Some(Ok(outcome)) => {
+                checked += 1;
+                if outcome.containment != Containment::NotContained {
+                    found.push(outcome);
+                }
+            }
+            Some(Err(reason)) => {
+                checked += 1;
+                failures.push(ContainerFailure {
+                    target: candidates[at].clone(),
+                    reason,
+                });
+            }
         }
-        match check_indexed(log, program, path, snapshot, &index, branch, target, scratch_parent) {
-            Ok(outcome) if outcome.containment != Containment::NotContained => found.push(outcome),
-            Ok(_) => {}
-            Err(reason) => failures.push(ContainerFailure {
-                target: target.clone(),
-                reason,
-            }),
-        }
-        checked += 1;
-        on_progress(checked, total, found.len() as u32);
     }
 
     Ok(ContainerSearch {
@@ -261,7 +380,7 @@ pub fn find_containers_in(
         checked,
         found,
         failures,
-        cancelled,
+        cancelled: cancel.is_cancelled(),
         elapsed_ms: started.elapsed().as_millis() as u64,
     })
 }
@@ -279,6 +398,7 @@ fn tip_of(snapshot: &RepositorySnapshot, name: &str) -> Result<String, String> {
     Ok(entry.target.clone())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn judge(
     log: &dyn LogSink,
     program: &str,
@@ -287,6 +407,8 @@ fn judge(
     branch_tip: &str,
     target_tip: &str,
     scratch_parent: &Path,
+    objects: &str,
+    cache: &SignatureCache,
 ) -> Result<Containment, String> {
     // 1. 普通にマージ済み。**git を呼ばない**（メモリ上の祖先関係。CLAUDE.md §2）。
     let (ahead, _) = index
@@ -302,13 +424,14 @@ fn judge(
     };
 
     let scratch = ScratchDir::new_in(scratch_parent)?;
-    let probe = MergeProbe::new(log, program, path, target_tip, &scratch)?;
+    let probe = MergeProbe::new(log, program, path, target_tip, &scratch, objects)?;
     let squash_finder = SquashFinder {
         log,
         program,
         path,
         base: &base,
         target_tip,
+        cache,
     };
 
     // 2. ③ 先端をそのままマージして、相手と同じ中身か。
@@ -396,6 +519,23 @@ pub fn first_contained<E>(
 }
 
 /// `git merge-base`。**共通の祖先が無ければ `None`**（終了コード 1）。
+/// オブジェクトの置き場所（`GIT_ALTERNATE_OBJECT_DIRECTORIES` に渡すもの）。
+///
+/// worktree でも正しい場所を返す（`.git` がファイルのとき、オブジェクトは共通の場所にある）。
+/// **リポジトリで 1 つ**なので、1 回引いて使い回す。
+fn objects_dir(log: &dyn LogSink, program: &str, path: &Path) -> Result<String, String> {
+    let output = exec::run(
+        log,
+        program,
+        Some(path),
+        &["rev-parse", "--path-format=absolute", "--git-path", "objects"],
+    )?;
+    if !output.ok() {
+        return Err(output.failure("オブジェクトの置き場所を読めませんでした"));
+    }
+    Ok(output.stdout_lossy().trim().to_string())
+}
+
 fn merge_base(
     log: &dyn LogSink,
     program: &str,
@@ -429,21 +569,14 @@ impl<'a> MergeProbe<'a> {
         path: &'a Path,
         target_tip: &'a str,
         scratch: &'a ScratchDir,
+        // オブジェクトの置き場所。**リポジトリで 1 つ**なので、相手ごとに引き直さない
+        // （数千本と比べると、それだけで数千回 git が起きる）。
+        objects: &str,
     ) -> Result<Self, String> {
         let tree_arg = format!("{target_tip}^{{tree}}");
         let tree = exec::run(log, program, Some(path), &["rev-parse", "--verify", &tree_arg])?;
         if !tree.ok() {
             return Err(tree.failure("相手の中身を読めませんでした"));
-        }
-        // worktree でも正しい場所を返す（`.git` がファイルのとき、オブジェクトは共通の場所にある）。
-        let objects = exec::run(
-            log,
-            program,
-            Some(path),
-            &["rev-parse", "--path-format=absolute", "--git-path", "objects"],
-        )?;
-        if !objects.ok() {
-            return Err(objects.failure("オブジェクトの置き場所を読めませんでした"));
         }
         Ok(Self {
             log,
@@ -452,7 +585,7 @@ impl<'a> MergeProbe<'a> {
             target_tip,
             target_tree: tree.stdout_lossy().trim().to_string(),
             scratch,
-            objects: objects.stdout_lossy().trim().to_string(),
+            objects: objects.to_string(),
         })
     }
 
@@ -491,6 +624,7 @@ struct SquashFinder<'a> {
     path: &'a Path,
     base: &'a str,
     target_tip: &'a str,
+    cache: &'a SignatureCache,
 }
 
 impl SquashFinder<'_> {
@@ -502,21 +636,39 @@ impl SquashFinder<'_> {
         }
         let files: BTreeSet<&str> = wanted.keys().map(String::as_str).collect();
 
+        // **絞り込みは git にさせる**（T-38。2026-09-20）。分岐点から相手までを丸ごと読むと、
+        // onyx では 2 万コミットぶんのファイル名が毎回流れてくる。数千本と比べるとこれが効く。
+        //
+        // - `--since`: squash はブランチの最後のコミットより後にしか起きない（下の絞り込みと同じ条件）
+        // - pathspec: 同じファイルを触っていないコミットは、そもそも同じ変更を持てない
+        //
+        // **どちらも「候補を減らす」だけ**で、当たりかどうかは下の差分の突き合わせが決める。
         let range = format!("{}..{}", self.base, self.target_tip);
-        let output = exec::run(
-            self.log,
-            self.program,
-            Some(self.path),
-            &[
-                "log",
-                "--no-merges",
-                "--no-renames",
-                "--name-only",
-                "-z",
-                "--format=%x1e%H%x1f%ct",
-                &range,
-            ],
-        )?;
+        // **`--since` ではなく `--since-as-filter`**（git 2.37 以降。下限は 2.38 なので使える）。
+        // `--since` は古いコミットに当たるとそこで**履歴を辿るのをやめる**ので、先端が古いブランチの
+        // 先にある squash を見落とす（テストで踏んだ）。`--since-as-filter` は辿ったうえで落とすだけ。
+        // **1 秒手前から渡す**のは「その時刻より後」の意味だから（同じ秒の squash を落とさない）。
+        // 正確な絞り込みは下の `>=` が受け持つ。
+        let since = format!("--since-as-filter=@{}", upto.commit_time.saturating_sub(1));
+        let mut args: Vec<&str> = vec![
+            // ファイル名を glob として解釈させない（`*` や `[` を含むパスがある）。
+            "--literal-pathspecs",
+            "log",
+            "--no-merges",
+            "--no-renames",
+            "--name-only",
+            "-z",
+            "--format=%x1e%H%x1f%ct",
+            &since,
+            &range,
+        ];
+        // **長すぎる pathspec は渡さない**（Windows のコマンドラインには上限がある）。
+        // 触ったファイルが多いブランチでは、時刻の絞り込みだけで足りる。
+        if files.len() <= MAX_PATHSPEC {
+            args.push("--");
+            args.extend(files.iter().copied());
+        }
+        let output = exec::run(self.log, self.program, Some(self.path), &args)?;
         if !output.ok() {
             return Err(output.failure("相手のコミットを読めませんでした"));
         }
@@ -540,6 +692,16 @@ impl SquashFinder<'_> {
     }
 
     fn signature(&self, from: &str, to: &str) -> Result<Signature, String> {
+        let key = (from.to_string(), to.to_string());
+        if let Some(hit) = self.cache.get(&key) {
+            return Ok(hit);
+        }
+        let signature = self.diff_signature(from, to)?;
+        self.cache.put(key, &signature);
+        Ok(signature)
+    }
+
+    fn diff_signature(&self, from: &str, to: &str) -> Result<Signature, String> {
         let output = exec::run(
             self.log,
             self.program,

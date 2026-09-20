@@ -236,6 +236,17 @@ export function containersProgressView(
   return { done, total, remainingSeconds: Math.ceil((perOne * (total - done)) / 1000) };
 }
 
+/**
+ * 届いた途中経過を取り込む。**戻る数字を見せない。**
+ *
+ * 相手を同時に調べるので、`5 本目まで` の知らせが `6 本目まで` の後に届くことがある。
+ * 古い知らせは捨てる（残りの目安も跳ねる）。
+ */
+export function mergeProgress<T extends { done: number }>(previous: T | null, incoming: T): T {
+  if (previous !== null && incoming.done < previous.done) return previous;
+  return incoming;
+}
+
 /** 結果の見出しの種類。**中止したときは「全部ではない」ことを必ず出す。** */
 export type ContainersSummary =
   | { kind: "noCandidates" }

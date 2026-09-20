@@ -11,6 +11,7 @@ import {
   containmentKey,
   containmentView,
   keyFor,
+  mergeProgress,
   nextToCheck,
   refLabel,
   resultFor,
@@ -395,5 +396,27 @@ describe("containerRows", () => {
 
   it("入っていないものが混じっても行にしない", () => {
     expect(containerRows([to(MAIN, { kind: "notContained" })], refs)).toEqual([]);
+  });
+});
+
+describe("mergeProgress", () => {
+  it("新しい知らせを採る", () => {
+    const next = { done: 6, total: 10 };
+    expect(mergeProgress({ done: 5, total: 10 }, next)).toBe(next);
+  });
+
+  it("**前後して届いた古い知らせは捨てる**（同時に調べているので起きる）", () => {
+    const previous = { done: 6, total: 10 };
+    expect(mergeProgress(previous, { done: 5, total: 10 })).toBe(previous);
+  });
+
+  it("同じ数なら新しいほうでよい（見つかった数が増えていることがある）", () => {
+    const next = { done: 6, total: 10, found: 2 };
+    expect(mergeProgress({ done: 6, total: 10, found: 1 }, next)).toBe(next);
+  });
+
+  it("最初の 1 件はそのまま採る", () => {
+    const first = { done: 0, total: 10 };
+    expect(mergeProgress(null, first)).toBe(first);
   });
 });

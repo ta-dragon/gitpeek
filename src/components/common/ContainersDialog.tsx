@@ -18,6 +18,7 @@ import { ja } from "../../i18n/ja";
 import {
   containerRows,
   containersProgressView,
+  mergeProgress,
   containersSummary,
   type ContainersSummary,
 } from "../../lib/containment";
@@ -67,12 +68,15 @@ export function ContainersDialog({
       if (runId.current !== mine || event.repositoryId !== repositoryId || event.branch !== branch.name) {
         return;
       }
-      setProgress({
-        done: event.done,
-        total: event.total,
-        found: event.found,
-        elapsedMs: performance.now() - started,
-      });
+      // **同時に調べているので、知らせが前後することがある**（`mergeProgress` が古いほうを捨てる）。
+      setProgress((previous) =>
+        mergeProgress(previous, {
+          done: event.done,
+          total: event.total,
+          found: event.found,
+          elapsedMs: performance.now() - started,
+        }),
+      );
     });
     void (async () => {
       try {
