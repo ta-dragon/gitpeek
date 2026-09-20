@@ -1487,7 +1487,7 @@ dependencies = [
 
 [[package]]
 name = "gitpeek"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "chrono",
  "encoding_rs",
