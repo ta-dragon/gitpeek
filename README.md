@@ -209,6 +209,10 @@ npm run typecheck       tsc --noEmit
 
 結合テストで使うリポジトリはスクリプトが生成するので、手元の実リポジトリには依存しません。
 
+目で見て確かめる用のリポジトリは `npm run demo:repo` で作れます（`~/gitpeek-demo`）。ブランチが取り込まれて
+いるかの表示を確かめるためのもので、**ブランチ名が期待する結果になっていて**、同じフォルダの `確認手順.md` に
+一覧があります。
+
 リリースは手元で作って上げます（`npm run release`）。GitLab.com の共有ランナーに Windows のものが
 無く、Tauri の Windows 向けビルドを Linux で作るのは現実的でないためです。詳しくは
 [`docs/DESIGN.md`](docs/DESIGN.md) §2.3.2 を見てください。
