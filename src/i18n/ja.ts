@@ -610,8 +610,11 @@ export const ja = {
       `${checked} 本を調べましたが、このブランチを取り込んでいるブランチは見つかりませんでした。`,
     containersFound: (count: number, checked: number) =>
       `${checked} 本を調べ、${count} 本に入っていました。`,
+    // **止めたのは利用者**。どこまで調べたか、何が見つかったか、残りをどうしたかの順で書く。
     containersCancelled: (count: number, checked: number, total: number) =>
-      `途中で止めました。${total} 本のうち ${checked} 本までで、${count} 本に入っていました（全部ではありません）。`,
+      count > 0
+        ? `止めました。${total} 本のうち ${checked} 本まで調べ、${count} 本に入っていました。残りは調べていません。`
+        : `止めました。${total} 本のうち ${checked} 本まで調べ、入っているブランチはまだありません。残りは調べていません。`,
     containersFailures: (n: number) => `${n} 本は調べられませんでした（ホバーで理由）。`,
     containersJumpBranch: "ブランチへ移動",
     containersJumpSquash: (squash: string) => `${squash} へ移動`,

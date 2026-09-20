@@ -51,14 +51,20 @@ export function ContainersDialog({
   const [search, setSearch] = useState<ContainerSearch | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
-  /** 閉じたあとに届いた結果を捨てる。 */
-  const alive = useRef(true);
+  /**
+   * 何回目の走りか。**古い走りの結果を捨てる**ための番号（`store/snapshot.ts` の `latestRequest` と同じ）。
+   *
+   * 真偽値の「生きているか」では足りない。**StrictMode は同じ component で効果を 2 回走らせる**ので、
+   * 2 回目が番号を戻してしまい、**1 回目の走り（2 回目に中止されたもの）の結果を採ってしまった**
+   * — 止めていないのに「途中で止めました。16 本のうち 0 本まで」と出た（2026-09-19 に利用者が見つけた）。
+   */
+  const runId = useRef(0);
 
   useEffect(() => {
-    alive.current = true;
+    const mine = (runId.current += 1);
     const started = performance.now();
     const unlisten = onContainersProgress((event) => {
-      if (!alive.current || event.repositoryId !== repositoryId || event.branch !== branch.name) {
+      if (runId.current !== mine || event.repositoryId !== repositoryId || event.branch !== branch.name) {
         return;
       }
       setProgress({
@@ -71,13 +77,15 @@ export function ContainersDialog({
     void (async () => {
       try {
         const result = await findContainers(repositoryId, branch.name);
-        if (alive.current) setSearch(result);
+        if (runId.current === mine) setSearch(result);
       } catch (error) {
-        if (alive.current) setFailure(typeof error === "string" ? error : String(error));
+        if (runId.current === mine) setFailure(typeof error === "string" ? error : String(error));
       }
     })();
     return () => {
-      alive.current = false;
+      // **この走りの結果はもう採らない。** 走っているぶんは止める（画面から消えたものに git を回させない）。
+      runId.current += 1;
+      void cancelFindContainers();
       void unlisten.then((stop) => stop());
     };
   }, [repositoryId, branch.name]);
@@ -89,11 +97,8 @@ export function ContainersDialog({
     void cancelFindContainers();
   };
 
-  // **走っている間に閉じたら止める。** 画面から消えたものに数分 git を回させない。
-  const close = () => {
-    if (running) void cancelFindContainers();
-    onClose();
-  };
+  // 閉じると片付け（上の `useEffect` の後始末）が走り、そこで止める。
+  const close = () => onClose();
   useEscape(close);
 
   const title = ja.containment.containersTitle(branch.shortName);
