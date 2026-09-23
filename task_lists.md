@@ -50,9 +50,9 @@ v1（Phase 1〜9）の作業を、人間が概ね 3 日で終える単位に割�
 
 **次のセッションが最初にやること**
 
-1. 下の「▸コマンド」を 4 つ流してベースラインを取る（直近は **Rust 560 / vitest 522** で全部緑。ignore 2 本のうち 1 本は手元の onyx が要る中止のテスト）
+1. 下の「▸コマンド」を 4 つ流してベースラインを取る（直近は **Rust 577 / vitest 547** で全部緑。ignore 2 本のうち 1 本は手元の onyx が要る中止のテスト）
 2. **T-40（ファイルを変えたコミットを辿る）**。2026-09-24 に利用者が選び、詳細化した（「v1.1 — ファイル単位の
-   履歴」の節）。「決めたこと」5 点は利用者が了承済み。**エージェントは完了を宣言しない。**
+   履歴」の節）。**実装済みで、▸目視待ち。エージェントは完了を宣言しない** — 目視の結果をもらってから完了済みへ移す。
    **利用者は「使っていくと気になる部分があるかもしれない」と言っている**（取り込み判定とコミット検索）—
    出てきたら、文言と同じく実運用で挙げてもらって直す。文言の直しは「画面の名前と読んだ文」をもらって直す（下記）
 
@@ -63,7 +63,7 @@ npm run test:rust   npm run check:rust   npm run test   npm run typecheck
 | 項目 | 内容 |
 |---|---|
 | 直前に完了 | **T-38**（取り込まれているかを画面に出す。2026-09-24 に利用者が目視確認）/ v0.2.3 の公開（GitLab ＋ GitHub。2026-09-20。探索を並列にして速くした）/ v0.2.2 / v0.2.1 / v0.2.0 / T-37 / T-36 / T-35 |
-| いまここ | **T-40（ファイルを変えたコミットを辿る）の実装中**（「決めたこと」5 点は 2026-09-24 に了承済み）|
+| いまここ | **T-40（ファイルを変えたコミットを辿る）実装済み・▸目視待ち**（▸コマンドは全部通っている）|
 | 未解決の判断事項 | なし（git 2.38 未満は**警告して止める**と 2026-09-18 に確定）。ただし**文言はまだ途中で、利用者はまだ満足していない**（下記）|
 
 **v1 は 2026-09-12 に終わった**（Phase 9 完了 ＋ 実リポジトリ 8 個で 7 日運用 ＋ 既存 GUI クライアントを
@@ -209,31 +209,9 @@ graph LR
 - 文言は `ja.ts`。**「何が起きるか」で書く**（CLAUDE.md §6）
 - **git の書き込みは増えない**（読むだけ。CLAUDE.md §1 に触れない）。新しい依存も足さない
 
-**調べたこと**（2026-09-24。git 2.43.0.windows.1）
-
-1. **`git log --follow` は枝分かれした履歴で改名前のコミットを落とす。** 捨てるリポジトリで、main で
-   `old.txt → new.txt` に改名し、並行するブランチで `old.txt` を 2 回直してからマージした。
-   `--follow -- new.txt` はブランチ側の 2 件のうち**時刻が改名より後の 1 件を落とし**、
-   **`--topo-order` を付けると 2 件とも落とす**（このアプリは `--topo-order` で読む）。`--follow` は
-   「改名を見つけたら、以後はその名前だけを追う」を**履歴全体で 1 本**やっているため
-2. **自前で改名を辿ると 7 件全部拾える。** パスを絞った `log --diff-filter=A` で「このファイルが足された
-   コミット」を探し、そのコミットを `diff-tree -M` で見て改名元があれば名前に加える、を名前が増えなく
-   なるまで繰り返す。最後に**全部の名前を pathspec にして 1 回** `log` する
-3. **既定の履歴の簡略化は、ファイルを実際に変えたコミットを黙って落とす。** onyx の
-   `backend/onyx/main.py`（`backend/danswer/main.py` からの改名）で:
-
-   | オプション | 件数 | うちマージ | `--follow` が拾って、こちらが落としたもの |
-   |---|---|---|---|
-   | 既定 | 432 | 4 | **13** |
-   | `--full-history` | 569 | **128** | 0 |
-   | **`--full-history --simplify-merges`** | **451** | **10** | **0** |
-   | `--full-history --no-merges` | 441 | 0 | 0 |
-
-   落ちた 13 件は、どれも `main.py` を実際に変えている（`git show` で確かめた）。枝の変更が
-   マージで打ち消された・両側で同じ変更をした、のようにマージが片方の親と同じになると、
-   既定では**もう片方の親の側を辿らない**
-4. **速さ**: パスを絞った `log` は onyx で 0.3 秒、vite で 0.2 秒。`--simplify-merges` を足しても変わらない。
-   改名を辿るぶんは、足されたコミット 1 件ごとに `diff-tree` が 1 回増える（ふつう名前 1 つにつき 1〜2 回）
+**調べたこと**（2026-09-24）は **DESIGN.md §6.7 へ移した** — `git log --follow` は枝分かれした履歴で改名前の
+コミットを落とし、git の既定の絞り方もファイルを変えたコミットを落とす（onyx の `main.py` で 13 件）。
+改名は自前で辿り、`--full-history --simplify-merges` を付ける。
 
 **決めたこと**（2026-09-24 に利用者が 5 点とも了承）
 
@@ -253,44 +231,28 @@ graph LR
 5. **当たったコミットへ移ったら、そのコミットでの名前のファイルを選ぶ**（改名の前後で名前が違うので、
    いまの「同じパスを選び続ける」だけでは改名より前で何も選ばれない）
 
-**実装内容**
+**実装したもの**（2026-09-24。▸目視待ち）
 
-1. **Rust**（`git/search.rs`）
-   - `CommitQuery` に `path: Option<String>`
-   - `follow_names(log, program, repo, path, include_head) -> Followed { names, truncated }` — 上の 2. の繰り返し。
-     ルートコミットで足されたものは改名元を探さない（`diff-tree` の片側が無い）
-   - `runs` — `path` があれば `--full-history --simplify-merges` と、`--` の後ろに全部の名前。
-     `--literal-pathspecs` は `log` の前（git 全体のオプション）
-   - `CommitSearchOutcome` に `paths: Vec<String>`（辿った名前。`path` が無ければ空）と `truncated`
-   - パスが一度も無かった場合は 0 件（失敗にしない）
-2. **純関数**（`src/lib/commitQuery.ts` / `commitSearch.ts` ほか）
-   - `parseQuery` に `path:`（指定語が 4 つになる）。`isEmptyQuery` / `planSearch` も `path` を見る
-   - `pathQuery(path)` — 右クリックから検索欄に入れる文字（空白を含むパスは `"…"` で囲む）
-   - `historyFileIn(changes, names)` — そのコミットの変更ファイルのうち、辿った名前に当たるもの
-     （改名なら新しい名前の側）
-   - `searchView` — 辿った名前と「20 個で止めた」を出す
-3. **画面**: `FileList.tsx` / `WorkingTreeFiles.tsx` に右クリック（`ContextMenu` を使う）。当たりへ移ったら
-   `historyFileIn` の結果を選ぶ（`App.tsx` の配線）
-4. **目視用のリポジトリ**: `npm run demo:repo` に**改名をまたぐ履歴**を足す（上の 1. の形 ＋ 両側で同じ変更をした
-   マージ ＋ `*` や日本語や空白を含むファイル名）。`確認手順.md` にも項目を足す
-5. **ドキュメント**: DESIGN.md §6.6（指定語が 4 つに）と新しい節（ファイルの履歴。上の「調べたこと」を移す）/
-   §14.6 / §17.1（`--follow` と既定の簡略化の落とし穴）/ README
+1. **Rust**（`git/search.rs`）— `CommitQuery.path` ／ `follow_names`（改名を辿る。名前は `MAX_NAMES` = 20 まで）／
+   `runs` は `path` があれば `--literal-pathspecs`（`log` の前）・`--full-history --simplify-merges`・`--` の後ろに
+   全部の名前 ／ `CommitSearchOutcome` に `paths`（辿った名前）と `truncated`
+2. **純関数** — `commitQuery.ts`（`path:` と `pathQuery`）／ `fileHistory.ts`（右クリックを押せるか・
+   `historyFileIn`・`fileToSelect`）／ `commitSearch.ts`（辿った名前と上限の知らせ。**ファイルで絞った
+   `code:` の実測は覚えない**）
+3. **画面** — `FileHistoryMenu.tsx`（右クリック。コミットの一覧と作業ツリーの一覧）／ `store/fileHistory.ts`
+   （右クリック → 探す欄への依頼と、辿った名前の受け渡し）／ `useCommitFiles` が `fileToSelect` で選び直す
+4. **目視用のリポジトリ** — `npm run demo:repo` が `history-demo` も作る。手順は `確認手順.md` の 4.
+5. **ドキュメント** — DESIGN.md §6.6 / **§6.7（新）** / §14.6 / §17.1、README、CLAUDE.md §2（`--follow` を使わない）
 
-**テスト**
-
-- **Rust**（`tests/search.rs` ＋ `make-test-repos.sh` に改名の fixture）: 改名元の名前を拾う ／ **並行する
-  ブランチで古い名前のまま直したコミットを 2 件とも拾う**（`--follow` なら落ちることも 1 本で固定する）／
-  **マージが片方の親と同じになる形でも、枝の側のコミットを拾う**（`--simplify-merges` を外すと落ちることを
-  1 度確かめる）／ `*` `[` `:` を含むパス・`-` で始まるパス・日本語・空白 ／ `author:` との AND ／
-  一度も無かったパスは 0 件で失敗しない ／ 名前の上限で止まる ／ `path` を含む JSON を Rust が食える
-- **vitest**: `parseQuery` の `path:`（引用符・重複・空）／ `pathQuery` ／ `historyFileIn`（改名の前後・
-  見つからない）／ `searchView` の辿った名前と上限
-
-**テストが当たらないところ**（予定）: 右クリックの配線と、当たりへ移ったときにファイルを選ぶ配線（`.tsx` と `App.tsx`）
+**テストが当たらないところ**: 右クリックの配線（`FileList.tsx` / `WorkingTreeFiles.tsx` / `FileHistoryMenu.tsx`）／
+右クリック → 探す欄の受け渡し（`store/fileHistory.ts` と `CommitList.tsx` の効果）／ `useCommitFiles` が
+`fileToSelect` を呼ぶところ ／ `App.tsx` の配線。**判断そのもの（押せるか・何を入れるか・どれを選ぶか）は
+純関数でテストしてある**
 
 **受け入れ条件**
 
-- ▸コマンド: `tests/search.rs` / `commitQuery.test.ts` / `commitSearch.test.ts` ／ 4 コマンド
+- ▸コマンド: `tests/search.rs` / `commitQuery.test.ts` / `commitSearch.test.ts` / `fileHistory.test.ts` ／ 4 コマンド
+**目視用のリポジトリ**: `npm run demo:repo` で `~/gitpeek-demo/history-demo` もできる。手順は `確認手順.md` の 4.
 - ▸目視: 目視用リポジトリで、改名をまたぐファイルを右クリック → 改名前と並行ブランチのコミットにも印が付き、
   辿った名前が読めること
 - ▸目視: 次 / 前で改名をまたいだとき、**そのコミットでの名前のファイルが選ばれて差分が出る**こと

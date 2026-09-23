@@ -16,6 +16,7 @@ import { fetchMergeItem } from "../common/refMenu";
 import { containmentMenuItems } from "../common/containmentText";
 import { refLabel } from "../../lib/containment";
 import { useContainment } from "../../store/containment";
+import { publishFollowed, useFileHistory } from "../../store/fileHistory";
 import { CommitGraph } from "../graph/CommitGraph";
 import type { WorkingSummary } from "../../lib/workingTree";
 import { WorkingTreeRow } from "./WorkingTreeRow";
@@ -297,6 +298,26 @@ export function CommitList({
   /** ツールバーの出し分け。**判定は `searchView` にあり、ここは描くだけ。** */
   const view = searchView(search);
   const currentHitRow = rowOf(search.hits, search.current);
+
+  /**
+   * 変更ファイルの右クリックから頼まれた検索（T-40。`store/fileHistory.ts`）。
+   * **連番が変わったときだけ動く**（同じファイルをもう一度押しても探し直す）。
+   */
+  const fileHistory = useFileHistory();
+  const handledRequest = useRef(fileHistory.request?.nonce ?? 0);
+  const { searchFor } = search;
+  useEffect(() => {
+    const request = fileHistory.request;
+    if (request === null || request.nonce === handledRequest.current) return;
+    handledRequest.current = request.nonce;
+    if (request.repositoryId !== repositoryId) return;
+    searchFor(request.input);
+  }, [fileHistory.request, repositoryId, searchFor]);
+
+  // 辿った名前を知らせる。**当たりへ移ったときに、そのコミットでの名前のファイルを選ぶ**のに使う。
+  useEffect(() => {
+    publishFollowed(repositoryId, search.paths);
+  }, [repositoryId, search.paths]);
 
   // 当たりへ飛ぶ。**連番が変わったときだけ動く**（`jumpTo` と同じ作り）。
   const handledFocus = useRef(0);
@@ -756,6 +777,10 @@ function noteText(note: SearchNote): string {
       return ja.commits.searchDuplicate(`${note.key}:`);
     case "emptyValue":
       return ja.commits.searchEmptyValue(`${note.key}:`);
+    case "followed":
+      return ja.commits.searchFollowed(note.names);
+    case "truncated":
+      return ja.commits.searchTruncated(note.count);
   }
 }
 

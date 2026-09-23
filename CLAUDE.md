@@ -63,6 +63,8 @@ GIT_TERMINAL_PROMPT=0    GIT_SSH_COMMAND=ssh -o BatchMode=yes
 - **コミット検索の引数は `git/search.rs` だけが組み立てる**（フロントから git のフラグを受け取らない）。
   値は `--grep=<値>` の **1 引数の形**で渡す。**`--author` を 2 つ並べない** — `--all-match` を付けても
   OR のままで、絞ったつもりが広がる（`--grep` の 2 つは `--all-match` で AND になる。DESIGN.md §6.6, §17.1）。
+  **ファイルの履歴に `--follow` を使わない**（枝の側の改名前を落とす）。改名は `follow_names` が辿り、
+  `--full-history --simplify-merges` と `--literal-pathspecs` を付ける（DESIGN.md §6.7）。
 - **ルートコミットに `git diff` を使わない。** `diff-tree --root --no-commit-id -r`（patch は `-p`）。空ツリーの
   SHA を定数で埋め込まない（SHA-256 リポジトリで変わる）。
 - ahead/behind は `rev-list --count` を呼ばず**メモリ上のグラフから計算**する。**`%s` は最初の段落を 1 行に

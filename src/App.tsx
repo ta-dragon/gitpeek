@@ -90,6 +90,7 @@ import {
   useSettings,
 } from "./store/settings";
 import { closeContainers, pump, useContainment } from "./store/containment";
+import { requestFileHistory, useFileHistory } from "./store/fileHistory";
 import { autoCheckBranches, squashJump } from "./lib/containment";
 import * as snapshots from "./store/snapshot";
 import { useSnapshot } from "./store/snapshot";
@@ -116,6 +117,9 @@ const SIDEBAR_MAX = 560;
 /** 右のコミット情報ペイン幅の可動域。狭すぎると facts が折り返しだらけになる。 */
 const COMMIT_INFO_MIN = 240;
 const COMMIT_INFO_MAX = 720;
+
+/** ファイルで探していないとき。**毎回作り直すと、選び直しの効果が描くたびに回る。** */
+const NO_NAMES: readonly string[] = [];
 
 export default function App() {
   // **テーマは設定画面（T-25）で選ぶ。** ここで呼ぶのは `data-theme` を
@@ -1074,6 +1078,18 @@ function CommitWorkspace({
     );
   }, [workingList]);
 
+  /**
+   * ファイルを変えたコミットを辿る（T-40）。右クリックはコミットリストの検索欄へ頼み、
+   * 辿った名前はコミットリストから戻ってくる（`store/fileHistory.ts`）。
+   */
+  const fileHistory = useFileHistory();
+  const historyNames =
+    fileHistory.followed.repositoryId === entry.id ? fileHistory.followed.names : NO_NAMES;
+  const onFileHistory = useCallback(
+    (input: string) => requestFileHistory(entry.id, input),
+    [entry.id],
+  );
+
   const files = useCommitFiles({
     repositoryId: entry.id,
     // 作業ツリーを見ているあいだはコミットの一覧を取りに行かない。
@@ -1081,6 +1097,7 @@ function CommitWorkspace({
     commits: data.commits,
     selectedFile: perRepository.selectedFile,
     onSelectFile: selectFile,
+    historyNames,
   });
 
   // 一覧のキーボード操作は作業ツリーでも同じ（`Alt+↑` / `Alt+↓` / `Enter`）。
@@ -1419,6 +1436,7 @@ function CommitWorkspace({
                 selected={workingSelection}
                 onSelect={setWorkingSelection}
                 onReload={working.reload}
+                onFileHistory={onFileHistory}
               />
             </div>
           )
@@ -1442,6 +1460,7 @@ function CommitWorkspace({
           selectedFile={perRepository.selectedFile}
           onSelectFile={selectFile}
           onNotice={onNotice}
+          onFileHistory={onFileHistory}
         />
             )}
           </div>

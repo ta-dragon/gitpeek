@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { isEmptyQuery, parseQuery, planSearch, wantsCode } from "./commitQuery";
+import { isEmptyQuery, parseQuery, pathQuery, planSearch, wantsCode } from "./commitQuery";
 
 const of = (input: string) => parseQuery(input).query;
 
 describe("parseQuery", () => {
   it("そのまま打ったことばは、メッセージか作者から探すことばになる", () => {
-    expect(of("ほげ")).toEqual({ any: "ほげ", message: null, author: null, code: null });
+    expect(of("ほげ")).toEqual({
+      any: "ほげ",
+      message: null,
+      author: null,
+      code: null,
+      path: null,
+    });
   });
 
   it("空白を含めて打っても 1 つのことばとして扱う", () => {
@@ -20,6 +26,7 @@ describe("parseQuery", () => {
       message: "直す",
       author: "tatsuno",
       code: "piyo",
+      path: null,
     });
   });
 
@@ -138,5 +145,53 @@ describe("planSearch", () => {
   it("効かなかった打ち方は、探さない場合も残す", () => {
     expect(planSearch("message:").notices).toEqual([{ kind: "emptyValue", key: "message" }]);
     expect(planSearch("message:").kind).toBe("clear");
+  });
+});
+
+describe("path:（T-40）", () => {
+  it("ファイルを変えたコミットを探す指定として持つ", () => {
+    expect(of("path:src/main.ts").path).toBe("src/main.ts");
+    expect(of("PATH:src/main.ts").path).toBe("src/main.ts");
+  });
+
+  it("引用符で囲めば空白と日本語を含むパスを書ける", () => {
+    expect(of('path:"docs/日本語 ファイル.md"').path).toBe("docs/日本語 ファイル.md");
+  });
+
+  it("ほかの指定と重ねられる", () => {
+    const query = of('path:"a b.txt" author:tatsuno 直す');
+    expect(query.path).toBe("a b.txt");
+    expect(query.author).toBe("tatsuno");
+    expect(query.any).toBe("直す");
+  });
+
+  it("path: だけでも探す。重い検索ではない", () => {
+    expect(isEmptyQuery(of("path:a.txt"))).toBe(false);
+    const plan = planSearch("path:a.txt");
+    expect(plan.kind).toBe("search");
+    if (plan.kind === "search") expect(plan.slow).toBe(false);
+  });
+
+  it("値が空なら効かせず、そのことを残す", () => {
+    const parsed = parseQuery("path: ほげ");
+    expect(parsed.query.path).toBeNull();
+    expect(parsed.notices).toEqual([{ kind: "emptyValue", key: "path" }]);
+  });
+});
+
+describe("pathQuery", () => {
+  it("いつも引用符で囲む。読み戻すと同じパスになる", () => {
+    for (const path of ["a.txt", "docs/日本語 ファイル.md", "[x].txt", "-dash.txt", "c:d"]) {
+      const input = pathQuery(path);
+      expect(input).not.toBeNull();
+      expect(of(input ?? "").path).toBe(path);
+      // 素のことばに化けない（化けるとメッセージと作者からも探してしまう）。
+      expect(of(input ?? "").any).toBeNull();
+    }
+  });
+
+  it("引用符を含むパスは書けないので null（押せない理由を出す）", () => {
+    expect(pathQuery('say "hi".txt')).toBeNull();
+    expect(pathQuery("")).toBeNull();
   });
 });

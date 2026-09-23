@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# 「ブランチが取り込まれているか」（T-38）を目視で確かめるためのリポジトリを作る。
+# 「ブランチが取り込まれているか」（T-38）と「ファイルを変えたコミットを辿る」（T-40）を
+# 目視で確かめるためのリポジトリを作る。
 #
 #   scripts/make-demo-repo.sh [出力ディレクトリ]      既定は ~/gitpeek-demo
 #
@@ -10,6 +11,7 @@
 # 作るもの（出力ディレクトリの下）:
 #   containment-demo.git   上流（bare）。リモート追跡ブランチを出すために挟む
 #   containment-demo       GitPeek に登録するリポジトリ（origin/* が付いたクローン）
+#   history-demo           ファイルの改名をまたぐ履歴（T-40）。これも GitPeek に登録する
 #   確認手順.md            どのブランチに何が出れば正しいかの一覧
 #
 # Windows では **Git Bash で実行すること**（`npm run demo:repo`）。
@@ -189,8 +191,84 @@ done
 
 rm -rf "$work"
 
+# --- history-demo: ファイルを変えたコミットを辿る（T-40）-----------------------
+# **`git log --follow` が落とす形**をわざと入れてある（docs/DESIGN.md §6.7）:
+#   - 幹で改名したあと、並行していた枝が古い名前のまま直してから取り込まれる
+#   - 両側で同じ変更をした枝を取り込む（git の既定の絞り方だと枝の側が落ちる）
+# 取り込んだ枝は消す（ふつうそうする）。残すと起点になって、落ちる形にならない。
+hist=$out/history-demo
+rm -rf "$hist"
+git_ init --quiet -b main "$hist"
+
+# ファイルを書いてコミットする（history-demo 用）。
+hcommit() {
+  tick
+  git_ -C "$hist" add -A
+  git_ -C "$hist" commit --quiet -m "$1"
+}
+# 行を書き換える（行番号, 新しい中身, ファイル）。
+hline() {
+  sed -i "$1s/.*/$2/" "$hist/$3"
+}
+
+mkdir -p "$hist/app" "$hist/src"
+seq -f '設定 %g 行目' 1 12 >"$hist/app/config.txt"
+printf '説明\n' >"$hist/README.txt"
+hcommit "最初のコミット"
+hline 2 '設定 2 行目（項目を足した）' app/config.txt
+hcommit "設定: 項目を足す"
+
+git_ -C "$hist" checkout --quiet -b 並行/古い名前のまま
+git_ -C "$hist" checkout --quiet main
+git_ -C "$hist" mv app/config.txt src/config.txt
+hcommit "設定: app/ から src/ へ移す"
+hline 5 '設定 5 行目（既定値を変えた）' src/config.txt
+hcommit "設定: 既定値を変える"
+
+git_ -C "$hist" checkout --quiet 並行/古い名前のまま
+hline 3 '設定 3 行目（タイムアウトを足した）' app/config.txt
+hcommit "設定（古い名前のまま）: タイムアウトを足す"
+hline 7 '設定 7 行目（コメントを直した）' app/config.txt
+hcommit "設定（古い名前のまま）: コメントを直す"
+git_ -C "$hist" checkout --quiet main
+tick
+git_ -C "$hist" merge --quiet --no-ff 並行/古い名前のまま -m "並行していた作業を取り込む"
+git_ -C "$hist" branch --quiet -d 並行/古い名前のまま
+
+git_ -C "$hist" mv src/config.txt src/settings.txt
+hcommit "設定: 名前を settings に変える"
+
+git_ -C "$hist" checkout --quiet -b 同じ変更
+hline 9 '設定 9 行目（両側で同じに直した）' src/settings.txt
+hcommit "設定（枝）: 9 行目を直す（幹と同じ変更）"
+git_ -C "$hist" checkout --quiet main
+hline 9 '設定 9 行目（両側で同じに直した）' src/settings.txt
+hcommit "設定（幹）: 9 行目を直す（枝と同じ変更）"
+tick
+git_ -C "$hist" merge --quiet --no-ff 同じ変更 -m "同じ変更をした枝を取り込む"
+git_ -C "$hist" branch --quiet -d 同じ変更
+
+printf '説明（書き足した）\n' >>"$hist/README.txt"
+hcommit "README を書き足す"
+printf 'x\n' >"$hist/x.txt"
+hcommit "x.txt を足す"
+printf '角括弧\n' >"$hist/[x].txt"
+hcommit "[x].txt を足す（glob なら x.txt にも当たる名前）"
+printf '日本語\n' >"$hist/日本語 ファイル.txt"
+hcommit "日本語 ファイル.txt を足す"
+
+# まだ取り込んでいない枝（幹の外にも印が付くこと）。
+git_ -C "$hist" checkout --quiet -b 作業中/設定を直す
+hline 11 '設定 11 行目（作業中）' src/settings.txt
+hcommit "設定（作業中）: 11 行目を直す"
+git_ -C "$hist" checkout --quiet main
+
+# 作業ツリー: 追跡しているファイルを直しかけ、未追跡のファイルを 1 つ置く。
+hline 12 '設定 12 行目（手元で直しかけ）' src/settings.txt
+printf 'まだコミットしていない\n' >"$hist/未追跡.txt"
+
 cat >"$out/確認手順.md" <<'GUIDE'
-# GitPeek の「取り込まれているか」を確かめる（T-38）
+# GitPeek の目視用リポジトリ（T-38 / T-40）
 
 `containment-demo` を GitPeek に登録して開く。**ブランチ名が期待する結果になっている。**
 
@@ -227,6 +305,29 @@ cat >"$out/確認手順.md" <<'GUIDE'
 
 2.38 未満の git を設定で指定したとき、起動画面で止まり、なぜ 2.38 が要るかが読めること。
 
+## 4. ファイルを変えたコミットを辿る（T-40。`history-demo`）
+
+`history-demo` を GitPeek に登録して開く。`src/settings.txt` は **`app/config.txt` → `src/config.txt` →
+`src/settings.txt`** と 2 回名前が変わっている。
+
+1. `設定: 名前を settings に変える` を選び、変更ファイルの一覧で `src/settings.txt` を右クリック →
+   「このファイルを変えたコミットに印を付ける」
+   - 探す欄に `path:"src/settings.txt"` が入り、印が付く
+   - 欄の下に「名前が変わる前の src/config.txt、app/config.txt も含めています。」と出る
+   - 印が付くのは **`設定` で始まるコミットと、2 つの取り込み**（`並行していた作業を取り込む` /
+     `同じ変更をした枝を取り込む`）、それに `最初のコミット`。`README` や `x.txt` には付かない
+   - **`設定（古い名前のまま）: …` の 2 つ**と **`設定（枝）: 9 行目を直す（幹と同じ変更）`** に
+     印が付いていること（`git log --follow` や git の既定の絞り方だと落ちるもの）
+   - まだ取り込んでいない `設定（作業中）: 11 行目を直す` にも付く
+2. 「次へ / 前へ」で辿ると、**そのコミットでの名前のファイルが選ばれて差分が出る**
+   （`設定: 項目を足す` では `app/config.txt`、`設定: 既定値を変える` では `src/config.txt`）
+3. 作業ツリーの行を選び、直しかけの `src/settings.txt` を右クリックしても同じことができる。
+   **`未追跡.txt` を右クリックすると項目は押せず**、理由がホバーで読める
+4. 探す欄に `path:"[x].txt"` と打つと `[x].txt を足す` だけに付く（`x.txt を足す` には付かない）。
+   `path:"日本語 ファイル.txt"` も探せる
+5. `path:"src/settings.txt" 9 行目` と打つと、2 つの `9 行目を直す` だけに絞れる
+6. 「やめる」で欄を空にすると印が消え、コミットを移っても選ぶファイルが勝手に変わらなくなる
+
 ## 作り直し
 
 `npm run demo:repo` をもう一度実行すると作り直す（このフォルダごと上書きされる）。
@@ -236,4 +337,5 @@ GUIDE
 
 echo "できました:"
 echo "  リポジトリ  $clone"
+echo "              $hist"
 echo "  確認手順    $out/確認手順.md"

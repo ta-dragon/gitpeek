@@ -399,6 +399,55 @@ git_ -C "$repo" tag search-only
 git_ -C "$repo" checkout --quiet main
 git_ -C "$repo" branch --quiet -D throwaway
 
+# --- ファイルの履歴（T-40）-------------------------------------------------
+# **`git log --follow` が落とす形**を入れておく（docs/DESIGN.md §6.7）。幹で old.txt を
+# new.txt に改名し、並行する枝では古い名前のまま 2 回直してから取り込む。
+new_repo history
+seq 1 30 >"$repo/old.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "履歴: old.txt を足す"
+git_ -C "$repo" checkout --quiet -b feature
+sed -i 's/^5$/5 feature/' "$repo/old.txt"
+git_ -C "$repo" commit --quiet -am "履歴: 枝で old.txt を直す 1"
+sed -i 's/^8$/8 feature/' "$repo/old.txt"
+git_ -C "$repo" commit --quiet -am "履歴: 枝で old.txt を直す 2"
+git_ -C "$repo" checkout --quiet main
+git_ -C "$repo" mv old.txt new.txt
+git_ -C "$repo" commit --quiet -m "履歴: old.txt を new.txt に改名する"
+sed -i 's/^20$/20 main/' "$repo/new.txt"
+git_ -C "$repo" commit --quiet -am "履歴: 幹で new.txt を直す"
+git_ -C "$repo" merge --quiet --no-ff feature -m "履歴: 枝を取り込む"
+# 両側で同じ変更をした枝。マージが両方の親と同じになるので、**既定の簡略化では
+# 枝の側のコミットが落ちる**（`--simplify-merges` が要る理由）。
+git_ -C "$repo" checkout --quiet -b same
+sed -i 's/^12$/12 same/' "$repo/new.txt"
+git_ -C "$repo" commit --quiet -am "履歴: 枝で new.txt を直す（幹と同じ変更）"
+git_ -C "$repo" checkout --quiet main
+sed -i 's/^12$/12 same/' "$repo/new.txt"
+git_ -C "$repo" commit --quiet -am "履歴: 幹で new.txt を直す（枝と同じ変更）"
+git_ -C "$repo" merge --quiet --no-ff same -m "履歴: 同じ変更の枝を取り込む"
+# 取り込んだ枝は消す（ふつうそうする）。**枝が残っていると起点 ref になり、簡略化の外から辿られてしまう。**
+git_ -C "$repo" branch --quiet -d feature same
+commit other.txt "履歴: 別のファイル"
+# glob として読まれてはいけない名前。`[x].txt` は glob なら `x.txt` に当たる。
+# （`*` `?` `:` は Windows のファイル名に使えないので、探す側で試す）
+commit x.txt "履歴: x.txt"
+commit "[x].txt" "履歴: [x].txt"
+commit -dash.txt "履歴: -dash.txt"
+commit "日本語 ファイル.txt" "履歴: 日本語 ファイル.txt"
+commit dir/a.txt "履歴: dir/a.txt"
+# 21 回改名する（名前の上限 20 で止まること）。中身が空だと改名と見なされないので書いておく。
+mkdir -p "$repo/chain"
+seq 1 10 >"$repo/chain/n00.txt"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "履歴: 改名の鎖を始める"
+for i in $(seq 1 21); do
+  from=$(printf 'n%02d.txt' $((i - 1)))
+  to=$(printf 'n%02d.txt' "$i")
+  git_ -C "$repo" mv "chain/$from" "chain/$to"
+  git_ -C "$repo" commit --quiet -m "履歴: $from を $to に改名する"
+done
+
 # --- bare -------------------------------------------------------------------
 git_ clone --quiet --bare "$root/linear" "$root/bare.git"
 

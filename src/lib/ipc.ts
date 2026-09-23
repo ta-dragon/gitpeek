@@ -618,6 +618,13 @@ export type CommitSearchOutcome = {
   elapsedMs: number;
   /** 中止した（T-36）。**`shas` はそこまでに見つかったぶんで、全部ではない。** */
   cancelled: boolean;
+  /**
+   * ファイルで探したとき、**改名を辿って含めた名前**（T-40）。先頭が打った名前で、
+   * 古い名前が後に続く。`path` が無ければ空。
+   */
+  paths: string[];
+  /** 名前の上限に届いて、それより古い改名を辿るのをやめた。 */
+  truncated: boolean;
 };
 
 /**

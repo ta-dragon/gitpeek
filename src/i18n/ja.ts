@@ -400,7 +400,8 @@ export const ja = {
     searchPlaceholder: "メッセージか作者から探す",
     searchHint:
       "そのまま打つと、メッセージか作者のどちらかに入っているコミットを探します。" +
-      "message: / author: / code: を付けると、その指定どうしを重ねて絞り込めます。" +
+      "message: / author: / code: / path: を付けると、その指定どうしを重ねて絞り込めます。" +
+      "path: はそのファイルを変えたコミットで、名前が変わる前にもさかのぼります。" +
       "空白を含めたいときは引用符で囲みます。",
     searchRun: "探す",
     searchClear: "やめる",
@@ -425,6 +426,10 @@ export const ja = {
     // 中止しても当たったぶんは残す。**0 件でも「当たりませんでした」とは言わない。**
     searchCancelled: "中止しました。出ている当たりは途中までのもので、全部ではありません。",
     searchFailed: "探せませんでした。",
+    // path: で改名を辿ったとき（T-40）。**打っていない名前でも当たる**ので、黙って広げない。
+    searchFollowed: (names: string[]) => `名前が変わる前の ${names.join("、")} も含めています。`,
+    searchTruncated: (count: number) =>
+      `名前を ${count} 個さかのぼったところで止めました。それより前の名前だったころの変更は入っていません。`,
     // 当たりが無いときの「次へ / 前へ」。押せない形で残し、理由を出す（CLAUDE.md §6）。
     searchNothingToStep: "まだ当たりがありません。",
   },
@@ -838,6 +843,10 @@ export const ja = {
     layoutLabel: "一覧",
     binary: "バイナリ",
     renamedFrom: (oldPath: string) => `${oldPath} から`,
+    // 変更ファイルの右クリック（T-40）。探す欄に path: を入れて探す。
+    fileHistory: "このファイルを変えたコミットに印を付ける",
+    fileHistoryUntracked: "まだ一度もコミットされていないファイルなので、変えたコミットはありません。",
+    fileHistoryUnquotable: "パスに \" が入っているので、探す欄に書けません。",
     modeChanged: (oldMode: string, newMode: string) => `モード ${oldMode} → ${newMode}`,
     // 状態の 1 文字。色はテーマトークンで付ける。
     statusAdded: "A",

@@ -4,7 +4,8 @@
  * 入力欄は 1 つで、打ち方は 2 通りある。
  *
  * - **そのまま打つ** … メッセージ **または** 作者から探す（OR）
- * - **`message:` / `author:` / `code:`** … 埋めた指定どうしは **AND**
+ * - **`message:` / `author:` / `code:` / `path:`** … 埋めた指定どうしは **AND**
+ *   （`path:` はそのファイルを変えたコミット。改名は Rust が辿る — T-40。§6.7）
  *
  * **コード内容は `code:` を書いたときだけ探す。** 素のことばで走らせない
  * （`git log -S` は 2 万コミットで 17 秒かかる。§6.6 の実測）。
@@ -13,8 +14,8 @@
  * （引数を作るのは `src-tauri/src/git/search.rs`。CLAUDE.md §4）。
  */
 
-/** 指定語。**この 3 つだけ。** ほかのコロンは素のことばの一部として扱う。 */
-export type QueryKey = "message" | "author" | "code";
+/** 指定語。**この 4 つだけ。** ほかのコロンは素のことばの一部として扱う。 */
+export type QueryKey = "message" | "author" | "code" | "path";
 
 /**
  * Rust の `git::search::CommitQuery` と同じ形。**綴りを変えない。**
@@ -27,6 +28,8 @@ export type CommitQuery = {
   message: string | null;
   author: string | null;
   code: string | null;
+  /** このファイルを変えたコミット（T-40）。リポジトリの根からのパス。 */
+  path: string | null;
 };
 
 /**
@@ -46,10 +49,11 @@ export const EMPTY_QUERY: CommitQuery = {
   message: null,
   author: null,
   code: null,
+  path: null,
 };
 
 /** `message:` のように書かれたときだけ指定語。`fix:` や `https://…` は当たらない。 */
-const NAMED = /^(message|author|code):([\s\S]*)$/i;
+const NAMED = /^(message|author|code|path):([\s\S]*)$/i;
 
 /**
  * 空白で割る。ただし `"` で囲んだ中の空白では割らない。**引用符そのものは落とす。**
@@ -125,6 +129,7 @@ export function parseQuery(input: string): ParsedQuery {
       message: named.get("message") ?? null,
       author: named.get("author") ?? null,
       code: named.get("code") ?? null,
+      path: named.get("path") ?? null,
     },
     notices,
   };
@@ -132,7 +137,7 @@ export function parseQuery(input: string): ParsedQuery {
 
 /** 探すことばが 1 つも無いか。**空欄は「まだ何も探していない」**（差分内検索と同じ）。 */
 export function isEmptyQuery(query: CommitQuery): boolean {
-  return [query.any, query.message, query.author, query.code].every(
+  return [query.any, query.message, query.author, query.code, query.path].every(
     (value) => value === null || value.trim() === "",
   );
 }
@@ -161,4 +166,16 @@ export function planSearch(input: string): SearchPlan {
   const { query, notices } = parseQuery(input);
   if (isEmptyQuery(query)) return { kind: "clear", notices };
   return { kind: "search", query, slow: wantsCode(query), notices };
+}
+
+/**
+ * 右クリックの「このファイルを変えたコミットに印を付ける」で検索欄に入れる文字（T-40）。
+ *
+ * **いつも `"…"` で囲む**（空白を含むパスを 1 つのことばにするため。囲んでも害は無い）。
+ * 打ち方にはエスケープが無いので、**`"` を含むパスは書けない** — `null` を返し、
+ * 押せない理由を画面に出す（Windows では作れない名前だが、Linux 由来のリポジトリにはありうる）。
+ */
+export function pathQuery(path: string): string | null {
+  if (path.includes('"') || path.trim() === "") return null;
+  return `path:"${path}"`;
 }

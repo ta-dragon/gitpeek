@@ -7,7 +7,7 @@
  * **全ファイルを縦に連結してスクロールする方式は採らない**（§7.3）。一覧で 1 つ選び、
  * 中央下の差分ペインにその差分だけを出す。
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { ja } from "../../i18n/ja";
 import {
@@ -17,6 +17,10 @@ import {
   type FileTreeNode,
 } from "../../lib/fileTree";
 import { isBinaryChange, type ChangeStatus, type FileChange } from "../../lib/ipc";
+import { FileHistoryMenu, type FileMenuAt } from "./FileHistoryMenu";
+
+/** 行の右クリック。無ければメニューを出さない。 */
+type OnMenu = ((path: string, x: number, y: number) => void) | undefined;
 
 /** 一覧の表示形式。既定はフラット（docs/DESIGN.md §7.3）。 */
 export type FileListLayout = "flat" | "tree";
@@ -33,6 +37,8 @@ type Props = {
   layout: FileListLayout;
   onSelect: (path: string) => void;
   onLayoutChange: (layout: FileListLayout) => void;
+  /** 右クリックの「このファイルを変えたコミットに印を付ける」（T-40）。 */
+  onFileHistory?: (input: string) => void;
 };
 
 export function FileList({
@@ -41,7 +47,13 @@ export function FileList({
   layout,
   onSelect,
   onLayoutChange,
+  onFileHistory,
 }: Props) {
+  const [menu, setMenu] = useState<FileMenuAt | null>(null);
+  const onMenu: OnMenu =
+    onFileHistory === undefined
+      ? undefined
+      : (path, x, y) => setMenu({ x, y, path, untracked: false });
   const total = useMemo(() => totalChanges(changes), [changes]);
   const tree = useMemo(
     () => (layout === "tree" ? buildFileTree(changes) : []),
@@ -106,6 +118,7 @@ export function FileList({
                   scale={scale}
                   selected={change.path === selectedPath}
                   onSelect={onSelect}
+                  onMenu={onMenu}
                 />
               </li>
             ))}
@@ -120,11 +133,15 @@ export function FileList({
                 scale={scale}
                 selectedPath={selectedPath}
                 onSelect={onSelect}
+                onMenu={onMenu}
               />
             ))}
           </ul>
         )}
       </div>
+      {menu !== null && onFileHistory !== undefined && (
+        <FileHistoryMenu at={menu} onClose={() => setMenu(null)} onFileHistory={onFileHistory} />
+      )}
     </section>
   );
 }
@@ -135,12 +152,14 @@ function TreeNode({
   scale,
   selectedPath,
   onSelect,
+  onMenu,
 }: {
   node: FileTreeNode;
   depth: number;
   scale: number;
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  onMenu: OnMenu;
 }) {
   if (node.kind === "file") {
     return (
@@ -152,6 +171,7 @@ function TreeNode({
           scale={scale}
           selected={node.change.path === selectedPath}
           onSelect={onSelect}
+          onMenu={onMenu}
         />
       </li>
     );
@@ -174,6 +194,7 @@ function TreeNode({
             scale={scale}
             selectedPath={selectedPath}
             onSelect={onSelect}
+            onMenu={onMenu}
           />
         ))}
       </ul>
@@ -189,6 +210,7 @@ export function FileRow({
   scale,
   selected,
   onSelect,
+  onMenu,
 }: {
   change: FileChange;
   depth: number;
@@ -197,6 +219,8 @@ export function FileRow({
   scale: number;
   selected: boolean;
   onSelect: (path: string) => void;
+  /** 右クリック（T-40）。無ければブラウザの既定のまま。 */
+  onMenu?: OnMenu;
 }) {
   const { dir, name } = splitPath(change.path);
   const binary = isBinaryChange(change);
@@ -210,6 +234,14 @@ export function FileRow({
       style={{ paddingLeft: 8 + depth * INDENT }}
       title={titleOf(change)}
       onClick={() => onSelect(change.path)}
+      onContextMenu={
+        onMenu === undefined
+          ? undefined
+          : (event) => {
+              event.preventDefault();
+              onMenu(change.path, event.clientX, event.clientY);
+            }
+      }
     >
       <span className={`flist__status flist__status--${change.status}`}>
         {statusMark(change.status)}

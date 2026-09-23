@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { fileToSelect } from "../../lib/fileHistory";
 import { useFileNavigation } from "../../hooks/useFileNavigation";
 
 import {
@@ -69,6 +70,7 @@ export function useCommitFiles({
   commits,
   selectedFile,
   onSelectFile,
+  historyNames,
 }: {
   repositoryId: string;
   /** 見ているもの。`null` なら何も選ばれていない。 */
@@ -77,6 +79,11 @@ export function useCommitFiles({
   commits: CommitMeta[];
   selectedFile: string | null;
   onSelectFile: (path: string | null) => void;
+  /**
+   * ファイルで探しているときに辿った名前（T-40）。**改名の前後で名前が違う**ので、
+   * 当たりへ移ったらそのコミットでの名前を選ぶ。探していなければ空。
+   */
+  historyNames: readonly string[];
 }): CommitFiles {
   // **依存には素の値を並べる。** `scope` は呼び出しのたびに作り直される
   // オブジェクトなので、そのまま依存に入れると毎回取り直しになる。
@@ -161,15 +168,14 @@ export function useCommitFiles({
     })();
   }, [repositoryId, sha, from, to, symmetric, parentIndex, retryCount]);
 
-  // 選択ファイルが今の一覧に無ければ先頭へ寄せる。コミットを移ると前のファイルは
-  // たいてい変更されていないので、毎回「選択なし」になるより先頭が出るほうが速い。
+  // 選び直すかどうかは `fileToSelect`（純関数）が決める — ファイルで探していればその名前、
+  // 選択ファイルが今の一覧に無ければ先頭。
   useEffect(() => {
-    if (changes.length === 0) return;
-    if (selectedFile !== null && changes.some((change) => change.path === selectedFile)) return;
-    onSelectFile(changes[0].path);
-    // **依存は `changes` だけ。** `onSelectFile` と `selectedFile` を入れると、
-    // 選択を書き戻すたびにこの効果が回って往復する。
-  }, [changes]);
+    const next = fileToSelect(changes, selectedFile, historyNames);
+    if (next !== null) onSelectFile(next);
+    // **依存に `onSelectFile` と `selectedFile` を入れない。** 入れると、選択を書き戻すたびに
+    // この効果が回って往復する。
+  }, [changes, historyNames]);
 
   // `Alt+↑` / `Alt+↓` と `Enter`（作業ツリーの一覧と同じものを使う）。
   const paths = useMemo(() => changes.map((change) => change.path), [changes]);

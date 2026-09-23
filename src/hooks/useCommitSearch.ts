@@ -34,6 +34,8 @@ export type CommitSearch = SearchState & {
   setInput: (value: string) => void;
   /** 探す。空欄なら「まだ何も探していない」に戻すだけ。 */
   run: () => void;
+  /** 欄にこの文字を入れて、すぐ探す（変更ファイルの右クリック。T-40）。 */
+  searchFor: (text: string) => void;
   /** 探すのをやめる（欄も結果も空にする。走っていれば止める）。 */
   clear: () => void;
   /** 走っている検索を止める。**そこまでの当たりは残す。** */
@@ -61,6 +63,9 @@ export function useCommitSearch(
   const [running, setRunning] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** ファイルで探したときに辿った名前（T-40）。 */
+  const [paths, setPaths] = useState<string[]>([]);
+  const [truncated, setTruncated] = useState(false);
   const [current, setCurrent] = useState(-1);
   const [focus, setFocus] = useState<SearchFocus | null>(null);
   /** コード内容を探している間の計時。メッセージと作者だけのときは `null`。 */
@@ -125,6 +130,8 @@ export function useCommitSearch(
     setNotices([]);
     setCancelled(false);
     setError(null);
+    setPaths([]);
+    setTruncated(false);
     setClock(null);
     setCurrent(-1);
     setFocus(null);
@@ -136,12 +143,14 @@ export function useCommitSearch(
     reset();
   }, [repositoryId, reset]);
 
-  const run = useCallback(() => {
+  const runWith = useCallback((text: string) => {
     // **何をするかは `planSearch` が決める。** ここに分岐の理由を書かない。
-    const plan = planSearch(input);
+    const plan = planSearch(text);
     setNotices(plan.notices);
     setError(null);
     setCancelled(false);
+    setPaths([]);
+    setTruncated(false);
 
     if (plan.kind !== "search") {
       setShas(null);
@@ -165,6 +174,8 @@ export function useCommitSearch(
         if (mine !== request.current) return;
         setShas(outcome.shas);
         setCancelled(outcome.cancelled);
+        setPaths(outcome.paths);
+        setTruncated(outcome.truncated);
         const found = hitsIn(shownRef.current, outcome.shas);
         goTo(hitAfter(found, selectedRef.current), found);
 
@@ -186,7 +197,17 @@ export function useCommitSearch(
       .finally(() => {
         if (mine === request.current) setRunning(false);
       });
-  }, [commitCount, goTo, input, repositoryId]);
+  }, [commitCount, goTo, repositoryId]);
+
+  const run = useCallback(() => runWith(input), [input, runWith]);
+
+  const searchFor = useCallback(
+    (text: string) => {
+      setInput(text);
+      runWith(text);
+    },
+    [runWith],
+  );
 
   const clear = useCallback(() => {
     setInput("");
@@ -207,6 +228,7 @@ export function useCommitSearch(
     input,
     setInput,
     run,
+    searchFor,
     clear,
     cancel,
     running,
@@ -218,6 +240,8 @@ export function useCommitSearch(
     notices,
     cancelled,
     error,
+    paths,
+    truncated,
     timing:
       clock === null
         ? null

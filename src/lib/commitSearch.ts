@@ -100,7 +100,12 @@ export function learnedRate(
   commitCount: number,
 ): number | null {
   const codeOnly =
-    wantsCode(query) && query.any === null && query.message === null && query.author === null;
+    wantsCode(query) &&
+    query.any === null &&
+    query.message === null &&
+    query.author === null &&
+    // ファイルで絞ると `-S` が見る差分が減って速く終わる。覚えると次の目安が短すぎる。
+    query.path === null;
   if (!codeOnly || outcome.cancelled) return null;
   if (outcome.elapsedMs < MIN_LEARNING_MS || commitCount <= 0) return null;
   return commitCount / (outcome.elapsedMs / 1_000);
@@ -129,6 +134,10 @@ export type SearchNote =
   /** 中止した。**出ている当たりは途中までで、全部ではない。** */
   | { kind: "cancelled" }
   | { kind: "failed"; detail: string }
+  /** ファイルで探したとき、改名を辿って**打っていない名前も含めた**（T-40）。黙って広げない。 */
+  | { kind: "followed"; names: string[] }
+  /** 名前の上限で改名を辿るのをやめた。`count` は辿った名前の数。 */
+  | { kind: "truncated"; count: number }
   | QueryNotice;
 
 /** 画面の出し分けに要る材料。`hooks/useCommitSearch.ts` が持っている値そのもの。 */
@@ -144,6 +153,9 @@ export type SearchState = {
   error: string | null;
   /** コード内容を探している間だけ。目安（秒）と経過（ms）。 */
   timing: { estimateSeconds: number; elapsedMs: number } | null;
+  /** ファイルで探したときに辿った名前（T-40）。先頭が打った名前。探していなければ空。 */
+  paths: string[];
+  truncated: boolean;
 };
 
 export type SearchView = {
@@ -180,6 +192,8 @@ export function searchView(state: SearchState): SearchView {
   }
   if (state.hits.hidden > 0) notes.push({ kind: "hidden", count: state.hits.hidden });
   if (state.cancelled) notes.push({ kind: "cancelled" });
+  if (state.paths.length > 1) notes.push({ kind: "followed", names: state.paths.slice(1) });
+  if (state.truncated) notes.push({ kind: "truncated", count: state.paths.length });
   notes.push(...state.notices);
   if (state.error !== null) notes.push({ kind: "failed", detail: state.error });
 

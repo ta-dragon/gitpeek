@@ -102,7 +102,29 @@ describe("searchView", () => {
     cancelled: false,
     error: null,
     timing: null,
+    paths: [] as string[],
+    truncated: false,
   };
+
+  it("ファイルで探して改名を辿ったら、打っていない名前も含めたと言う（T-40）", () => {
+    const view = searchView({
+      ...idle,
+      searched: true,
+      paths: ["new.txt", "old.txt", "older.txt"],
+    });
+    expect(view.notes).toContainEqual({ kind: "followed", names: ["old.txt", "older.txt"] });
+  });
+
+  it("改名が無ければ、名前のことは言わない", () => {
+    const view = searchView({ ...idle, searched: true, paths: ["a.txt"] });
+    expect(view.notes.some((note) => note.kind === "followed")).toBe(false);
+  });
+
+  it("名前の上限で止めたら、そう言う", () => {
+    const names = Array.from({ length: 20 }, (_, index) => `n${index}.txt`);
+    const view = searchView({ ...idle, searched: true, paths: names, truncated: true });
+    expect(view.notes).toContainEqual({ kind: "truncated", count: 20 });
+  });
 
   it("まだ何もしていなければ何も出さない", () => {
     expect(searchView(idle)).toEqual({
@@ -235,7 +257,7 @@ describe("estimateSeconds", () => {
 });
 
 describe("learnedRate", () => {
-  const codeOnly = { any: null, message: null, author: null, code: "NEEDLE" };
+  const codeOnly = { any: null, message: null, author: null, code: "NEEDLE", path: null };
 
   it("code: だけで最後まで走った実行から、1 秒あたりのコミット数を覚える", () => {
     expect(learnedRate(codeOnly, { elapsedMs: 17_100, cancelled: false }, 20_285)).toBeCloseTo(
@@ -255,6 +277,11 @@ describe("learnedRate", () => {
     expect(learnedRate(narrowed, { elapsedMs: 5_900, cancelled: false }, 20_285)).toBeNull();
     const bare = { ...codeOnly, any: "fix" };
     expect(learnedRate(bare, { elapsedMs: 5_900, cancelled: false }, 20_285)).toBeNull();
+  });
+
+  it("ファイルで絞った実行も覚えない（T-40。-S が見る差分が減って速く終わる）", () => {
+    const narrowed = { ...codeOnly, path: "src/main.ts" };
+    expect(learnedRate(narrowed, { elapsedMs: 2_000, cancelled: false }, 20_285)).toBeNull();
   });
 
   it("中止した実行は覚えない", () => {

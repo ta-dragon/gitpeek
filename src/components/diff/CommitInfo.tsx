@@ -32,6 +32,7 @@ export function CommitInfo({
   selectedFile,
   onSelectFile,
   onNotice,
+  onFileHistory,
 }: {
   /** 選択中のコミット。`null` なら案内だけ出す。 */
   sha: string | null;
@@ -40,6 +41,8 @@ export function CommitInfo({
   selectedFile: string | null;
   onSelectFile: (path: string) => void;
   onNotice: (message: string) => void;
+  /** 変更ファイルの右クリック（T-40）。 */
+  onFileHistory: (input: string) => void;
 }) {
   const [layout, setLayout] = useState<FileListLayout>("flat");
 
@@ -102,6 +105,7 @@ export function CommitInfo({
         layout={layout}
         onSelect={onSelectFile}
         onLayoutChange={setLayout}
+        onFileHistory={onFileHistory}
       />
     </div>
   );

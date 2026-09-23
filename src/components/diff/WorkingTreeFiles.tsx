@@ -15,20 +15,27 @@ import {
   SECTION_ORDER,
   type WorkingSelection,
 } from "../../lib/workingTree";
+import { useState } from "react";
+
 import { FileRow } from "./FileList";
+import { FileHistoryMenu, type FileMenuAt } from "./FileHistoryMenu";
 
 export function WorkingTreeFiles({
   tree,
   selected,
   onSelect,
   onReload,
+  onFileHistory,
 }: {
   tree: WorkingTree;
   selected: WorkingSelection | null;
   onSelect: (selection: WorkingSelection) => void;
   onReload: () => void;
+  /** 右クリックの「このファイルを変えたコミットに印を付ける」（T-40）。 */
+  onFileHistory: (input: string) => void;
 }) {
   const key = selected === null ? null : entryKey(selected);
+  const [menu, setMenu] = useState<FileMenuAt | null>(null);
 
   return (
     <section className="wtree">
@@ -54,9 +61,13 @@ export function WorkingTreeFiles({
             tree={tree}
             selectedKey={key}
             onSelect={onSelect}
+            onMenu={setMenu}
           />
         ))}
       </div>
+      {menu !== null && (
+        <FileHistoryMenu at={menu} onClose={() => setMenu(null)} onFileHistory={onFileHistory} />
+      )}
     </section>
   );
 }
@@ -66,12 +77,16 @@ function Section({
   tree,
   selectedKey,
   onSelect,
+  onMenu,
 }: {
   section: WorkingSection;
   tree: WorkingTree;
   selectedKey: string | null;
   onSelect: (selection: WorkingSelection) => void;
+  onMenu: (at: FileMenuAt) => void;
 }) {
+  // 未追跡はまだ一度もコミットされていない。押せない形で出す（CLAUDE.md §6）。
+  const untracked = section === "untracked";
   const entries = sectionEntries(tree, section);
   // 空のセクションは見出しごと出さない（4 つ並ぶと何も無い行ばかりになる）。
   if (entries.length === 0) return null;
@@ -100,6 +115,10 @@ function Section({
                   selectedKey === entryKey(entry) ? " flist__row--selected" : ""
                 }`}
                 onClick={() => onSelect({ section, path: entry.path })}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  onMenu({ x: event.clientX, y: event.clientY, path: entry.path, untracked });
+                }}
               >
                 <span className="flist__pathBox">
                   <span className="flist__path">
@@ -115,6 +134,7 @@ function Section({
                 scale={scale}
                 selected={selectedKey === entryKey(entry)}
                 onSelect={() => onSelect({ section, path: entry.path })}
+                onMenu={(path, x, y) => onMenu({ x, y, path, untracked })}
               />
             )}
           </li>

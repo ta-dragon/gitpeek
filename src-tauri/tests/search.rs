@@ -331,3 +331,155 @@ fn a_long_code_search_can_be_stopped_midway() {
         "中止が効いていない: {elapsed:?}",
     );
 }
+
+// --- ファイルを変えたコミット（T-40。docs/DESIGN.md §6.7）---------------------
+
+fn file(path: &str) -> CommitQuery {
+    CommitQuery {
+        path: Some(path.to_string()),
+        ..CommitQuery::default()
+    }
+}
+
+/// ファイルで探して、当たりの要約と辿った名前を返す。
+fn history_of(query: &CommitQuery) -> (Vec<String>, search::CommitSearchOutcome) {
+    let subjects = subjects_of("history", query);
+    let path = fixtures().join("history");
+    let outcome = search::search(&log(), "git", &path, query, true, &Cancel::new())
+        .unwrap_or_else(|error| panic!("探せません: {error}"));
+    (subjects, outcome)
+}
+
+/// 同じ引数で git に直接聞いて、要約を返す（比べる相手）。
+fn git_subjects(args: &[&str]) -> Vec<String> {
+    let output = gitpeek_lib::git::exec::run(&log(), "git", Some(&fixtures().join("history")), args)
+        .unwrap_or_else(|error| panic!("git が走りません: {error}"));
+    assert!(output.ok(), "git が失敗しました: {args:?}");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn a_renamed_file_is_followed_back_to_its_old_name() {
+    let (subjects, outcome) = history_of(&file("new.txt"));
+    assert_eq!(outcome.paths, ["new.txt", "old.txt"]);
+    assert!(!outcome.truncated);
+    for expected in [
+        "履歴: old.txt を足す",
+        "履歴: old.txt を new.txt に改名する",
+        "履歴: 幹で new.txt を直す",
+    ] {
+        assert!(subjects.iter().any(|s| s == expected), "{expected} が無い: {subjects:?}");
+    }
+    assert!(!subjects.iter().any(|s| s == "履歴: 別のファイル"));
+}
+
+#[test]
+fn commits_on_a_parallel_branch_under_the_old_name_are_found() {
+    // **`--follow` が落とす形。** 改名の後に、枝で古い名前のまま直したもの。
+    let (subjects, _) = history_of(&file("new.txt"));
+    for expected in ["履歴: 枝で old.txt を直す 1", "履歴: 枝で old.txt を直す 2"] {
+        assert!(subjects.iter().any(|s| s == expected), "{expected} が無い: {subjects:?}");
+    }
+
+    // `--follow` に任せない理由を固定しておく。git が直したらここが落ちる — そのときは見直す。
+    let followed = git_subjects(&[
+        "log", "--branches", "--topo-order", "--follow", "--format=%s", "--", "new.txt",
+    ]);
+    assert!(
+        !followed.iter().any(|s| s.starts_with("履歴: 枝で old.txt")),
+        "--follow が枝の側を拾うようになった: {followed:?}",
+    );
+}
+
+#[test]
+fn a_branch_commit_hidden_by_the_default_simplification_is_found() {
+    // 両側で同じ変更をした枝。マージが両方の親と同じになるので、既定では枝の側を辿らない。
+    let (subjects, _) = history_of(&file("new.txt"));
+    let hidden = "履歴: 枝で new.txt を直す（幹と同じ変更）";
+    assert!(subjects.iter().any(|s| s == hidden), "{hidden} が無い: {subjects:?}");
+
+    // `--simplify-merges` を付ける理由を固定しておく。
+    let simplified = git_subjects(&[
+        "log", "--branches", "--topo-order", "--format=%s", "--", "new.txt", "old.txt",
+    ]);
+    assert!(!simplified.iter().any(|s| s == hidden), "既定でも拾うようになった: {simplified:?}");
+}
+
+#[test]
+fn a_path_that_looks_like_a_glob_is_read_literally() {
+    // glob なら `[x].txt` は `x.txt` に当たる。
+    let (subjects, _) = history_of(&file("[x].txt"));
+    assert_eq!(subjects, ["履歴: [x].txt"]);
+    // glob なら `*.txt` は全部に当たる。そんな名前のファイルは無い。
+    let (subjects, _) = history_of(&file("*.txt"));
+    assert!(subjects.is_empty(), "{subjects:?}");
+    // magic pathspec として読ませない。
+    let (subjects, _) = history_of(&file(":(glob)*.txt"));
+    assert!(subjects.is_empty(), "{subjects:?}");
+}
+
+#[test]
+fn a_path_that_starts_with_a_dash_or_has_japanese_and_spaces_is_found() {
+    assert_eq!(history_of(&file("-dash.txt")).0, ["履歴: -dash.txt"]);
+    assert_eq!(history_of(&file("日本語 ファイル.txt")).0, ["履歴: 日本語 ファイル.txt"]);
+}
+
+#[test]
+fn a_folder_finds_the_commits_that_changed_something_in_it() {
+    assert_eq!(history_of(&file("dir")).0, ["履歴: dir/a.txt"]);
+}
+
+#[test]
+fn a_path_that_never_existed_finds_nothing_and_is_not_an_error() {
+    let (subjects, outcome) = history_of(&file("nowhere.txt"));
+    assert!(subjects.is_empty());
+    assert_eq!(outcome.paths, ["nowhere.txt"]);
+}
+
+#[test]
+fn a_path_narrows_the_other_words() {
+    let query = CommitQuery {
+        message: Some("同じ変更".to_string()),
+        path: Some("new.txt".to_string()),
+        ..CommitQuery::default()
+    };
+    let (mut subjects, _) = history_of(&query);
+    subjects.sort();
+    // 取り込んだマージも残る（`--simplify-merges` は枝の側が残るとき、つなぐマージを残す）。
+    assert_eq!(
+        subjects,
+        [
+            "履歴: 同じ変更の枝を取り込む",
+            "履歴: 幹で new.txt を直す（枝と同じ変更）",
+            "履歴: 枝で new.txt を直す（幹と同じ変更）",
+        ]
+    );
+    // ファイルが違えば、同じことばでも当たらない。
+    let other = CommitQuery {
+        message: Some("同じ変更".to_string()),
+        path: Some("x.txt".to_string()),
+        ..CommitQuery::default()
+    };
+    assert!(history_of(&other).0.is_empty());
+}
+
+#[test]
+fn following_renames_stops_at_the_limit_and_says_so() {
+    let (_, outcome) = history_of(&file("chain/n21.txt"));
+    assert_eq!(outcome.paths.len(), search::MAX_NAMES);
+    assert!(outcome.truncated);
+    assert_eq!(outcome.paths[0], "chain/n21.txt");
+    assert_eq!(outcome.paths[1], "chain/n20.txt");
+}
+
+#[test]
+fn a_file_without_renames_is_not_said_to_be_truncated() {
+    let (_, outcome) = history_of(&file("chain/n01.txt"));
+    // n01 は n00 からの改名で、n00 は最初から n00。
+    assert_eq!(outcome.paths, ["chain/n01.txt", "chain/n00.txt"]);
+    assert!(!outcome.truncated);
+}
