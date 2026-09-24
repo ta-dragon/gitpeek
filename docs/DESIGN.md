@@ -3045,6 +3045,12 @@ gitviewer/
 
 ### 17.1 踏んだ落とし穴（次も効く）
 
+**npm スクリプトの `bash` は WSL の bash を掴む**（2026-09-24）。`npm run demo:repo` を `bash …` で書いていたら、
+PowerShell から実行したときに Windows の `System32` にある `bash.exe`（WSL の入口）が先に見つかり、目視用のリポジトリが
+**WSL の中（/home/<名前>/gitpeek-demo）にできた**。Windows の git からは開けない。`scripts/make-demo-repo.ps1` が
+結合テストの fixture と同じ順番（`GIT_BASH` → PATH の git.exe から辿る → 既定のインストール先）で Git Bash を探し、
+**見つからなければ PATH の bash に委ねず止める**。表示するパスも `cygpath -w` で Windows の形にした。
+
 **`git log --follow` は枝分かれした履歴で改名前のコミットを落とし、git の既定の絞り方もファイルを変えた
 コミットを落とす**（T-40。2026-09-24）。どちらも**エラーにならず件数が少し減るだけ**なので、画面を見ても
 気付けない。`--follow` は改名を履歴全体で 1 本しか追わない（`--topo-order` だと枝の側を全部落とす）。

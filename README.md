@@ -211,7 +211,7 @@ npm run typecheck       tsc --noEmit
 
 結合テストで使うリポジトリはスクリプトが生成するので、手元の実リポジトリには依存しません。
 
-目で見て確かめる用のリポジトリは `npm run demo:repo` で作れます（`~/gitpeek-demo`）。ブランチが取り込まれて
+目で見て確かめる用のリポジトリは `npm run demo:repo` で作れます（ホームの `gitpeek-demo`。PowerShell から実行しても Git Bash で動きます）。ブランチが取り込まれて
 いるかの表示（`containment-demo`。**ブランチ名が期待する結果になっています**）と、名前が変わったファイルの
 履歴（`history-demo`）を確かめるためのもので、同じフォルダの `確認手順.md` に一覧があります。
 

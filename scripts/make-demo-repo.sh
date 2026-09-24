@@ -14,7 +14,9 @@
 #   history-demo           ファイルの改名をまたぐ履歴（T-40）。これも GitPeek に登録する
 #   確認手順.md            どのブランチに何が出れば正しいかの一覧
 #
-# Windows では **Git Bash で実行すること**（`npm run demo:repo`）。
+# Windows では **Git Bash で実行すること**。`npm run demo:repo` はどこから実行しても
+# `make-demo-repo.ps1` が Git Bash を探して呼ぶ（PATH の `bash` は WSL のことがあり、WSL で動くと
+# リポジトリが WSL の中にできて Windows の git から開けない）。
 #
 # ブランチ名で期待する結果が読めるようにしてある:
 #   期待/…   ブランチ一覧とチップに出る印
@@ -70,7 +72,12 @@ commit() {
   git_ -C "$work" commit --quiet -m "$message"
 }
 
-echo "作っています: $clone"
+# 表示は Windows のパスで出す（Git Bash の /c/… や /tmp/… は、エクスプローラーに貼れない）。
+show() {
+  if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else echo "$1"; fi
+}
+
+echo "作っています: $(show "$out")"
 
 git_ init --quiet -b main "$work"
 printf 'a\nb\nc\nd\ne\n' >"$work/f.txt"
@@ -232,7 +239,7 @@ hline 7 '設定 7 行目（コメントを直した）' app/config.txt
 hcommit "設定（古い名前のまま）: コメントを直す"
 git_ -C "$hist" checkout --quiet main
 tick
-git_ -C "$hist" merge --quiet --no-ff 並行/古い名前のまま -m "並行していた作業を取り込む"
+git_ -C "$hist" merge --quiet --no-ff 並行/古い名前のまま -m "並行していた作業を取り込む" >/dev/null
 git_ -C "$hist" branch --quiet -d 並行/古い名前のまま
 
 git_ -C "$hist" mv src/config.txt src/settings.txt
@@ -336,6 +343,6 @@ GitPeek に登録したままでも構わないが、**開いたまま作り直�
 GUIDE
 
 echo "できました:"
-echo "  リポジトリ  $clone"
-echo "              $hist"
-echo "  確認手順    $out/確認手順.md"
+echo "  リポジトリ  $(show "$clone")"
+echo "              $(show "$hist")"
+echo "  確認手順    $(show "$out/確認手順.md")"
