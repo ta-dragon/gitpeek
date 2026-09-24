@@ -913,7 +913,7 @@ VS Code 風を基本に、リスト移動のみ vim 風の `j` / `k` も受け�
 | `message:ほげ author:tatsuno code:ぴよ` | 書いた指定どうしの **AND** |
 | `ほげ author:tatsuno` | （メッセージ or 作者）**AND** 作者 |
 
-- 指定語は `message:` / `author:` / `code:` の 3 つだけ（大文字小文字は問わない）。
+- 指定語は `message:` / `author:` / `code:` / `path:` の 4 つだけ（大文字小文字は問わない。`path:` は §6.7）。
   **ほかのコロン（`https://…` / `fix: typo`）は素のことばの一部**
 - **素のことばは、指定語を取り除いた残りを詰めて 1 つのことば**にする（`fix typo` を 2 語に
   割らない。割ると git の実行回数がことばの数だけ増える）
@@ -1049,6 +1049,12 @@ VS Code 風を基本に、リスト移動のみ vim 風の `j` / `k` も受け�
 `--no-merges` にしないのは、両側で触ったマージ（衝突を直したところ）が見えなくなるため。
 
 **実測**: パスを絞った `log` は onyx で 0.3 秒、vite で 0.2 秒。`--simplify-merges` を足しても変わらない。
+
+**テストが当たらないところ**（判断は純関数と `git/search.rs` へ出してあり、残りは呼ぶだけ）— 右クリックの配線
+（`FileList.tsx` / `WorkingTreeFiles.tsx` / `FileHistoryMenu.tsx`）／ 右クリック → 探す欄の受け渡し（`store/fileHistory.ts`
+と `CommitList.tsx` の効果）／ `useCommitFiles` が `fileToSelect` を呼ぶところ ／ `App.tsx` の配線 ／ スクロールバーの
+当たりの印を描いて押せるようにするところ（`ScrollbarRefMarkers.tsx`）／ 当たった行の色（CSS。色の比は計算で確かめた）。
+目視用のリポジトリは `npm run demo:repo` の `history-demo`（README）。
 
 
 ---

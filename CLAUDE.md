@@ -250,6 +250,9 @@ npm run check:rust  # cargo clippy -D warnings    npm run typecheck   # tsc --no
   起動する**（2026-09-08 に踏んだ。icon.ico は新しいのに画面だけ古い、という形で出る）。
   `package:zip` は先に touch を走らせるので、配布ぶんは気にしなくてよい。**`icons/android` と
   `icons/ios` は使わないので追跡しない**（`.gitignore` に入れてある）。
+- **npm スクリプトから `bash` を直に呼ばない**（PowerShell から実行すると PATH の `bash` が WSL の入口に解決され、
+  WSL の中で動く）。`npm run demo:repo` は `scripts/make-demo-repo.ps1` が Git Bash を探して呼ぶ
+  （結合テストの `tests/common/mod.rs` の `bash()` と同じ順番。DESIGN.md §17.1）。
 - 配布はポータブル zip のみ（`npm run package:zip`。Tauri の bundler に zip ターゲットは無いので自前で固める）。
   **`tauri.conf.json` の `mainBinaryName` を消さない** — 消すと実体が `gitpeek.exe`（小文字）になるが、Windows は
   大文字小文字を区別しないので **`package:zip` は偶然通り、壊れたことに気付けない**（DESIGN.md §2.3）。
