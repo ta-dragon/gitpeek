@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   estimateSeconds,
   hitAfter,
+  hitMarkers,
   hitRows,
   hitsIn,
   learnedRate,
@@ -314,5 +315,32 @@ describe("searchProgress", () => {
     // 「あと 0 秒」のまま待たせ続けない。
     expect(searchProgress(17, 17_001)).toEqual({ kind: "overdue", elapsed: 17 });
     expect(searchProgress(17, 30_500)).toEqual({ kind: "overdue", elapsed: 30 });
+  });
+});
+
+describe("hitMarkers（T-40）", () => {
+  const hits = (rows: number[]) => ({ rows, hidden: 0 });
+
+  it("当たりの行を 0〜1 の位置にする", () => {
+    expect(hitMarkers(hits([0, 50]), 100, -1)).toEqual([
+      { row: 0, ratio: 0, current: false },
+      { row: 50, ratio: 0.5, current: false },
+    ]);
+  });
+
+  it("同じ高さに重なるものは 1 つにまとめる", () => {
+    // 2 万行を 300 に分けると、隣り合う行は同じ帯に入る。
+    const markers = hitMarkers(hits([1000, 1001, 1002, 15000]), 20_000, -1);
+    expect(markers.map((marker) => marker.row)).toEqual([1000, 15000]);
+  });
+
+  it("いま辿っている当たりは、まとめても必ず残す", () => {
+    const markers = hitMarkers(hits([1000, 1001, 1002]), 20_000, 2);
+    expect(markers).toEqual([{ row: 1002, ratio: 1002 / 20_000, current: true }]);
+  });
+
+  it("当たりが無い・行が無いときは何も置かない", () => {
+    expect(hitMarkers(hits([]), 100, -1)).toEqual([]);
+    expect(hitMarkers(hits([0]), 0, 0)).toEqual([]);
   });
 });

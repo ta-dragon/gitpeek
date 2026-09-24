@@ -63,6 +63,43 @@ export function hitRows(hits: SearchHits): Set<number> {
   return new Set(hits.rows);
 }
 
+/** スクロールバーに置く当たりの印 1 つ（T-40）。 */
+export type HitMarker = {
+  /** 押したときに見せる行。 */
+  row: number;
+  /** 0〜1 の位置。トラックの高さに掛ける。 */
+  ratio: number;
+  /** いま辿っている当たりか。 */
+  current: boolean;
+};
+
+/** スクロールバーの帯を分ける数（ref の印と同じ。ScrollbarRefMarkers.tsx）。 */
+export const HIT_MARKER_BUCKETS = 300;
+
+/**
+ * スクロールバーに置く当たりの印。**同じ高さに重なるものは 1 つにまとめる**（onyx で 451 件に
+ * 当たると、そのまま置けば帯が塗り潰れる）。**いま辿っている当たりは、まとめても必ず残す**
+ * — 束ねた代表に選ばれなかったせいで「いまどこか」が消えないように。
+ */
+export function hitMarkers(
+  hits: SearchHits,
+  total: number,
+  current: number,
+  buckets: number = HIT_MARKER_BUCKETS,
+): HitMarker[] {
+  if (total <= 0 || hits.rows.length === 0) return [];
+  const currentRow = rowOf(hits, current);
+  const byBucket = new Map<number, HitMarker>();
+  for (const row of hits.rows) {
+    const ratio = row / total;
+    const bucket = Math.round(ratio * buckets);
+    const isCurrent = row === currentRow;
+    if (byBucket.has(bucket) && !isCurrent) continue;
+    byBucket.set(bucket, { row, ratio, current: isCurrent });
+  }
+  return [...byBucket.values()].sort((left, right) => left.row - right.row);
+}
+
 /**
  * コード内容の検索の、初回のレート（コミット / 秒。T-36。docs/DESIGN.md §6.6）。
  *

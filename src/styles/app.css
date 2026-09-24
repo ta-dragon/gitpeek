@@ -1972,12 +1972,25 @@ body {
 }
 
 /*
- * コミット検索で当たった行（T-35。docs/DESIGN.md §6.6）。
- * **差分内検索と同じ見せ方にそろえる** — 文字は塗らず、行の背を変えて、
- * いま辿っている 1 件だけを囲む。選択の塗りより弱くして、選択と取り違えない。
+ * コミット検索で当たった行（T-35 / T-40。docs/DESIGN.md §6.6, §6.7）。
+ * 文字は塗らず、行の背を変えて、いま辿っている 1 件だけを囲む。
+ *
+ * **地はホバーとも選択とも違う色相**（--hit-bg）。ホバーと同じ塗りだった頃は、印とマウスの
+ * 位置が見分けられなかった（2026-09-24 の T-40 の目視）。**左端の帯**も付けて、選択や
+ * ホバーで地が塗り替わっても当たりだと分かるようにする（帯は選択中でも残る）。
+ * **選択の塗りは当たりの地より優先する** — 以前は後に書いた当たりの地が勝ち、選んだ行が
+ * 選んでいないように見えていた。
  */
 .crow--hit {
-  background: var(--bg-hover);
+  box-shadow: inset 3px 0 0 var(--hit-mark);
+}
+
+.crow--hit:not(.crow--selected) {
+  background: var(--hit-bg);
+}
+
+.crow--hit:not(.crow--selected):hover {
+  background: var(--hit-bg-hover);
 }
 
 .crow--hit-current {
@@ -1993,6 +2006,13 @@ body {
 .crow--compare-from {
   background: color-mix(in srgb, var(--accent) 9%, transparent);
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* 比較元が当たりでもあるときは、帯を 2 本並べる（どちらかを消すと片方の意味が読めなくなる）。 */
+.crow--compare-from.crow--hit {
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    inset 6px 0 0 var(--hit-mark);
 }
 
 /* グラフの線が通る場所。行側は空けるだけ。 */
@@ -2124,6 +2144,28 @@ body {
   height: 5px;
   margin-left: 1px;
   transform: rotate(45deg);
+}
+
+/*
+ * 検索の当たり（T-35 / T-40）。**帯の右半分に、当たりの色の短い線。** ref の線（左寄せ）と
+ * 同じ位置に置くと重なって見分けられないので、横にずらして幅も変える。
+ * 数万行のうちどこに当たりがあるかを、スクロールせずに見せる。
+ */
+.refmarks__hit {
+  position: absolute;
+  right: 0;
+  width: 3px;
+  height: 3px;
+  padding: 0;
+  border: 0;
+  background: var(--hit-mark);
+  cursor: pointer;
+}
+
+.refmarks__hit--current {
+  width: 10px;
+  height: 4px;
+  background: var(--accent);
 }
 
 /* ---------- 差分ペイン（docs/DESIGN.md §7.3） ---------- */

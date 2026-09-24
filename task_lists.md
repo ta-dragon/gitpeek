@@ -244,6 +244,11 @@ graph LR
 4. **目視用のリポジトリ** — `npm run demo:repo` が `history-demo` も作る。手順は `確認手順.md` の 4.
 5. **ドキュメント** — DESIGN.md §6.6 / **§6.7（新）** / §14.6 / §17.1、README、CLAUDE.md §2（`--follow` を使わない）
 
+**目視で見つけて直したもの**
+
+- **当たった行の色がホバーと同じで見分けられない**（2026-09-24 に利用者の指摘）。淡い黄（`--hit-bg`）＋ 左端の帯にし、
+  選択の塗りが当たりの地に負けていたのも直した。あわせてスクロールバーに当たりの印を置いた（DESIGN.md §6.7）
+
 **テストが当たらないところ**: 右クリックの配線（`FileList.tsx` / `WorkingTreeFiles.tsx` / `FileHistoryMenu.tsx`）／
 右クリック → 探す欄の受け渡し（`store/fileHistory.ts` と `CommitList.tsx` の効果）／ `useCommitFiles` が
 `fileToSelect` を呼ぶところ ／ `App.tsx` の配線。**判断そのもの（押せるか・何を入れるか・どれを選ぶか）は

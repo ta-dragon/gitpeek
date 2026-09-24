@@ -7,6 +7,7 @@
  */
 import { useMemo } from "react";
 
+import type { HitMarker } from "../../lib/commitSearch";
 import { laneColor } from "../../lib/graphPath";
 import type { RefEntry } from "../../lib/ipc";
 
@@ -27,12 +28,15 @@ export function ScrollbarRefMarkers({
   rowIndexBySha,
   laneBySha,
   total,
+  hits,
   onJump,
 }: {
   refs: RefEntry[];
   rowIndexBySha: Map<string, number>;
   laneBySha: Map<string, number>;
   total: number;
+  /** 検索の当たり（T-40）。どこに置くかは `lib/commitSearch.ts` の `hitMarkers` が決める。 */
+  hits: HitMarker[];
   onJump: (row: number) => void;
 }) {
   const markers = useMemo<Marker[]>(() => {
@@ -66,7 +70,7 @@ export function ScrollbarRefMarkers({
     return [...buckets.values()];
   }, [refs, rowIndexBySha, laneBySha, total]);
 
-  if (markers.length === 0) return null;
+  if (markers.length === 0 && hits.length === 0) return null;
 
   return (
     <div className="refmarks" aria-hidden="true">
@@ -82,6 +86,15 @@ export function ScrollbarRefMarkers({
           }}
           title={marker.label}
           onClick={() => onJump(Math.round(marker.ratio * total))}
+        />
+      ))}
+      {hits.map((hit) => (
+        <button
+          type="button"
+          key={`hit-${hit.row}`}
+          className={`refmarks__hit${hit.current ? " refmarks__hit--current" : ""}`}
+          style={{ top: `${hit.ratio * 100}%` }}
+          onClick={() => onJump(hit.row)}
         />
       ))}
     </div>

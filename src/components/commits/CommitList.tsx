@@ -22,7 +22,7 @@ import type { WorkingSummary } from "../../lib/workingTree";
 import { WorkingTreeRow } from "./WorkingTreeRow";
 import { useCommitNavigation } from "../../hooks/useCommitNavigation";
 import { useCommitSearch } from "../../hooks/useCommitSearch";
-import { hitRows, rowOf, searchView, type SearchNote } from "../../lib/commitSearch";
+import { hitMarkers, hitRows, rowOf, searchView, type SearchNote } from "../../lib/commitSearch";
 import { isTyping, matches } from "../../lib/shortcuts";
 import { ja } from "../../i18n/ja";
 import { graphWidth, ROW_HEIGHT } from "../../lib/graphPath";
@@ -298,6 +298,11 @@ export function CommitList({
   /** ツールバーの出し分け。**判定は `searchView` にあり、ここは描くだけ。** */
   const view = searchView(search);
   const currentHitRow = rowOf(search.hits, search.current);
+  /** スクロールバーに置く当たりの印（T-40）。置き場所は `hitMarkers` が決める。 */
+  const scrollbarHits = useMemo(
+    () => hitMarkers(search.hits, shown.length, search.current),
+    [search.hits, shown.length, search.current],
+  );
 
   /**
    * 変更ファイルの右クリックから頼まれた検索（T-40。`store/fileHistory.ts`）。
@@ -608,6 +613,7 @@ export function CommitList({
           rowIndexBySha={indexBySha}
           laneBySha={laneBySha}
           total={shown.length}
+          hits={scrollbarHits}
           onJump={reveal}
         />
       </div>
