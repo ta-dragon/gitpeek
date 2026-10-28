@@ -276,6 +276,23 @@ export function commitTimes(commits: CommitMeta[]): CommitTimes {
 }
 
 /**
+ * sha → 作者の名前とメールアドレスの索引（CSV の「最終コミットの作者」列。§6.4）。
+ *
+ * `commitTimes` と同じく git を呼び直さない。**コミッタではなく作者** — コミッタ名は
+ * 読み込んでいないうえ、画面が「作者」として見せているのもこちら。
+ */
+export type CommitAuthor = { name: string; email: string };
+export type CommitAuthors = ReadonlyMap<string, CommitAuthor>;
+
+export function commitAuthors(commits: CommitMeta[]): CommitAuthors {
+  const authors = new Map<string, CommitAuthor>();
+  for (const commit of commits) {
+    authors.set(commit.sha, { name: commit.authorName, email: commit.authorEmail });
+  }
+  return authors;
+}
+
+/**
  * `2026-09-01` を、その日の 00:00:00（ローカル）のミリ秒にする。読めなければ null。
  *
  * 踏んだ経緯は docs/DESIGN.md §17.1。

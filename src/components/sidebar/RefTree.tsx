@@ -19,6 +19,7 @@ import {
   branchesUpdatedSince,
   buildRefTree,
   checkStateOf,
+  commitAuthors,
   commitTimes,
   excludedSet,
   onlyVisible,
@@ -93,11 +94,12 @@ export function RefTree({
   const groups = useMemo(() => buildRefTree(refs, filter), [refs, filter]);
   const excluded = useMemo(() => excludedSet(visibleRefs), [visibleRefs]);
   const times = useMemo(() => commitTimes(commits), [commits]);
+  const authors = useMemo(() => commitAuthors(commits), [commits]);
   // **判定は純関数へ出す**（CLAUDE.md §6, §8）。ここは受け取った結果を描くだけ。
   const sinceAt = useMemo(() => startOfDay(since), [since]);
   const csvRows = useMemo(
-    () => branchCsvRows(refs, excluded, times),
-    [refs, excluded, times],
+    () => branchCsvRows(refs, excluded, times, authors),
+    [refs, excluded, times, authors],
   );
   const csvState = csvExportState(csvRows);
   const collapsedSet = useMemo(() => new Set(collapsed), [collapsed]);

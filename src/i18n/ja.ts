@@ -486,6 +486,8 @@ export const ja = {
       // ファイルの中の見出し。**画面には出ないが、利用者が読む文字**なのでここに置く。
       headerName: "ブランチ",
       headerTime: "最終コミット時刻",
+      headerAuthor: "最終コミットの作者",
+      headerEmail: "作者のメールアドレス",
     },
 
     // ahead/behind（docs/DESIGN.md §4.5）。上流の無いブランチには何も出さない。

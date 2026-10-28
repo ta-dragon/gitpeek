@@ -6,6 +6,7 @@ import {
   branchesUpdatedSince,
   buildRefTree,
   checkStateOf,
+  commitAuthors,
   commitTimes,
   excludedSet,
   isHeadRef,
@@ -311,5 +312,18 @@ describe("commitTimes", () => {
     expect(times.get("a")).toBe(100);
     expect(times.get("b")).toBe(200);
     expect(times.get("c")).toBeUndefined();
+  });
+});
+
+describe("commitAuthors", () => {
+  it("sha から作者の名前とメールアドレスを引ける", () => {
+    const authors = commitAuthors([
+      { ...commit("a", 100), authorName: "山田", authorEmail: "yamada@example.com" },
+      { ...commit("b", 200), authorName: "Doe", authorEmail: "doe@example.com" },
+    ]);
+
+    expect(authors.get("a")).toEqual({ name: "山田", email: "yamada@example.com" });
+    expect(authors.get("b")).toEqual({ name: "Doe", email: "doe@example.com" });
+    expect(authors.get("c")).toBeUndefined();
   });
 });

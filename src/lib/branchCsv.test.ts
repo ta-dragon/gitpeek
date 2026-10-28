@@ -9,6 +9,7 @@ import {
   type BranchCsvRow,
 } from "./branchCsv";
 import type { RefEntry } from "./ipc";
+import type { CommitAuthor } from "./refTree";
 import { absoluteTimeDetailed } from "./relativeTime";
 
 function ref(shortName: string, kind: RefEntry["kind"] = "localBranch"): RefEntry {
@@ -32,6 +33,10 @@ function times(entries: [string, number][]): Map<string, number> {
   return new Map(entries);
 }
 
+function authors(entries: [string, string, string][]): Map<string, CommitAuthor> {
+  return new Map(entries.map(([sha, name, email]) => [sha, { name, email }]));
+}
+
 /** BOM を外し、CRLF で割った行。 */
 function lines(csv: string): string[] {
   expect(csv.startsWith(String.fromCharCode(0xfeff))).toBe(true);
@@ -41,7 +46,7 @@ function lines(csv: string): string[] {
 describe("branchCsvRows", () => {
   it("チェックの外れたブランチを落とす", () => {
     const refs = [ref("main"), ref("feature")];
-    const rows = branchCsvRows(refs, new Set(["refs/heads/feature"]), times([]));
+    const rows = branchCsvRows(refs, new Set(["refs/heads/feature"]), times([]), authors([]));
 
     expect(rows.map((row) => row.shortName)).toEqual(["main"]);
   });
@@ -49,7 +54,7 @@ describe("branchCsvRows", () => {
   it("タグは一覧に入れない", () => {
     // タグにはチェックボックスが無いので、入れると外せない行になる。
     const refs = [ref("main"), ref("v1.0", "tag")];
-    const rows = branchCsvRows(refs, new Set(), times([]));
+    const rows = branchCsvRows(refs, new Set(), times([]), authors([]));
 
     expect(rows.map((row) => row.shortName)).toEqual(["main"]);
   });
@@ -61,7 +66,7 @@ describe("branchCsvRows", () => {
       ref("alpha"),
       ref("origin/dev", "remoteBranch"),
     ];
-    const rows = branchCsvRows(refs, new Set(), times([]));
+    const rows = branchCsvRows(refs, new Set(), times([]), authors([]));
 
     expect(rows.map((row) => row.shortName)).toEqual([
       "alpha",
@@ -72,11 +77,30 @@ describe("branchCsvRows", () => {
   });
 
   it("指す先のコミットが読み込まれていなければ時刻は null", () => {
-    const rows = branchCsvRows([ref("main"), ref("old")], new Set(), times([["sha-main", T]]));
+    const rows = branchCsvRows(
+      [ref("main"), ref("old")],
+      new Set(),
+      times([["sha-main", T]]),
+      authors([]),
+    );
 
     expect(rows).toEqual([
-      { shortName: "main", time: T },
-      { shortName: "old", time: null },
+      { shortName: "main", time: T, author: null },
+      { shortName: "old", time: null, author: null },
+    ]);
+  });
+
+  it("指す先のコミットの作者とメールアドレスを引く。読み込まれていなければ null", () => {
+    const rows = branchCsvRows(
+      [ref("main"), ref("old")],
+      new Set(),
+      times([]),
+      authors([["sha-main", "山田", "yamada@example.com"]]),
+    );
+
+    expect(rows.map((row) => row.author)).toEqual([
+      { name: "山田", email: "yamada@example.com" },
+      null,
     ]);
   });
 });
@@ -88,7 +112,7 @@ describe("csvExportState", () => {
   });
 
   it("件数を持って返す", () => {
-    const rows: BranchCsvRow[] = [{ shortName: "main", time: T }];
+    const rows: BranchCsvRow[] = [{ shortName: "main", time: T, author: { name: "a", email: "a@example.com" } }];
 
     expect(csvExportState(rows)).toEqual({ kind: "ready", count: 1 });
   });
@@ -97,7 +121,7 @@ describe("csvExportState", () => {
 describe("toCsv", () => {
   it("BOM で始まり、CRLF で終わる", () => {
     // BOM が無いと Excel が CP932 と誤読して日本語のブランチ名が化ける。
-    const csv = toCsv([{ shortName: "main", time: T }]);
+    const csv = toCsv([{ shortName: "main", time: T, author: { name: "a", email: "a@example.com" } }]);
 
     expect(csv.startsWith(String.fromCharCode(0xfeff))).toBe(true);
     expect(csv.endsWith("\r\n")).toBe(true);
@@ -106,35 +130,46 @@ describe("toCsv", () => {
 
   it("見出しの次に 1 行 1 ブランチで並ぶ", () => {
     const csv = toCsv([
-      { shortName: "main", time: T },
-      { shortName: "dev", time: T },
+      { shortName: "main", time: T, author: { name: "a", email: "a@example.com" } },
+      { shortName: "dev", time: T, author: { name: "b", email: "b@example.com" } },
     ]);
 
     const rows = lines(csv);
     expect(rows).toHaveLength(3);
-    // 文言そのものは見ない（CLAUDE.md §8）。列が 2 つあることだけ固定する。
-    expect(rows[0].split(",")).toHaveLength(2);
-    expect(rows[1]).toBe(`main,${absoluteTimeDetailed(T)}`);
+    // 文言そのものは見ない（CLAUDE.md §8）。列が 4 つあることだけ固定する。
+    expect(rows[0].split(",")).toHaveLength(4);
+    // 作者とメールアドレスは末尾。既存の 2 列の位置を動かさない。
+    expect(rows[1]).toBe(`main,${absoluteTimeDetailed(T)},a,a@example.com`);
   });
 
-  it("時刻が無い行は空欄にする", () => {
+  it("時刻と作者とメールアドレスが無い行は空欄にする", () => {
     // 0 を入れると 1970 年として本物の日時に混ざる。
-    const rows = lines(toCsv([{ shortName: "old", time: null }]));
+    const rows = lines(toCsv([{ shortName: "old", time: null, author: null }]));
 
-    expect(rows[1]).toBe("old,");
+    expect(rows[1]).toBe("old,,,");
+  });
+
+  it("カンマと引用符を含む作者名で列がずれない", () => {
+    // 作者名は git の制約が緩く、`,` も `"` も入る。
+    const rows = lines(
+      toCsv([{ shortName: "main", time: null, author: { name: 'Doe, "J"', email: "j@example.com" } }]),
+    );
+
+    expect(rows[1]).toBe('main,,"Doe, ""J""",j@example.com');
   });
 
   it("カンマと引用符を含むブランチ名で列がずれない", () => {
     // git はブランチ名に `,` と `"` を許す。囲まないと 1 行が 3 列に見える。
-    const rows = lines(toCsv([{ shortName: 'a,b"c', time: null }]));
+    const rows = lines(toCsv([{ shortName: 'a,b"c', time: null, author: null }]));
 
-    expect(rows[1]).toBe('"a,b""c",');
+    expect(rows[1]).toBe('"a,b""c",,,');
   });
 
   it("見出しは ja.ts の文言をそのまま使う", () => {
     const rows = lines(toCsv([]));
 
-    expect(rows[0]).toBe(`${ja.refTree.csv.headerName},${ja.refTree.csv.headerTime}`);
+    const { headerName, headerTime, headerAuthor, headerEmail } = ja.refTree.csv;
+    expect(rows[0]).toBe(`${headerName},${headerTime},${headerAuthor},${headerEmail}`);
   });
 });
 

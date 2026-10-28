@@ -9,7 +9,7 @@
  */
 import { ja } from "../i18n/ja";
 import type { RefEntry } from "./ipc";
-import type { CommitTimes } from "./refTree";
+import type { CommitAuthor, CommitAuthors, CommitTimes } from "./refTree";
 import { absoluteTimeDetailed } from "./relativeTime";
 
 /** CSV の 1 行。 */
@@ -18,6 +18,8 @@ export type BranchCsvRow = {
   shortName: string;
   /** グラフの外を指していて時刻を引けないときだけ null。 */
   time: number | null;
+  /** 指す先のコミットの作者。時刻と同じく、引けないときだけ null。 */
+  author: CommitAuthor | null;
 };
 
 /** ローカルを先、リモートを後。ツリーの並びと同じにして、見比べられるようにする。 */
@@ -33,6 +35,7 @@ export function branchCsvRows(
   refs: RefEntry[],
   excluded: ReadonlySet<string>,
   times: CommitTimes,
+  authors: CommitAuthors,
 ): BranchCsvRow[] {
   return refs
     .filter((entry) => entry.kind !== "tag" && !excluded.has(entry.name))
@@ -45,6 +48,7 @@ export function branchCsvRows(
     .map((entry) => ({
       shortName: entry.shortName,
       time: times.get(entry.target) ?? null,
+      author: authors.get(entry.target) ?? null,
     }));
 }
 
@@ -71,13 +75,22 @@ const BOM = String.fromCharCode(0xfeff);
  * CSV 本文。**行区切りは CRLF、先頭に BOM**（RFC 4180 と Excel に合わせる）。
  *
  * 時刻を引けなかった行は**空欄**にする。0 や「不明」を入れると、
- * 日付で並べ替えたときに本物の日時に混ざって見分けが付かなくなる。
+ * 日付で並べ替えたときに本物の日時に混ざって見分けが付かなくなる。作者も同じく空欄。
+ *
+ * **作者の列は末尾に足す。** 既存の列の位置を動かすと、列番号で読んでいる側が黙ってずれる。
+ * 名前とメールアドレスは別の列にする（1 列にまとめると、並べ替えや絞り込みで分けられない）。
  */
 export function toCsv(rows: BranchCsvRow[]): string {
+  const { headerName, headerTime, headerAuthor, headerEmail } = ja.refTree.csv;
   const lines = [
-    [ja.refTree.csv.headerName, ja.refTree.csv.headerTime].map(field).join(","),
+    [headerName, headerTime, headerAuthor, headerEmail].map(field).join(","),
     ...rows.map((row) =>
-      [row.shortName, row.time === null ? "" : absoluteTimeDetailed(row.time)]
+      [
+        row.shortName,
+        row.time === null ? "" : absoluteTimeDetailed(row.time),
+        row.author?.name ?? "",
+        row.author?.email ?? "",
+      ]
         .map(field)
         .join(","),
     ),
