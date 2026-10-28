@@ -8,7 +8,8 @@
 import { useState } from "react";
 
 import { ja } from "../../i18n/ja";
-import type { CommitMeta } from "../../lib/ipc";
+import type { CompareCounts } from "../../lib/branchCompare";
+import type { CommitMeta, RefEntry } from "../../lib/ipc";
 import { CommitDetail } from "./CommitDetail";
 import { CompareBar } from "./CompareBar";
 import { FileList, type FileListLayout } from "./FileList";
@@ -20,6 +21,10 @@ export type CompareInfo = {
   to: string;
   symmetric: boolean;
   commitBySha: Map<string, CommitMeta>;
+  /** 両端を指している ref の名前を引くため（T-41）。 */
+  refs: RefEntry[];
+  /** 片側にだけあるコミットの数（T-41）。 */
+  counts: CompareCounts;
   onSymmetricChange: (symmetric: boolean) => void;
   onSwap: () => void;
   onClear: () => void;
@@ -83,6 +88,8 @@ export function CommitInfo({
           from={{ sha: compare.from, commit: compare.commitBySha.get(compare.from) ?? null }}
           to={{ sha: compare.to, commit: compare.commitBySha.get(compare.to) ?? null }}
           symmetric={compare.symmetric}
+          refs={compare.refs}
+          counts={compare.counts}
           onSymmetricChange={compare.onSymmetricChange}
           onSwap={compare.onSwap}
           onClear={compare.onClear}

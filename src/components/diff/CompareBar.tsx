@@ -3,14 +3,20 @@
  *
  * 比較中はコミット詳細の代わりにここを出す。**1 点のときの詳細と同じ場所**に置くのは、
  * 「今どちらを見ているか」が同じ位置で分かるようにするため。
+ *
+ * 両端を指している ref の名前と、片側にだけあるコミットの数も出す（T-41）。名前は
+ * **いまその SHA を指しているもの**で、fetch で ref が動けば消える（`lib/branchCompare.ts`）。
  */
 import { ja } from "../../i18n/ja";
-import type { CommitMeta } from "../../lib/ipc";
+import { refsAt, type CompareCounts } from "../../lib/branchCompare";
+import type { CommitMeta, RefEntry } from "../../lib/ipc";
 
 export function CompareBar({
   from,
   to,
   symmetric,
+  refs,
+  counts,
   onSymmetricChange,
   onSwap,
   onClear,
@@ -19,6 +25,8 @@ export function CompareBar({
   from: { sha: string; commit: CommitMeta | null };
   to: { sha: string; commit: CommitMeta | null };
   symmetric: boolean;
+  refs: RefEntry[];
+  counts: CompareCounts;
   onSymmetricChange: (symmetric: boolean) => void;
   onSwap: () => void;
   onClear: () => void;
@@ -35,8 +43,10 @@ export function CompareBar({
         </button>
       </header>
 
-      <End label={ja.compare.from} end={from} kind="from" />
-      <End label={ja.compare.to} end={to} kind="to" />
+      <End label={ja.compare.from} end={from} names={refsAt(from.sha, refs)} kind="from" />
+      <End label={ja.compare.to} end={to} names={refsAt(to.sha, refs)} kind="to" />
+
+      <p className="cmp__counts">{countsText(counts)}</p>
 
       {/*
        * 比べ方は**この比較かぎり**の判断なので `settings.json` に残さない
@@ -57,18 +67,32 @@ export function CompareBar({
 function End({
   label,
   end,
+  names,
   kind,
 }: {
   label: string;
   end: { sha: string; commit: CommitMeta | null };
+  /** その SHA を指している ref の短い名前。無ければ出さない。 */
+  names: string[];
   kind: "from" | "to";
 }) {
+  const joined = names.join(", ");
   return (
     <div className="cmp__end">
       {/* 印はグラフ上の行と同じ色にする（どちらの端か目で追えるように）。 */}
       <span className={`cmp__badge cmp__badge--${kind}`}>{label}</span>
       <span className="cmp__sha">{end.sha.slice(0, 8)}</span>
+      {names.length > 0 && (
+        <span className="cmp__refs" title={joined}>
+          {joined}
+        </span>
+      )}
       <span className="cmp__subject">{end.commit?.subject ?? ja.compare.outsideGraph}</span>
     </div>
   );
+}
+
+function countsText(counts: CompareCounts): string {
+  if (counts.kind === "unknown") return ja.compare.countsUnknown;
+  return `${ja.compare.onlyInTo(counts.onlyInTo)} / ${ja.compare.onlyInFrom(counts.onlyInFrom)}`;
 }

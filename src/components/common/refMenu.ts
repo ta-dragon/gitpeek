@@ -12,6 +12,7 @@
 import { ja } from "../../i18n/ja";
 import type { RefEntry } from "../../lib/ipc";
 import { canFetchMerge } from "../../lib/repositoryMenu";
+import { openBranchCompare } from "../../store/branchCompare";
 import type { ContextMenuItem } from "./ContextMenu";
 
 /**
@@ -36,6 +37,20 @@ export function fetchMergeItem(
     disabled: !availability.enabled,
     title: reasonText(availability.why),
     onSelect: () => onSelect(entry),
+  };
+}
+
+/**
+ * 「比べる…」（T-41。docs/DESIGN.md §10.3）。押すと比較元と比較先を選ぶダイアログが開く。
+ *
+ * **ここでは押せるかを判定しない。** 同じもの同士かどうかは、両端が決まるダイアログの中で
+ * `compareReadiness` が見る（タグもグラフの外の ref も比べられる — 差分は SHA で取る）。
+ */
+export function compareItem(entry: RefEntry): ContextMenuItem {
+  return {
+    label: ja.branchCompare.menu,
+    title: ja.branchCompare.menuHint,
+    onSelect: () => openBranchCompare(entry),
   };
 }
 

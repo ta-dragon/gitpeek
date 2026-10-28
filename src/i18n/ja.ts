@@ -809,6 +809,28 @@ export const ja = {
     // 共通の祖先が無いときの説明は Rust 側（`git/diff.rs` の `explain`）にある。
     // git のエラーを言い換えるものなので、出どころと同じところに置く。
     hint: "Ctrl+クリックで 2 点比較",
+    // 比較バーの件数（T-41）。メモリ上のグラフから数える。
+    onlyInTo: (count: number) => `比較先にだけあるコミット ${count} 件`,
+    onlyInFrom: (count: number) => `比較元にだけあるコミット ${count} 件`,
+    countsUnknown: "片方が読み込んだ範囲の外にあるため、コミットの数を数えられません",
+  },
+
+  // ブランチ同士を比べる（T-41。docs/DESIGN.md §10.3）。
+  branchCompare: {
+    menu: "比べる…",
+    menuHint: "比較元と比較先をブランチやタグから選んで、差分を出します",
+    title: "ブランチを比べる",
+    lead: "比較元から比較先へ何が変わったかを、差分ペインに出します。比べるのはいまの位置で、あとでブランチが動いても比べ直しません。",
+    filter: "名前で絞り込む",
+    noMatch: "当てはまる名前がありません",
+    groupLocal: "ローカル",
+    groupRemote: "リモート",
+    groupTag: "タグ",
+    start: "比べる",
+    cancel: "やめる",
+    whyMissing: "比較元と比較先を両方選んでください。",
+    whySameRef: "同じものどうしは比べられません。",
+    whySameCommit: "2 つとも同じコミットを指しているので、差分がありません。",
   },
 
   diff: {

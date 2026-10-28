@@ -40,6 +40,7 @@ import { Sidebar } from "./components/sidebar/Sidebar";
 import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { RepositorySettingsDialog } from "./components/settings/RepositorySettingsDialog";
 import { ReviewDrawer } from "./components/review/ReviewDrawer";
+import { BranchCompareDialog } from "./components/diff/BranchCompareDialog";
 import { CloneDialog } from "./components/setup/CloneDialog";
 import { EmptyState } from "./components/setup/EmptyState";
 import { GitSetupScreen } from "./components/setup/GitSetupScreen";
@@ -52,6 +53,7 @@ import { checkoutChoices, checkoutCommit, type CheckoutChoice } from "./lib/writ
 import { useTheme } from "./hooks/useTheme";
 import { ja } from "./i18n/ja";
 import { clearCompare, selectCommit, swapEnds } from "./lib/compareSelection";
+import { compareCounts } from "./lib/branchCompare";
 import { findingsFor, newLines, type LineLookup } from "./lib/reviewFindings";
 import { crashSummary, logHint } from "./lib/crashNotice";
 import { bindingOf, isTyping, matches } from "./lib/shortcuts";
@@ -90,6 +92,7 @@ import {
   useSettings,
 } from "./store/settings";
 import { closeContainers, pump, useContainment } from "./store/containment";
+import { closeBranchCompare, useBranchCompare } from "./store/branchCompare";
 import { requestFileHistory, useFileHistory } from "./store/fileHistory";
 import { autoCheckBranches, squashJump } from "./lib/containment";
 import * as snapshots from "./store/snapshot";
@@ -1041,6 +1044,37 @@ function CommitWorkspace({
     return map;
   }, [data.commits]);
 
+  /**
+   * 片側にだけあるコミットの数（T-41）。**git は呼ばない** — 全コミットが手元にある（§4.1）。
+   * 比較していないときは数えない。
+   */
+  const counts = useMemo(
+    () =>
+      compareFrom === null || perRepository.selectedCommit === null
+        ? null
+        : compareCounts(commitBySha, compareFrom, perRepository.selectedCommit),
+    [commitBySha, compareFrom, perRepository.selectedCommit],
+  );
+
+  /**
+   * 「比べる…」のダイアログ（T-41）。開くのはストアの `openBranchCompare`。
+   *
+   * **始めた時点の SHA を入れる**（`state.json` に ref 名を足さない）。比べ方は、比較元が
+   * 変わると既定へ戻る（上の `useEffect`）ので、`openHistoryEntry` と同じく戻し先を先に置く。
+   * **比較元が変わらないときは戻らない**ので、置いた戻し先を残さない（次の比較に漏れる）。
+   */
+  const comparing = useBranchCompare();
+  const startBranchCompare = (from: string, toSha: string, nextSymmetric: boolean) => {
+    setViewingWorking(false);
+    pendingSymmetric.current = from === compareFrom ? null : nextSymmetric;
+    setSymmetric(nextSymmetric);
+    updateRepositoryUiState(entry.id, (current) => ({
+      ...current,
+      selectedCommit: toSha,
+      compareCommit: from,
+    }));
+  };
+
   const to = perRepository.selectedCommit;
   const scope: DiffScope | null =
     to === null
@@ -1291,6 +1325,19 @@ function CommitWorkspace({
   );
 
   return (
+    <>
+    {comparing !== null && (
+      <BranchCompareDialog
+        // 別の ref から開き直したら、選んでいた値を持ち越さない。
+        key={comparing.name}
+        entry={comparing}
+        refs={data.refs}
+        defaultBranch={data.defaultBranch}
+        headBranch={data.head.branch}
+        onStart={startBranchCompare}
+        onClose={closeBranchCompare}
+      />
+    )}
     <SplitPane
       direction="row"
       unit="px"
@@ -1451,6 +1498,8 @@ function CommitWorkspace({
                   to: to ?? compareFrom,
                   symmetric,
                   commitBySha,
+                  refs: data.refs,
+                  counts: counts ?? { kind: "unknown" },
                   onSymmetricChange: setSymmetric,
                   onSwap: swap,
                   onClear: clear,
@@ -1467,6 +1516,7 @@ function CommitWorkspace({
         )
       }
     />
+    </>
   );
 }
 

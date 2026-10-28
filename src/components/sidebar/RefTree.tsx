@@ -28,7 +28,7 @@ import {
   type RefGroup,
 } from "../../lib/refTree";
 import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
-import { fetchMergeItem } from "../common/refMenu";
+import { compareItem, fetchMergeItem } from "../common/refMenu";
 import { containmentMenuItems } from "../common/containmentText";
 import { refLabel, squashJump } from "../../lib/containment";
 import { useContainment } from "../../store/containment";
@@ -444,6 +444,8 @@ function menuItems(
 
   // 取り込まれているか（T-38）。**チップのメニューにも同じものを出す**（`containmentText.ts`）。
   items.push(...containmentMenuItems(entry, actions.containmentTarget));
+  // ブランチ同士を比べる（T-41）。**チップのメニューにも同じものを出す**（`refMenu.ts`）。
+  items.push(compareItem(entry));
 
   items.push({
     label: ja.refTree.jump,

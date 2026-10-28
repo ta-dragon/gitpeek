@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
-import { fetchMergeItem } from "../common/refMenu";
+import { compareItem, fetchMergeItem } from "../common/refMenu";
 import { containmentMenuItems } from "../common/containmentText";
 import { refLabel } from "../../lib/containment";
 import { useContainment } from "../../store/containment";
@@ -699,6 +699,8 @@ function chipMenuItems(
 
   // 取り込まれているか（T-38）。**ブランチ一覧と同じ項目**（`containmentText.ts`）。
   items.push(...containmentMenuItems(entry, actions.containmentTarget));
+  // ブランチ同士を比べる（T-41）。**ブランチ一覧と同じ項目**（`refMenu.ts`）。タグにも出す。
+  items.push(compareItem(entry));
 
   items.push({
     label: ja.commits.checkoutHere,

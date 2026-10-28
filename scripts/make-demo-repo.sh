@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# 「ブランチが取り込まれているか」（T-38）と「ファイルを変えたコミットを辿る」（T-40）を
-# 目視で確かめるためのリポジトリを作る。
+# 「ブランチが取り込まれているか」（T-38）・「ファイルを変えたコミットを辿る」（T-40）・
+# 「ブランチ同士を比べる」（T-41）を目視で確かめるためのリポジトリを作る。
 #
 #   scripts/make-demo-repo.sh [出力ディレクトリ]      既定は ~/gitpeek-demo
 #
@@ -12,6 +12,7 @@
 #   containment-demo.git   上流（bare）。リモート追跡ブランチを出すために挟む
 #   containment-demo       GitPeek に登録するリポジトリ（origin/* が付いたクローン）
 #   history-demo           ファイルの改名をまたぐ履歴（T-40）。これも GitPeek に登録する
+#   compare-demo           分かれたあと両側が進んだ枝とタグ 2 つ（T-41）。これも GitPeek に登録する
 #   確認手順.md            どのブランチに何が出れば正しいかの一覧
 #
 # Windows では **Git Bash で実行すること**。`npm run demo:repo` はどこから実行しても
@@ -274,8 +275,36 @@ git_ -C "$hist" checkout --quiet main
 hline 12 '設定 12 行目（手元で直しかけ）' src/settings.txt
 printf 'まだコミットしていない\n' >"$hist/未追跡.txt"
 
+# --- compare-demo: ブランチ同士を比べる（T-41）---------------------------------
+# **分かれたあと両側が進んだ形**にしてある。「マージベース起点」を外すと、幹の側で進んだ
+# ぶん（main.txt）が逆向きに差分へ混ざるのが目で分かる。
+cmp=$out/compare-demo
+rm -rf "$cmp"
+git_ init --quiet -b main "$cmp"
+
+ccommit() {
+  printf '%s\n' "$2" >>"$cmp/$1"
+  tick
+  git_ -C "$cmp" add -A
+  git_ -C "$cmp" commit --quiet -m "$3"
+}
+
+ccommit main.txt "幹 1" "幹: 最初のコミット"
+ccommit shared.txt "共有 1" "幹: 共有するファイルを足す"
+git_ -C "$cmp" tag v1.0
+git_ -C "$cmp" checkout --quiet -b feature/画面を足す
+ccommit feature.txt "画面 1" "枝: 画面を足す"
+ccommit feature.txt "画面 2" "枝: 画面に項目を足す"
+git_ -C "$cmp" checkout --quiet main
+ccommit main.txt "幹 2" "幹: 枝と関係ない修正 1"
+ccommit main.txt "幹 3" "幹: 枝と関係ない修正 2"
+ccommit shared.txt "共有 2" "幹: 共有するファイルを直す"
+git_ -C "$cmp" tag v1.1
+# 幹と同じコミットを指すブランチ（「比べる」が押せないことの材料）。
+git_ -C "$cmp" branch 幹と同じ位置 main
+
 cat >"$out/確認手順.md" <<'GUIDE'
-# GitPeek の目視用リポジトリ（T-38 / T-40）
+# GitPeek の目視用リポジトリ（T-38 / T-40 / T-41）
 
 `containment-demo` を GitPeek に登録して開く。**ブランチ名が期待する結果になっている。**
 
@@ -335,6 +364,26 @@ cat >"$out/確認手順.md" <<'GUIDE'
 5. `path:"src/settings.txt" 9 行目` と打つと、2 つの `9 行目を直す` だけに絞れる
 6. 「やめる」で欄を空にすると印が消え、コミットを移っても選ぶファイルが勝手に変わらなくなる
 
+## 5. ブランチ同士を比べる（T-41。`compare-demo`）
+
+`compare-demo` を GitPeek に登録して開く。`feature/画面を足す` は `v1.0` の位置で幹から分かれ、
+そのあと**枝で 2 つ、幹で 3 つ**進んでいる。
+
+1. ブランチ一覧で `feature/画面を足す` を右クリック →「比べる…」
+   - 比較元に `main`、比較先に `feature/画面を足す` が選ばれた状態でダイアログが開く
+   - 「マージベース起点」にチェックが入っている
+2. 「比べる」を押す
+   - 差分に出るのは **`feature.txt` だけ**（枝で変えたもの）
+   - 比較バーに `main` と `feature/画面を足す` の名前、
+     「比較先にだけあるコミット 2 件 / 比較元にだけあるコミット 3 件」が出る
+3. 比較バーの「マージベース起点」を外す
+   - **`main.txt` と `shared.txt` も差分に出る**（幹の側で進んだぶんが、逆向きに混ざる）
+4. グラフのチップ（`v1.1` のタグなど）を右クリックしても「比べる…」がある。
+   比較元に `v1.0`、比較先に `v1.1` を選んで比べると、幹の 3 つぶんの差分になる
+5. 比較元と比較先に同じものを選ぶと「比べる」は押せず、理由が出る。
+   `main` と `幹と同じ位置` を選んだときも押せない（同じコミットを指している）
+6. 比べたまま「AI レビュー」を開くと、比較の範囲がレビューの対象として出る
+
 ## 作り直し
 
 `npm run demo:repo` をもう一度実行すると作り直す（このフォルダごと上書きされる）。
@@ -345,4 +394,5 @@ GUIDE
 echo "できました:"
 echo "  リポジトリ  $(show "$clone")"
 echo "              $(show "$hist")"
+echo "              $(show "$cmp")"
 echo "  確認手順    $(show "$out/確認手順.md")"

@@ -50,7 +50,7 @@ v1（Phase 1〜9）の作業を、人間が概ね 3 日で終える単位に割�
 
 **次のセッションが最初にやること**
 
-1. 下の「▸コマンド」を 4 つ流してベースラインを取る（直近は **Rust 577 / vitest 551** で全部緑。ignore 2 本のうち 1 本は手元の onyx が要る中止のテスト）
+1. 下の「▸コマンド」を 4 つ流してベースラインを取る（直近は **Rust 577 / vitest 576** で全部緑。ignore 2 本のうち 1 本は手元の onyx が要る中止のテスト）
 2. **T-41（ブランチ同士を比べる）**。2026-10-28 に利用者が選び、詳細化した（「v1.1 — ブランチ同士の比較」の節）。
    「決めたこと」6 点は利用者が了承済み（2026-10-28）。T-38 / T-40 と同じく、**詳細化 → 決めること を利用者に確認 →
    実装 → ▸目視**の順。**エージェントは完了を宣言しない。**
@@ -72,7 +72,7 @@ npm run test:rust   npm run check:rust   npm run test   npm run typecheck
 | 項目 | 内容 |
 |---|---|
 | 直前に完了 | **T-40**（ファイルを変えたコミットを辿る。2026-09-24 に利用者が目視確認）/ **T-38**（取り込まれているかを画面に出す。2026-09-24 に目視確認）/ v0.2.3 の公開（GitLab ＋ GitHub。2026-09-20。探索を並列にして速くした）/ v0.2.2 / v0.2.1 / v0.2.0 / T-37 / T-36 / T-35 |
-| いまここ | **T-41（ブランチ同士を比べる）の実装中**（「決めたこと」6 点は 2026-10-28 に了承済み）。push していないコミットあり（上の 3.）|
+| いまここ | **T-41（ブランチ同士を比べる）の▸目視待ち**（実装は 2026-10-28。「決めたこと」6 点は同日に了承済み）。push していないコミットあり（上の 3.）|
 | 未解決の判断事項 | なし（git 2.38 未満は**警告して止める**と 2026-09-18 に確定）。ただし**文言はまだ途中で、利用者はまだ満足していない**（下記）|
 
 **v1 は 2026-09-12 に終わった**（Phase 9 完了 ＋ 実リポジトリ 8 個で 7 日運用 ＋ 既存 GUI クライアントを
@@ -214,7 +214,7 @@ graph LR
 
 - **git の実行は増やさない。** 差分は T-15 の `changed_files` / `file_diff` に比較元を渡すだけで出る
   （DESIGN.md §10.3）。**件数は `rev-list --count` を呼ばずメモリ上のグラフから数える**（CLAUDE.md §2。
-  `graph::reach::CommitIndex::ahead_behind` を使う）
+  フロントに揃っている全コミットの親を辿る。実装内容の 1.）
 - **`A...B` は 1 つの引数**（DESIGN.md §10.3。いまの経路を通せば守られる）
 - 既定値・押せるかどうか・比較バーに出す名前は `src/lib/*.ts` の純関数へ。`.tsx` は呼ぶだけ（CLAUDE.md §8）
 - **押せない選択肢を消さない。** 押せない形で残し、理由を出す（CLAUDE.md §6）
@@ -257,35 +257,38 @@ graph LR
 
 **実装内容**
 
-1. **Rust**: コマンド `compare_counts(repository_id, from, to) -> { onlyInTo, onlyInFrom } | 数えられない` —
-   キャッシュ済みのスナップショットで `CommitIndex::ahead_behind` を呼ぶだけ（`merge_check_of` と同じ形）。
-   **git は呼ばない**
+1. **Rust は触らない**（着手時に見直した。2026-10-28）。当初は `CommitIndex::ahead_behind` を呼ぶコマンドを
+   足す案だったが、キャッシュを引く `load_cached` が**呼ぶたびに `symbolic-ref` / `rev-parse` / ref の一覧を走らせる**ので、
+   比較を始めるたびに git の実行が増え、コマンドログにも出る。**全コミットはフロントに揃っている**
+   （`RepositorySnapshot.commits`。CLAUDE.md §3.4）ので、件数は純関数で数える
 2. **純関数**（`src/lib/branchCompare.ts`）
    - `compareDefaults(entry, refs, defaultBranch, headBranch)` — ダイアログを開いたときの比較元・比較先
    - `compareReadiness(from, to)` — 押せるか。押せないときは理由を種類で返す（同じ ref / 同じ SHA / 未選択）
    - `refsAt(sha, refs)` — 比較バーに出す名前（ローカル → リモート → タグの順）
-   - `compareCountsView(counts)` — 件数の出し分け（数えられない場合を含む）
+   - `compareCounts(commits, from, to)` — 片側にだけあるコミットの数。どちらかが読み込んだ集合の外なら
+     「数えられない」（`CommitIndex::ahead_behind` と同じ意味。Rust 側の判定は FF の可否に使っていて、
+     こちらは表示だけなので、片方を変えてももう片方の結論は変わらない）
 3. **画面**: `BranchCompareDialog.tsx`（新規。ダイアログの作りは既存の確認画面に揃える）/ `refMenu.ts` に
    `compareItem` を足してブランチ一覧とチップの両方に配る / `CompareBar.tsx` に名前と件数 /
    `App.tsx` で `compareCommit` / `selectedCommit` を入れ、`pendingSymmetric` で比べ方を渡す
 4. **目視用のリポジトリ**: `npm run demo:repo` に、幹と分かれたあと**両側が進んだブランチ**と、タグ 2 つを
    足す（`A B` と `A...B` の違いが目で分かる形）。`確認手順.md` にも項目を足す
-5. **ドキュメント**: DESIGN.md §10.3（「ブランチ同士の比較は v1.1」を実装の説明に置き換える）/ §14.6 /
-   付録 A（コマンド一覧に `compare_counts`）/ README
+5. **ドキュメント**: DESIGN.md §10.3（「ブランチ同士の比較は v1.1」を実装の説明に置き換える）/ §14.6 / README
 
 **テスト**
 
-- **Rust**: `compare_counts` が分かれた 2 本・片方が祖先・同じ SHA・グラフの外で正しく返す ／
-  フロントから送る JSON を Rust が食える
+- **Rust**: なし（触らない）
 - **vitest**: `compareDefaults`（幹を押した / HEAD も幹 / 幹が無い）／ `compareReadiness`（同じ ref・
-  同じ SHA・未選択）／ `refsAt`（並び順・該当なし）／ `compareCountsView`
+  同じ SHA・未選択）／ `refsAt`（並び順・該当なし）／ `compareCounts`（分かれた 2 本・片方が祖先・
+  同じ SHA・マージをまたぐ・グラフの外）
 
-**テストが当たらないところ**（予定）: ダイアログの描画と絞り込み入力の配線、右クリックからダイアログを
-開く配線、`App.tsx` で選択と比べ方を入れる配線
+**テストが当たらないところ**: `BranchCompareDialog.tsx`（描画・絞り込み欄・一覧の選択）/ `store/branchCompare.ts` と
+`refMenu.ts` の `compareItem`（右クリックからダイアログを開く配線）/ `CompareBar.tsx`（名前と件数の描画・件数の文の
+組み立て）/ `App.tsx` の `startBranchCompare`（選択と比べ方を入れる。`pendingSymmetric` の扱い）と件数の `useMemo`
 
 **受け入れ条件**
 
-- ▸コマンド: `branchCompare.test.ts` ／ `compare_counts` のテスト ／ 4 コマンド
+- ▸コマンド: `branchCompare.test.ts` ／ 4 コマンド
 - ▸目視: 目視用リポジトリで、ブランチを右クリック →「比べる…」→ 幹が比較元に入った状態でダイアログが開き、
   押すと**分かれたところからの差分**が出ること。比較バーにブランチ名と件数が出ること
 - ▸目視: チェックを外すと 2 点間差分に変わり、幹の側で進んだぶんが差分に混ざること

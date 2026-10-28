@@ -2649,6 +2649,51 @@ body {
   font-size: 12px;
 }
 
+/* 比較バーの「どの ref か」と件数（T-41）。名前は SHA の横、件数は両端の下に置く。 */
+.cmp__refs {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmp__counts {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* 「比べる…」のダイアログ（T-41）。**両端を横に並べる** — 縦に積むと箱が 80vh を超え、
+   比べ方のチェックボックスと「比べる」がスクロールの下に隠れる。 */
+.bcmp__ends {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.bcmp__end {
+  min-width: 0;
+}
+
+.bcmp__badge {
+  align-self: flex-start;
+}
+
+/* ref の一覧。**名前は長い**（`origin/feature/…`）ので、横は箱に合わせて切る。 */
+.bcmp__list {
+  width: 100%;
+  min-width: 0;
+  padding: 2px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
 .cdetail {
   flex: 0 1 auto;
   max-height: 50%;
