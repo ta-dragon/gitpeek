@@ -434,6 +434,36 @@ export const ja = {
     searchNothingToStep: "まだ当たりがありません。",
   },
 
+  // stash（T-42。docs/DESIGN.md §7.5.1）。**見るだけ**で、作る・戻す・消す項目は無い（CLAUDE.md §1）。
+  // 画面の名前は「stash」のまま（言い換えると何のことか分からない — 2026-10-28 に利用者が了承）。
+  stash: {
+    title: "stash",
+    titleHint: "退避した作業の一覧です。GitPeek からは見るだけで、作る・戻す・消すことはできません。",
+    count: (n: number) => `${n}`,
+    empty: "stash はありません",
+    loading: "読んでいます…",
+    failed: (reason: string) => `stash の一覧を読めませんでした: ${reason}`,
+    rowHint: (label: string, branch: string | null, at: string) =>
+      branch === null ? `${label}\n${at} に退避` : `${label}\n${branch} で ${at} に退避`,
+    unnamed: "名前なし",
+    unnamedHint: "名前を付けずに退避したものです。退避したときのコミットの要約を出しています。",
+    // 右の列の見出し。
+    heading: (label: string) => `stash ${label}`,
+    branch: "退避したブランチ",
+    time: "退避した日時",
+    base: "元のコミット",
+    baseJump: "元のコミットへ移る",
+    baseJumpHint: "退避したときに HEAD があったコミットを、グラフで選びます。",
+    baseOutside:
+      "元のコミットは読み込んだ範囲の外にあります（退避したブランチを消した、など）。グラフでは選べません。",
+    baseHidden: "元のコミットはいまグラフに出していません。ブランチの表示を戻すと移れます。",
+    tracked: "変更したファイル",
+    untracked: "未追跡のファイル",
+    untrackedNote: "退避したときにまだ追跡していなかったファイルです。中身をすべて追加として出します。",
+    reviewUntracked:
+      "未追跡のファイルを見ているあいだは、AI レビューの対象にできません。変更したファイルを選ぶと対象にできます。",
+  },
+
   refTree: {
     title: "ブランチ / タグ",
     filterPlaceholder: "ブランチ・タグを絞り込み",

@@ -29,6 +29,7 @@ import {
 } from "../../lib/refTree";
 import { ContextMenu, type ContextMenuItem } from "../common/ContextMenu";
 import { compareItem, fetchMergeItem } from "../common/refMenu";
+import { STASH_NODE_ID, StashList } from "./StashList";
 import { containmentMenuItems } from "../common/containmentText";
 import { refLabel, squashJump } from "../../lib/containment";
 import { useContainment } from "../../store/containment";
@@ -47,6 +48,8 @@ type Props = {
   commits: CommitMeta[];
   /** CSV の既定ファイル名に使う登録名。 */
   repositoryName: string;
+  /** stash の欄（T-42）がどのリポジトリの一覧を出すか。 */
+  repositoryId: string;
   /** 上流を持つローカルブランチだけが入る（docs/DESIGN.md §4.5）。 */
   branchStatus: BranchStatus[];
   visibleRefs: VisibleRefs;
@@ -71,6 +74,7 @@ export function RefTree({
   head,
   commits,
   repositoryName,
+  repositoryId,
   branchStatus,
   visibleRefs,
   collapsed,
@@ -255,24 +259,32 @@ export function RefTree({
       </div>
 
       <div className="reftree__body">
-        {groups.length === 0 ? (
+        {groups.length === 0 && (
           <p className="reftree__empty">
             {refs.length === 0 ? ja.refTree.empty : ja.refTree.filterEmpty}
           </p>
-        ) : (
-          <ul className="reftree__groups">
-            {groups.map((group) => (
-              <Group
-                key={group.id}
-                group={group}
-                excluded={excluded}
-                statusByRef={statusByRef}
-                headBranch={head.branch}
-                callbacks={callbacks}
-              />
-            ))}
-          </ul>
         )}
+        <ul className="reftree__groups">
+          {groups.map((group) => (
+            <Group
+              key={group.id}
+              group={group}
+              excluded={excluded}
+              statusByRef={statusByRef}
+              headBranch={head.branch}
+              callbacks={callbacks}
+            />
+          ))}
+          {/*
+           * stash（T-42）。**タグの下に置き、絞り込みでは消さない**（ref ではないので
+           * 絞り込みの対象にならない。消すと、無いのか絞られたのか読めない）。
+           */}
+          <StashList
+            repositoryId={repositoryId}
+            collapsed={callbacks.isCollapsed(STASH_NODE_ID)}
+            onToggleCollapse={() => callbacks.onToggleCollapse(STASH_NODE_ID)}
+          />
+        </ul>
       </div>
 
       {menu !== null && (

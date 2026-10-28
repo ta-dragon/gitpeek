@@ -39,6 +39,8 @@ type Props = {
   onLayoutChange: (layout: FileListLayout) => void;
   /** 右クリックの「このファイルを変えたコミットに印を付ける」（T-40）。 */
   onFileHistory?: (input: string) => void;
+  /** 見出し。既定は「変更ファイル」。stash の未追跡の段（T-42）で変える。 */
+  title?: string;
 };
 
 export function FileList({
@@ -48,6 +50,7 @@ export function FileList({
   onSelect,
   onLayoutChange,
   onFileHistory,
+  title = ja.diff.files,
 }: Props) {
   const [menu, setMenu] = useState<FileMenuAt | null>(null);
   const onMenu: OnMenu =
@@ -74,7 +77,7 @@ export function FileList({
   return (
     <section className="flist">
       <header className="flist__head">
-        <span className="flist__title">{ja.diff.files}</span>
+        <span className="flist__title">{title}</span>
         <span className="flist__count">{ja.diff.fileCount(total.files)}</span>
         {total.additions > 0 && (
           <span className="flist__add">{ja.diff.additions(total.additions)}</span>

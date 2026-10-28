@@ -11,4 +11,5 @@ pub mod repo;
 pub mod scratch;
 pub mod search;
 pub mod snapshot;
+pub mod stash;
 pub mod status;

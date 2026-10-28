@@ -848,6 +848,32 @@ export function loadWorkingFile(repositoryId: string, path: string): Promise<Wor
   return invoke<WorkingFile>("load_working_file", { repositoryId, path });
 }
 
+/**
+ * stash 1 つ（T-42。docs/DESIGN.md §7.5.1）。**見るだけ**（CLAUDE.md §1）。
+ *
+ * stash は親を 2 つか 3 つ持つマージコミット。第 1 親が退避したときの HEAD、第 3 親は
+ * `-u` で退避したときだけあり、未追跡のファイルだけを持つルートコミット。
+ */
+export type StashEntry = {
+  /** stash そのもの（マージコミット）。 */
+  sha: string;
+  /** 第 1 親 ＝ 退避したときの HEAD（「元のコミット」）。 */
+  base: string;
+  /** 第 3 親 ＝ 未追跡のファイル。`-u` で退避していなければ null。 */
+  untracked: string | null;
+  /** `stash@{0}`。**stash を足すたびにずれる**ので、選択の記録には使わない。 */
+  label: string;
+  /** 退避した時刻（Unix 秒）。 */
+  time: number;
+  /** `On main: …` / `WIP on main: …`。分けるのは `lib/stash.ts`。 */
+  message: string;
+};
+
+/** stash の一覧を新しい順に読む。無ければ空。 */
+export function loadStashList(repositoryId: string): Promise<StashEntry[]> {
+  return invoke<StashEntry[]>("load_stash_list", { repositoryId });
+}
+
 /** コンテキスト行の選択肢。「すべて」は十分大きな `-U` で代用する。 */
 export const ALL_CONTEXT_LINES = 1_000_000;
 

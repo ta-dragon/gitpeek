@@ -26,6 +26,7 @@ use git::progress::{LoadPhase, LoadProgress, ProgressSink, Reporting};
 use git::repo::{RepositoryEntry, RepositoryProbe};
 use git::search::{CommitQuery, CommitSearchOutcome};
 use git::snapshot::SnapshotCache;
+use git::stash::StashEntry;
 use graph::reach::BranchStatus;
 use graph::{GraphOrder, LaneLayout};
 use model::RepositorySnapshot;
@@ -1051,6 +1052,32 @@ async fn load_working_tree(
     .map_err(|error| error.to_string())?
 }
 
+/// stash の一覧（T-42。docs/DESIGN.md §7.5.1）。
+///
+/// **見るだけ。** 作成・適用・削除の経路は無い（CLAUDE.md §1）。スナップショットには混ぜない
+/// （指紋が `refs/stash` を見ないので、キャッシュが stash の増減を見落とす）。
+#[tauri::command]
+async fn load_stash_list(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+) -> Result<Vec<StashEntry>, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = PathBuf::from(&repository.path);
+        if !path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", path.display()));
+        }
+        git::stash::list(&EmittingLog::new(&handle, &log), &program, &path)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// 未追跡ファイルの全文（docs/DESIGN.md §7.5）。
 ///
 /// **差分にはしない。** 全行追加の差分は視覚的ノイズが大きすぎる。
@@ -1896,6 +1923,7 @@ pub fn run() {
             load_file_diff,
             load_working_tree,
             load_working_file,
+            load_stash_list,
             fetch_repository,
             cancel_fetch,
             clone_repository,

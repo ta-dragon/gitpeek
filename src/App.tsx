@@ -41,6 +41,8 @@ import { SettingsDialog } from "./components/settings/SettingsDialog";
 import { RepositorySettingsDialog } from "./components/settings/RepositorySettingsDialog";
 import { ReviewDrawer } from "./components/review/ReviewDrawer";
 import { BranchCompareDialog } from "./components/diff/BranchCompareDialog";
+import { StashInfo } from "./components/diff/StashInfo";
+import { useStashFiles } from "./components/diff/useStashFiles";
 import { CloneDialog } from "./components/setup/CloneDialog";
 import { EmptyState } from "./components/setup/EmptyState";
 import { GitSetupScreen } from "./components/setup/GitSetupScreen";
@@ -54,6 +56,7 @@ import { useTheme } from "./hooks/useTheme";
 import { ja } from "./i18n/ja";
 import { clearCompare, selectCommit, swapEnds } from "./lib/compareSelection";
 import { compareCounts } from "./lib/branchCompare";
+import { stashBaseJump, stashReview } from "./lib/stash";
 import { findingsFor, newLines, type LineLookup } from "./lib/reviewFindings";
 import { crashSummary, logHint } from "./lib/crashNotice";
 import { bindingOf, isTyping, matches } from "./lib/shortcuts";
@@ -93,6 +96,7 @@ import {
 } from "./store/settings";
 import { closeContainers, pump, useContainment } from "./store/containment";
 import { closeBranchCompare, useBranchCompare } from "./store/branchCompare";
+import * as stashes from "./store/stash";
 import { requestFileHistory, useFileHistory } from "./store/fileHistory";
 import { autoCheckBranches, squashJump } from "./lib/containment";
 import * as snapshots from "./store/snapshot";
@@ -490,6 +494,7 @@ export default function App() {
                   entry={selected}
                   dataDir={dataDir}
                   jumpTo={jumpTo}
+                  onRevealCommit={revealCommit}
                   onCheckoutCommit={(sha) =>
                     writing.askCheckout(
                       { kind: "commit", name: sha.slice(0, 8) },
@@ -609,6 +614,7 @@ export default function App() {
 
       {/* 取り込まれているか（T-38。docs/DESIGN.md §7.6）。**ローカルブランチを 1 本ずつ調べる。** */}
       <ContainmentRunner />
+      <StashRunner />
       <ContainersHost onJump={revealCommit} onNotice={setMessage} />
 
       {/* clone（T-19。docs/DESIGN.md §8.4）。**成功したら黙って閉じて開く。** */}
@@ -710,6 +716,27 @@ function ContainmentRunner() {
   return null;
 }
 
+/**
+ * stash の一覧を読むきっかけ（T-42。docs/DESIGN.md §7.5.1）。**スナップショットと同じ** —
+ * 開いたとき・F5・書き込みのあとに読み直しが入るので、それに合わせて 1 回読む。
+ * 読み直しの間（data が空のとき）は読まない（終わったときに読む）。
+ */
+function StashRunner() {
+  const snapshot = useSnapshot();
+  const repositoryId = snapshot.repositoryId;
+  const data = snapshot.data;
+
+  useEffect(() => {
+    if (repositoryId === null) {
+      stashes.reload(null);
+      return;
+    }
+    if (data !== null) stashes.reload(repositoryId);
+  }, [repositoryId, data]);
+
+  return null;
+}
+
 /** 「このブランチを取り込んでいる可能性があるブランチを調べる…」の置き場所（T-38）。開くのはストアの `openContainers`。 */
 function ContainersHost({
   onJump,
@@ -777,6 +804,7 @@ function RefTreePanel({
       head={data.head}
       commits={data.commits}
       repositoryName={entry.name}
+      repositoryId={entry.id}
       branchStatus={snapshot.branchStatus}
       visibleRefs={snapshot.visibleRefs}
       collapsed={perRepository.collapsedTreeNodes}
@@ -843,6 +871,7 @@ function RepositoryPanel({
   entry,
   dataDir,
   jumpTo,
+  onRevealCommit,
   onCheckoutCommit,
   onCheckoutRef,
   onMergeRef,
@@ -853,6 +882,8 @@ function RepositoryPanel({
   /** `%APPDATA%\com.tatsu.gitpeek`。**履歴 0 件のときに保存先を出す**のに使う。 */
   dataDir: string;
   jumpTo: { sha: string; nonce: number } | null;
+  /** コミットを選んでグラフをそこまで動かす（stash の「元のコミットへ移る」。T-42）。 */
+  onRevealCommit: (sha: string) => void;
   /** グラフ行の右クリックから checkout の確認を出す（T-18）。 */
   onCheckoutCommit: (sha: string) => void;
   onCheckoutRef: (subject: CheckoutSubject, choices: CheckoutChoice[]) => void;
@@ -917,6 +948,7 @@ function RepositoryPanel({
       }
       dataDir={dataDir}
       jumpTo={jumpTo}
+      onRevealCommit={onRevealCommit}
       onCheckoutCommit={onCheckoutCommit}
       onCheckoutRef={onCheckoutRef}
       onMergeRef={onMergeRef}
@@ -945,6 +977,7 @@ function CommitWorkspace({
   repositoryDefaultProfile,
   dataDir,
   jumpTo,
+  onRevealCommit,
   onCheckoutCommit,
   onCheckoutRef,
   onMergeRef,
@@ -963,6 +996,7 @@ function CommitWorkspace({
   repositoryDefaultProfile: string | null;
   dataDir: string;
   jumpTo: { sha: string; nonce: number } | null;
+  onRevealCommit: (sha: string) => void;
   onCheckoutCommit: (sha: string) => void;
   /** ref チップの右クリックから（T-18）。**ref ツリーと同じ翻訳を通す。** */
   onCheckoutRef: (subject: CheckoutSubject, choices: CheckoutChoice[]) => void;
@@ -997,6 +1031,7 @@ function CommitWorkspace({
   // 遷移そのものは純関数（`lib/compareSelection.ts`）。ここは保存するだけ。
   const select = (sha: string, compare: boolean) => {
     setViewingWorking(false);
+    stashes.clearStash();
     updateRepositoryUiState(entry.id, (current) => ({
       ...current,
       ...selectCommit(current, sha, compare),
@@ -1066,6 +1101,7 @@ function CommitWorkspace({
   const comparing = useBranchCompare();
   const startBranchCompare = (from: string, toSha: string, nextSymmetric: boolean) => {
     setViewingWorking(false);
+    stashes.clearStash();
     pendingSymmetric.current = from === compareFrom ? null : nextSymmetric;
     setSymmetric(nextSymmetric);
     updateRepositoryUiState(entry.id, (current) => ({
@@ -1113,6 +1149,25 @@ function CommitWorkspace({
   }, [workingList]);
 
   /**
+   * stash を見ているか（T-42）。**作業ツリーと同じく残さない**（番号は足すたびにずれる）。
+   * 見ているものはストアが持つ（入口がブランチ一覧なので）。
+   */
+  const stash = stashes.useStash();
+  const stashEntry =
+    stash.repositoryId === entry.id && stash.selected !== null
+      ? (stash.entries?.find((item) => item.sha === stash.selected) ?? null)
+      : null;
+  const viewingStash = stashEntry !== null;
+  // stash を選んだら作業ツリーを見るのをやめる（コミットの選択は `select` が stash をやめる）。
+  useEffect(() => {
+    if (viewingStash) setViewingWorking(false);
+  }, [viewingStash]);
+  const viewWorking = () => {
+    stashes.clearStash();
+    setViewingWorking(true);
+  };
+
+  /**
    * ファイルを変えたコミットを辿る（T-40）。右クリックはコミットリストの検索欄へ頼み、
    * 辿った名前はコミットリストから戻ってくる（`store/fileHistory.ts`）。
    */
@@ -1126,8 +1181,8 @@ function CommitWorkspace({
 
   const files = useCommitFiles({
     repositoryId: entry.id,
-    // 作業ツリーを見ているあいだはコミットの一覧を取りに行かない。
-    scope: viewingWorking ? null : scope,
+    // 作業ツリーや stash を見ているあいだはコミットの一覧を取りに行かない。
+    scope: viewingWorking || viewingStash ? null : scope,
     commits: data.commits,
     selectedFile: perRepository.selectedFile,
     onSelectFile: selectFile,
@@ -1139,6 +1194,12 @@ function CommitWorkspace({
     keys: viewingWorking ? workingList.map(entryKey) : [],
     selected: workingSelection === null ? null : entryKey(workingSelection),
     onSelect: (key) => setWorkingSelection(parseKey(key)),
+    focusRef: files.focusRef,
+  });
+
+  const stashFiles = useStashFiles({
+    repositoryId: entry.id,
+    entry: stashEntry,
     focusRef: files.focusRef,
   });
 
@@ -1173,28 +1234,39 @@ function CommitWorkspace({
   }, [profiles, repositoryDefaultProfile]);
 
   /** 差分の出どころ。**呼び出し側で決めて `DiffPane` へ渡す。** */
-  const diffSource: DiffSource | null = viewingWorking
-    ? workingEntry === null || workingEntry.change === null
-      ? null
-      : { kind: "workingTree", staged: workingEntry.section === "staged" }
-    : files.range === null
-      ? null
-      : rangeSource(files.range);
+  const diffSource: DiffSource | null = viewingStash
+    ? stashFiles.source
+    : viewingWorking
+      ? workingEntry === null || workingEntry.change === null
+        ? null
+        : { kind: "workingTree", staged: workingEntry.section === "staged" }
+      : files.range === null
+        ? null
+        : rangeSource(files.range);
 
-  const diffChange = viewingWorking
-    ? (workingEntry?.change ?? null)
-    : (files.changes.find((change) => change.path === perRepository.selectedFile) ?? null);
+  const diffChange = viewingStash
+    ? stashFiles.change
+    : viewingWorking
+      ? (workingEntry?.change ?? null)
+      : (files.changes.find((change) => change.path === perRepository.selectedFile) ?? null);
 
   /**
    * レビューの対象。**いま差分ペインが見ているものと同じ。**
    *
    * 「レビューするために選び直す」を作らない — 見ているものをそのまま投げる。
    */
-  const reviewSource: DiffSource | null = viewingWorking
-    ? { kind: "workingTree", staged: false }
-    : files.range === null
-      ? null
-      : rangeSource(files.range);
+  // stash は**追跡しているファイルの変更だけ**を対象にする。未追跡を見ているときは理由を出して押せなくする。
+  const stashReviewState =
+    stashEntry === null ? null : stashReview(stashEntry, stashFiles.selected?.section ?? "tracked");
+  const reviewSource: DiffSource | null = viewingStash
+    ? stashReviewState?.kind === "ok"
+      ? stashReviewState.source
+      : null
+    : viewingWorking
+      ? { kind: "workingTree", staged: false }
+      : files.range === null
+        ? null
+        : rangeSource(files.range);
 
   // ドロワーを開いた／対象が変わったら計画を取り直す。**古い計画で走らせない。**
   useEffect(() => {
@@ -1263,7 +1335,9 @@ function CommitWorkspace({
    */
   const jumpToFinding = (path: string, line: number | null) => {
     setViewingWorking(false);
-    selectFile(path);
+    // stash をレビューしたときは、stash の一覧のほうで選ぶ（指摘は追跡ぶんにしか付かない）。
+    if (viewingStash) stashFiles.select("tracked", path);
+    else selectFile(path);
     // **同じ行をもう一度押しても飛べるように、押した回数で見分ける。**
     setFindingJump((current) =>
       line === null ? null : { path, line, nonce: (current?.nonce ?? 0) + 1 },
@@ -1283,6 +1357,7 @@ function CommitWorkspace({
       (sha) => commitBySha.get(sha)?.parents[0] ?? null,
     );
     if (selection === null) return;
+    stashes.clearStash();
 
     if (selection.kind === "workingTree") {
       setViewingWorking(true);
@@ -1377,15 +1452,15 @@ function CommitWorkspace({
               head={data.head}
               columns={perRepository.columnWidths}
               dateFormat={ui.dateFormat}
-              selectedSha={viewingWorking ? null : perRepository.selectedCommit}
-              compareSha={compareFrom}
+              selectedSha={viewingWorking || viewingStash ? null : perRepository.selectedCommit}
+              compareSha={viewingStash ? null : compareFrom}
               worktree={
                 isClean(working.tree)
                   ? null
                   : {
                       summary: summarize(working.tree),
                       selected: viewingWorking,
-                      onSelect: () => setViewingWorking(true),
+                      onSelect: viewWorking,
                     }
               }
               jumpTo={jumpTo}
@@ -1466,12 +1541,29 @@ function CommitWorkspace({
                 // 対象が決まっていないときも**消さずに**押せない形で残す。
                 disabled={reviewSource === null}
                 onClick={openReview}
-                title={bindingOf("openReview").label}
+                title={
+                  stashReviewState?.kind === "untracked"
+                    ? ja.stash.reviewUntracked
+                    : bindingOf("openReview").label
+                }
               >
                 {ja.review.open}
               </button>
             </div>
-            {viewingWorking ? (
+            {stashEntry !== null ? (
+              <StashInfo
+                entry={stashEntry}
+                files={stashFiles}
+                base={commitBySha.get(stashEntry.base) ?? null}
+                jump={stashBaseJump(
+                  stashEntry.base,
+                  (sha) => commitBySha.has(sha),
+                  snapshots.currentShownShas(),
+                )}
+                onJumpBase={() => onRevealCommit(stashEntry.base)}
+                onFileHistory={onFileHistory}
+              />
+            ) : viewingWorking ? (
           working.tree === null ? (
             <div className="cinfo cinfo--empty">
               <p>{working.error ?? ja.diff.loading}</p>

@@ -448,6 +448,25 @@ for i in $(seq 1 21); do
   git_ -C "$repo" commit --quiet -m "履歴: $from を $to に改名する"
 done
 
+# --- stash（T-42）-----------------------------------------------------------
+# 新しい順に: `-u` で未追跡入り / `-m` 無し（WIP on …）/ **消したブランチの上で退避**（元のコミットが
+# グラフの外）/ `-m` 付きの日本語。stash はグラフの起点にならないこと（CLAUDE.md §2）も、これで確かめる。
+new_repo stashes
+commit a.txt "stash: 最初"
+echo "直しかけ" >>"$repo/a.txt"
+git_ -C "$repo" stash push --quiet -m "作業: 日本語のメッセージ"
+git_ -C "$repo" checkout --quiet -b gone
+commit gone.txt "stash: 消すブランチのコミット"
+echo "消すブランチで直しかけ" >>"$repo/gone.txt"
+git_ -C "$repo" stash push --quiet -m "消したブランチの上"
+git_ -C "$repo" checkout --quiet main
+git_ -C "$repo" branch --quiet -D gone
+echo "名前を付けない" >>"$repo/a.txt"
+git_ -C "$repo" stash push --quiet
+echo "未追跡と一緒に" >>"$repo/a.txt"
+echo "未追跡のファイル" >"$repo/未追跡.txt"
+git_ -C "$repo" stash push --quiet -u -m "未追跡あり"
+
 # --- bare -------------------------------------------------------------------
 git_ clone --quiet --bare "$root/linear" "$root/bare.git"
 

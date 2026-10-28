@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # 「ブランチが取り込まれているか」（T-38）・「ファイルを変えたコミットを辿る」（T-40）・
-# 「ブランチ同士を比べる」（T-41）を目視で確かめるためのリポジトリを作る。
+# 「ブランチ同士を比べる」（T-41）・「stash の一覧を見る」（T-42）を目視で確かめるためのリポジトリを作る。
 #
 #   scripts/make-demo-repo.sh [出力ディレクトリ]      既定は ~/gitpeek-demo
 #
@@ -13,6 +13,7 @@
 #   containment-demo       GitPeek に登録するリポジトリ（origin/* が付いたクローン）
 #   history-demo           ファイルの改名をまたぐ履歴（T-40）。これも GitPeek に登録する
 #   compare-demo           分かれたあと両側が進んだ枝とタグ 2 つ（T-41）。これも GitPeek に登録する
+#   stash-demo             stash が 4 つ（T-42）。これも GitPeek に登録する
 #   確認手順.md            どのブランチに何が出れば正しいかの一覧
 #
 # Windows では **Git Bash で実行すること**。`npm run demo:repo` はどこから実行しても
@@ -303,8 +304,43 @@ git_ -C "$cmp" tag v1.1
 # 幹と同じコミットを指すブランチ（「比べる」が押せないことの材料）。
 git_ -C "$cmp" branch 幹と同じ位置 main
 
+# --- stash-demo: stash の一覧を見る（T-42）--------------------------------------
+# 古い順に: `-m` 付き / **消したブランチの上**（元のコミットがグラフの外）/ `-m` 無し（名前なし）/
+# `-u` で未追跡のファイル入り。stash はグラフに出ない（起点 ref ではない）。
+sdemo=$out/stash-demo
+rm -rf "$sdemo"
+git_ init --quiet -b main "$sdemo"
+
+scommit() {
+  printf '%s\n' "$2" >>"$sdemo/$1"
+  tick
+  git_ -C "$sdemo" add -A
+  git_ -C "$sdemo" commit --quiet -m "$3"
+}
+sstash() {
+  tick
+  git_ -C "$sdemo" stash push --quiet "$@"
+}
+
+scommit 設定.txt "設定 1" "最初のコミット"
+scommit 画面.txt "画面 1" "画面を足す"
+printf '設定 2（直しかけ）\n' >>"$sdemo/設定.txt"
+sstash -m "設定を直しかけた"
+git_ -C "$sdemo" checkout --quiet -b 試し/消すブランチ
+scommit 試し.txt "試し 1" "試しに足す"
+printf '試し 2（直しかけ）\n' >>"$sdemo/試し.txt"
+sstash -m "消したブランチの上で直しかけた"
+git_ -C "$sdemo" checkout --quiet main
+git_ -C "$sdemo" branch --quiet -D 試し/消すブランチ
+scommit 画面.txt "画面 2" "画面を直す"
+printf '画面 3（名前を付けずに退避）\n' >>"$sdemo/画面.txt"
+sstash
+printf '設定 3（未追跡と一緒に）\n' >>"$sdemo/設定.txt"
+printf 'まだ追跡していないメモ\n' >"$sdemo/メモ.txt"
+sstash -u -m "未追跡のファイルと一緒に退避"
+
 cat >"$out/確認手順.md" <<'GUIDE'
-# GitPeek の目視用リポジトリ（T-38 / T-40 / T-41）
+# GitPeek の目視用リポジトリ（T-38 / T-40 / T-41 / T-42）
 
 `containment-demo` を GitPeek に登録して開く。**ブランチ名が期待する結果になっている。**
 
@@ -384,6 +420,26 @@ cat >"$out/確認手順.md" <<'GUIDE'
    `main` と `幹と同じ位置` を選んだときも押せない（同じコミットを指している）
 6. 比べたまま「AI レビュー」を開くと、比較の範囲がレビューの対象として出る
 
+## 6. stash の一覧を見る（T-42。`stash-demo`）
+
+`stash-demo` を GitPeek に登録して開く。stash が 4 つある（新しい順に `stash@{0}` 〜 `stash@{3}`）。
+
+1. ブランチ一覧の一番下（タグの下）に「stash」の欄があり、4 つ並ぶ。番号・メッセージ・いつ退避したかが読める
+   - `stash@{1}` には「名前なし」の印が付く（名前を付けずに退避したもの）
+   - グラフには stash が出ない
+2. `stash@{3}`（設定を直しかけた）を押す
+   - グラフの選択が外れ、右の列に見出し（退避したブランチ `main`・日時・元のコミット）と
+     「変更したファイル」の `設定.txt` が出て、差分ペインにその差分が出る
+   - 親を選ぶドロップダウンは出ない
+3. `stash@{0}`（未追跡のファイルと一緒に退避）を押す
+   - 「変更したファイル」の下に説明と「未追跡のファイル」の段があり、`メモ.txt` を押すと中身が全部追加として出る
+   - `メモ.txt` を見ているあいだは「AI レビュー」が押せず、ホバーで理由が読める。`設定.txt` に戻すと押せる
+4. 「元のコミットへ移る」を押すと、グラフでそのコミットが選ばれる（stash を見るのはやめる）
+   - `stash@{2}`（消したブランチの上で直しかけた）では押せず、「読み込んだ範囲の外」と理由が出る
+5. グラフのコミットを押すと、stash を見るのをやめてコミットの差分に戻る
+6. stash を作る・戻す・消すための項目が、右クリックを含めてどこにも無い
+7. `containment-demo` など stash の無いリポジトリでは、欄に「stash はありません」と出る
+
 ## 作り直し
 
 `npm run demo:repo` をもう一度実行すると作り直す（このフォルダごと上書きされる）。
@@ -395,4 +451,5 @@ echo "できました:"
 echo "  リポジトリ  $(show "$clone")"
 echo "              $(show "$hist")"
 echo "              $(show "$cmp")"
+echo "              $(show "$sdemo")"
 echo "  確認手順    $(show "$out/確認手順.md")"
