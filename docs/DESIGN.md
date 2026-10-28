@@ -2107,6 +2107,13 @@ Rust 側が切った応答は壊れているので `text` 側へ落ちる — **
 Rust 側は共通祖先で止めて速くしているが、こちらは比較を始めたときに 1 度数えるだけなので素朴な形にした。
 **FF の可否は Rust 側の判定だけが決める**（§8.2）ので、2 つの数え方がずれても書き込みの結論は変わらない。
 
+**目視は一度で通った**（2026-10-28。利用者）。
+
+**テストが当たらないところ**（`.tsx` と配線。純関数は `branchCompare.test.ts`）: `BranchCompareDialog.tsx`（描画・
+絞り込み欄・一覧の選択）/ `store/branchCompare.ts` と `refMenu.ts` の `compareItem`（右クリックからダイアログを開く）/
+`CompareBar.tsx`（名前と件数の描画・件数の文の組み立て）/ `App.tsx` の `startBranchCompare`（選択と比べ方を入れる。
+比較元が変わらないときに `pendingSymmetric` を残さない）と件数の `useMemo`。
+
 ### 10.4 実行前パネル（必須）
 
 - 対象ファイル一覧＋個別除外チェック
