@@ -8,6 +8,12 @@ export const ja = {
   app: {
     name: "GitPeek",
     tagline: "個人用 Git ビューワー",
+    // 版の表示（T-43）。ウィンドウのタイトルと設定画面の下端で同じ形にする。
+    withVersion: (name: string, version: string) => `${name} ${version}`,
+    // `GitPeek.bat` / `npm run start:release` での起動。未コミットの変更が入っていても
+    // リリースと同じ版を名乗るので、見分けが付くように添える。
+    devBuild: (label: string) => `${label}（開発用の起動）`,
+    versionUnknown: "版を読めませんでした。",
   },
 
   common: {

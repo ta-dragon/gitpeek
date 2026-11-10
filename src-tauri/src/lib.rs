@@ -1817,6 +1817,26 @@ fn log_status(state: State<'_, AppState>) -> LogStatus {
     state.log_status.clone()
 }
 
+/// 起動しているアプリの版（T-43）。
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppInfo {
+    /// `tauri.conf.json` の `version`。**起動ログの 1 行目と同じ出どころ**にして、
+    /// 画面とログで食い違わないようにする。
+    version: String,
+    /// `tauri dev` での起動か（`npm run start:release` も含む）。**開発用の起動は
+    /// 未コミットの変更が入っていても同じ版を名乗る**ので、画面で見分けられるようにする。
+    dev: bool,
+}
+
+#[tauri::command]
+fn app_info(app: AppHandle) -> AppInfo {
+    AppInfo {
+        version: app.package_info().version.to_string(),
+        dev: tauri::is_dev(),
+    }
+}
+
 /// ログフォルダを開く。
 ///
 /// **capability は広げない。** 開けるのはこのフォルダだけで、フロントから
@@ -1954,6 +1974,7 @@ pub fn run() {
             export_text,
             set_repository_llm_profile,
             log_status,
+            app_info,
             open_log_folder,
             open_repository_folder,
             log_frontend_error

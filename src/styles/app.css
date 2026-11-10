@@ -1661,6 +1661,14 @@ body {
   font-size: 11px;
 }
 
+/* 版の 1 行（T-43）。**問い合わせに貼れるよう選べるようにする。** */
+.settings__version {
+  margin: 8px 0 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  user-select: text;
+}
+
 /** ショートカットの一覧。**対応表から作る**ので実際のキーとずれない。 */
 .settings__keys {
   margin: 0;

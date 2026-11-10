@@ -1147,6 +1147,18 @@ export function logStatus(): Promise<LogStatus> {
   return invoke<LogStatus>("log_status");
 }
 
+/** 起動しているアプリの版（T-43。`lib.rs` の `AppInfo`）。 */
+export type AppInfo = {
+  /** `tauri.conf.json` の `version`。起動ログの 1 行目と同じ値。 */
+  version: string;
+  /** `tauri dev` での起動か（`npm run start:release` も含む）。 */
+  dev: boolean;
+};
+
+export function appInfo(): Promise<AppInfo> {
+  return invoke<AppInfo>("app_info");
+}
+
 /**
  * ログフォルダを開く。
  *

@@ -19,10 +19,12 @@ import {
   detectGit,
   isGitUsable,
   openLogFolder,
+  type AppInfo,
   type GitStatus,
   type LogStatus,
   type Settings,
 } from "../../lib/ipc";
+import { versionLine } from "../../lib/appVersion";
 import { logHint } from "../../lib/crashNotice";
 import { readNumber, showNumber, type NumberFieldName } from "../../lib/settingsForm";
 import { SHORTCUTS } from "../../lib/shortcuts";
@@ -36,6 +38,7 @@ export function SettingsDialog({
   settings,
   globalSkillDir,
   log,
+  version,
   onChange,
   onChanged,
   onGitChecked,
@@ -46,6 +49,8 @@ export function SettingsDialog({
   globalSkillDir: string;
   /** ログの置き場所と、書けているか（T-24）。 */
   log: LogStatus | null;
+  /** 起動しているアプリの版（T-43）。**どのタブでも見えるよう下端に出す。** */
+  version: AppInfo | null;
   /** 設定を 1 つ変える。**保存はここを受けた側が行う。** */
   onChange: (change: (current: Settings) => Settings) => void;
   /** 接続先や観点を変えたあとに読み直させる。 */
@@ -105,6 +110,8 @@ export function SettingsDialog({
             {ja.settings.close}
           </button>
         </div>
+
+        <p className="settings__version">{versionLine(version)}</p>
       </div>
     </div>
   );

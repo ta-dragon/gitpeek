@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { CommandLogPanel } from "./components/commandlog/CommandLogPanel";
 import { CommitList } from "./components/commits/CommitList";
@@ -59,11 +60,13 @@ import { compareCounts } from "./lib/branchCompare";
 import { stashBaseJump, stashReview } from "./lib/stash";
 import { findingsFor, newLines, type LineLookup } from "./lib/reviewFindings";
 import { crashSummary, logHint } from "./lib/crashNotice";
+import { windowTitle } from "./lib/appVersion";
 import { bindingOf, isTyping, matches } from "./lib/shortcuts";
 import { defaultSelection, initialProfile } from "./lib/reviewPlan";
 import { selectionForSource, type TargetContext } from "./lib/reviewTarget";
 import {
   appDataDir,
+  appInfo,
   detectGit,
   logStatus,
   onAppPanic,
@@ -73,6 +76,7 @@ import {
   loadCommitMessage,
   MIN_VERSION_FALLBACK,
   setRepositoryLlmProfile,
+  type AppInfo,
   type ColumnWidths,
   type CommitMeta,
   type DiffSource,
@@ -162,6 +166,8 @@ export default function App() {
    * 「書いているつもり」になる。
    */
   const [log, setLog] = useState<LogStatus | null>(null);
+  /** 起動しているアプリの版（T-43）。タイトルと設定画面の下端に出す。 */
+  const [version, setVersion] = useState<AppInfo | null>(null);
   /**
    * Rust 側が落ちたことの知らせ（T-24）。**画面は生きているが、以後の操作は
    * 当てにならない**ので、理由とログの場所を出す（DESIGN.md §13.3）。
@@ -205,6 +211,17 @@ export default function App() {
     void logStatus()
       .then(setLog)
       .catch(() => setLog(null));
+  }, []);
+
+  // 版も起動中に変わらない（T-43）。**タイトルは読めたときだけ書き換える** —
+  // 読めなければ `tauri.conf.json` の「GitPeek」のまま。
+  useEffect(() => {
+    void appInfo()
+      .then((info) => {
+        setVersion(info);
+        return getCurrentWindow().setTitle(windowTitle(info));
+      })
+      .catch(() => {});
   }, []);
 
   // Rust 側の panic を受け取る（T-24）。**購読は 1 回だけ。**
@@ -590,6 +607,7 @@ export default function App() {
           settings={settings.settings}
           globalSkillDir={dataDir === "" ? "skills" : `${dataDir}\\skills`}
           log={log}
+          version={version}
           onChange={(change) => void updateSettings(change)}
           onChanged={refreshSettings}
           onGitChecked={setStatus}
