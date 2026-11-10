@@ -60,6 +60,39 @@ export function hasMore(run: FetchRun): boolean {
   return !run.cancelled && run.index < run.targets.length;
 }
 
+/**
+ * 実行のどこにいるか。`run` だけでは読み直しの間が分からないので、`useFetch` が別に持つ。
+ *
+ * - `fetching` — 取ってきている（中止を押したあと、走っている 1 件が終わるまでも含む）
+ * - `refreshing` — 取り終えて、リポジトリ一覧とグラフを読み直している
+ * - `done` — 全部終わった
+ */
+export type FetchPhase = "fetching" | "refreshing" | "done";
+
+/**
+ * 画面の下のボタン。**閉じられるのは `done` のときだけ**（`Esc` も同じ）。
+ *
+ * 読み直しの途中で閉じると、読み直しが終わったところで結果をもう一度入れ直してしまい、
+ * **閉じたはずの結果の画面がまた出た**（2026-11-11 に利用者が見つけた）。中止を押したあと、
+ * 走っている 1 件が終わる前に閉じたときも同じことが起きる。押せない間は理由を出す（CLAUDE.md §6）。
+ */
+export type FetchButton =
+  | { kind: "cancel" }
+  | { kind: "cancelling" }
+  | { kind: "refreshing" }
+  | { kind: "close" };
+
+export function fetchButton(run: FetchRun, phase: FetchPhase): FetchButton {
+  switch (phase) {
+    case "fetching":
+      return run.cancelled ? { kind: "cancelling" } : { kind: "cancel" };
+    case "refreshing":
+      return { kind: "refreshing" };
+    case "done":
+      return { kind: "close" };
+  }
+}
+
 /** 全部終わったか（中止で打ち切った場合も含む）。 */
 export function isDone(run: FetchRun): boolean {
   return run.cancelled || run.index >= run.targets.length;

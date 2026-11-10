@@ -16,6 +16,7 @@ import {
   recordResult,
   requestCancel,
   startRun,
+  type FetchPhase,
   type FetchRun,
   type FetchTarget,
 } from "../lib/fetchState";
@@ -29,6 +30,8 @@ export type FetchState = {
   progress: FetchProgress | null;
   /** 実行前の確認待ち。**一括のときだけ出す**（1 件には確認を出さない）。 */
   pending: FetchTarget[] | null;
+  /** 取ってきている / 読み直している / 終わった。**閉じられるのは終わってから**（`fetchButton`）。 */
+  phase: FetchPhase;
 };
 
 export function useFetch() {
@@ -36,6 +39,7 @@ export function useFetch() {
     run: null,
     progress: null,
     pending: null,
+    phase: "done",
   });
 
   // 中止したかどうかは実行ループの中から読む。state の値は閉じ込められて古くなる。
@@ -60,7 +64,7 @@ export function useFetch() {
     cancelled.current = false;
 
     let run = startRun(targets);
-    setState({ run, progress: null, pending: null });
+    setState({ run, progress: null, pending: null, phase: "fetching" });
 
     try {
       while (hasMore(run)) {
@@ -84,21 +88,29 @@ export function useFetch() {
         setState((current) => ({ ...current, run, progress: null }));
       }
 
-      // ref が動いた可能性があるので、一覧（放置警告と ahead/behind の素）を取り直す。
-      await repositories.refresh();
+      // **読み直しが終わるまで閉じさせない。** 途中で閉じると、下の `finally` が結果を
+      // 入れ直して、閉じたはずの画面がまた出る（2026-11-11 に利用者が見つけた）。
+      setState((current) => ({ ...current, run, progress: null, phase: "refreshing" }));
 
+      // ref が動いた可能性があるので、一覧（放置警告と ahead/behind の素）を取り直す。
       // 開いているリポジトリだけ履歴を読み直す（docs/DESIGN.md §8.5）。
       // 開いていないものは、切り替えたときに読めばよい。
       const open = snapshots.currentRepositoryId();
       const touched = run.results.some(
         (result) => result.id === open && result.status !== "failed",
       );
-      if (touched) await snapshots.reload();
+      // **2 つは同時に走らせる。** 一覧の取り直しは登録した全リポジトリに git を当てるので遅く、
+      // 終わるのを待ってからグラフを読み直すと、そのぶん閉じられない時間が延びる。
+      // グラフの読み込み（`store/snapshot.ts`）は一覧のストアを読まないので、順番は要らない。
+      await Promise.all([repositories.refresh(), touched ? snapshots.reload() : undefined]);
     } finally {
       // **必ず外す。** 読み直しで例外が出たまま立てっぱなしにすると、
       // このセッションでは二度と fetch できなくなる。
       running.current = false;
-      setState((current) => ({ ...current, run, progress: null }));
+      // **閉じられていたら入れ直さない**（閉じた結果を生き返らせない）。
+      setState((current) =>
+        current.run === null ? current : { ...current, run, progress: null, phase: "done" },
+      );
     }
   }, []);
 
@@ -113,7 +125,7 @@ export function useFetch() {
   /** 一括。**実行前に確認を 1 回**（docs/DESIGN.md §8.3）。 */
   const askAll = useCallback((targets: FetchTarget[]) => {
     if (targets.length === 0) return;
-    setState({ run: null, progress: null, pending: targets });
+    setState({ run: null, progress: null, pending: targets, phase: "done" });
   }, []);
 
   /** 確認に「はい」。**対象は呼び出し側から渡す** — 更新関数の中で走らせない
@@ -126,7 +138,7 @@ export function useFetch() {
   );
 
   const dismiss = useCallback(() => {
-    setState({ run: null, progress: null, pending: null });
+    setState({ run: null, progress: null, pending: null, phase: "done" });
   }, []);
 
   /** 中止。**走っている 1 件は Rust 側が落とす**が、取り込み済みの ref は戻らない。 */

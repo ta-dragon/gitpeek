@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   currentTarget,
+  fetchButton,
   hasMore,
   isDone,
   recordResult,
@@ -119,5 +120,31 @@ describe("summarize", () => {
     expect(summary.partial).toBe(1);
     expect(summary.success).toBe(0);
     expect(summary.failed).toBe(0);
+  });
+});
+
+describe("fetchButton", () => {
+  it("取ってきている間は中止", () => {
+    expect(fetchButton(run(), "fetching")).toEqual({ kind: "cancel" });
+  });
+
+  it("中止を押したあと、走っている 1 件が終わるまでは閉じられない", () => {
+    // `isDone` は中止を押した時点で true になるが、まだ git が走っている。
+    const cancelled = requestCancel(run());
+    expect(isDone(cancelled)).toBe(true);
+
+    expect(fetchButton(cancelled, "fetching")).toEqual({ kind: "cancelling" });
+  });
+
+  it("取り終えても、読み直している間は閉じられない", () => {
+    // ここで閉じると、読み直しが終わったところで結果の画面がまた出た。
+    let finished = run();
+    while (hasMore(finished)) finished = recordResult(finished, outcome("success"));
+
+    expect(fetchButton(finished, "refreshing")).toEqual({ kind: "refreshing" });
+  });
+
+  it("全部終わったら閉じられる", () => {
+    expect(fetchButton(requestCancel(run()), "done")).toEqual({ kind: "close" });
   });
 });

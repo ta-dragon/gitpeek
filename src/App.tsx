@@ -577,6 +577,7 @@ export default function App() {
       {fetching.run !== null && (
         <FetchDialog
           run={fetching.run}
+          phase={fetching.phase}
           progress={fetching.progress}
           onCancel={fetching.cancel}
           onClose={fetching.dismiss}

@@ -12,8 +12,10 @@ import { ja } from "../../i18n/ja";
 import { useEscape } from "../../hooks/useEscape";
 import {
   currentTarget,
+  fetchButton,
   isDone,
   summarize,
+  type FetchPhase,
   type FetchResult,
   type FetchRun,
   type FetchTarget,
@@ -23,11 +25,14 @@ import { LoadProgress } from "./LoadProgress";
 
 export function FetchDialog({
   run,
+  phase,
   progress,
   onCancel,
   onClose,
 }: {
   run: FetchRun;
+  /** 読み直しの間は閉じさせない（`fetchButton`）。 */
+  phase: FetchPhase;
   progress: FetchProgress | null;
   onCancel: () => void;
   onClose: () => void;
@@ -35,10 +40,11 @@ export function FetchDialog({
   const done = isDone(run);
   const target = currentTarget(run);
   const summary = summarize(run);
+  const button = fetchButton(run, phase);
 
-  // **走っている間は `Esc` で閉じない。** 中止は明示的に押させる（docs/DESIGN.md §6.5 の
-  // 「ドロワー / パネルを閉じる」は、結果を読み終えたあとにだけ当てはまる）。
-  useEscape(done ? onClose : null);
+  // **走っている間と読み直している間は `Esc` で閉じない。** 中止は明示的に押させる
+  // （docs/DESIGN.md §6.5 の「ドロワー / パネルを閉じる」は、結果を読み終えたあとにだけ当てはまる）。
+  useEscape(button.kind === "close" ? onClose : null);
 
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-label={ja.fetch.title}>
@@ -88,13 +94,30 @@ export function FetchDialog({
         )}
 
         <div className="modal__actions">
-          {done ? (
+          {button.kind === "close" && (
             <button type="button" className="button button--primary" onClick={onClose}>
               {ja.fetch.close}
             </button>
-          ) : (
-            <button type="button" className="button" onClick={onCancel} disabled={run.cancelled}>
-              {run.cancelled ? ja.fetch.cancelling : ja.fetch.cancel}
+          )}
+          {/* **押せない間も消さず、何を待っているかを出す**（CLAUDE.md §6）。 */}
+          {button.kind === "refreshing" && (
+            <button
+              type="button"
+              className="button button--primary"
+              disabled
+              title={ja.fetch.refreshingHint}
+            >
+              {ja.fetch.refreshing}
+            </button>
+          )}
+          {(button.kind === "cancel" || button.kind === "cancelling") && (
+            <button
+              type="button"
+              className="button"
+              onClick={onCancel}
+              disabled={button.kind === "cancelling"}
+            >
+              {button.kind === "cancelling" ? ja.fetch.cancelling : ja.fetch.cancel}
             </button>
           )}
         </div>
