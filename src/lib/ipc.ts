@@ -694,18 +694,28 @@ export type ContainmentOutcome = {
   elapsedMs: number;
 };
 
+/** まとめて調べた 1 本ぶん（`src-tauri/src/git/contained.rs` の `CheckResult`。T-45）。 */
+export type BatchCheckResult =
+  | { kind: "done"; outcome: ContainmentOutcome }
+  | { kind: "failed"; reason: string };
+
 /**
- * `branch` が `target` に取り込まれているか（T-37 / T-38。docs/DESIGN.md §7.6）。
+ * `branches` が `target` に取り込まれているかを、まとめて調べる（T-37 / T-38 / T-45。docs/DESIGN.md §7.6）。
  *
- * **どちらも完全な ref 名。SHA は渡さない**（Rust がスナップショットから引く）。
- * タグ・同じ名前・グラフ外は断られる。
+ * **どれも完全な ref 名。SHA は渡さない**（Rust がスナップショットから引く）。
+ * 結果は渡した順のまま。タグ・同じ名前・グラフ外はその 1 本だけ `failed` になる。
+ * **下準備を 1 回で済ませる**ために、1 本ずつではなく何本かまとめて頼む（`CHECK_BATCH`）。
  */
-export function checkContainment(
+export function checkContainmentBatch(
   repositoryId: string,
-  branch: string,
+  branches: readonly string[],
   target: string,
-): Promise<ContainmentOutcome> {
-  return invoke<ContainmentOutcome>("check_containment", { repositoryId, branch, target });
+): Promise<BatchCheckResult[]> {
+  return invoke<BatchCheckResult[]>("check_containment_batch", {
+    repositoryId,
+    branches,
+    target,
+  });
 }
 
 /** 相手 1 本ぶんの失敗。**1 本の失敗で全体を止めない。** */

@@ -128,6 +128,87 @@ pub fn check_in(
     )
 }
 
+/// まとめて比べた 1 本ぶんの結果（T-45）。**画面の `CheckResult` と同じ形**で返す
+/// （`{ kind: "done", outcome }` / `{ kind: "failed", reason }`）。1 本の失敗で残りを止めない。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum CheckResult {
+    Done { outcome: ContainmentOutcome },
+    Failed { reason: String },
+}
+
+impl From<Result<ContainmentOutcome, String>> for CheckResult {
+    fn from(result: Result<ContainmentOutcome, String>) -> Self {
+        match result {
+            Ok(outcome) => Self::Done { outcome },
+            Err(reason) => Self::Failed { reason },
+        }
+    }
+}
+
+/// 何本かのブランチを、同じ相手とまとめて比べる（T-45。docs/DESIGN.md §7.6.2）。
+///
+/// **下準備を 1 回で済ませる** — オブジェクトの置き場所・コミットの索引・差分の指紋の覚え書きを
+/// 全部の本数で使い回す。1 本ずつ頼むと、判定の本体が git を呼ばずに決まる場合でも、この
+/// 下準備だけで 1 本 0.1 秒ほどかかっていた。**中は 1 本ずつ順に判定する**（自動の印は同時に
+/// 1 本しか走らせない。T-38）。結果は渡した順のまま。
+pub fn check_many(
+    log: &dyn LogSink,
+    program: &str,
+    path: &Path,
+    snapshot: &RepositorySnapshot,
+    branches: &[String],
+    target: &str,
+) -> Vec<CheckResult> {
+    check_many_in(log, program, path, snapshot, branches, target, &std::env::temp_dir())
+}
+
+/// [`check_many`] の一時フォルダの置き場所を渡せるもの（テストで「残らない」ことを見る）。
+pub fn check_many_in(
+    log: &dyn LogSink,
+    program: &str,
+    path: &Path,
+    snapshot: &RepositorySnapshot,
+    branches: &[String],
+    target: &str,
+    scratch_parent: &Path,
+) -> Vec<CheckResult> {
+    if branches.is_empty() {
+        return Vec::new();
+    }
+    // 置き場所が読めなければ、どの 1 本も `merge-tree` まで進めない。**全部に同じ理由を返す**
+    // （黙って空にすると、画面は「まだ調べていない」と読んでまた頼んでくる）。
+    let objects = match objects_dir(log, program, path) {
+        Ok(objects) => objects,
+        Err(reason) => {
+            return branches
+                .iter()
+                .map(|_| CheckResult::Failed { reason: reason.clone() })
+                .collect()
+        }
+    };
+    let index = CommitIndex::new(&snapshot.commits);
+    let cache = SignatureCache::default();
+    branches
+        .iter()
+        .map(|branch| {
+            check_indexed(
+                log,
+                program,
+                path,
+                snapshot,
+                &index,
+                branch,
+                target,
+                scratch_parent,
+                &objects,
+                &cache,
+            )
+            .into()
+        })
+        .collect()
+}
+
 /// [`check_in`] の本体。**索引は呼ぶ側が 1 度だけ作る**（[`find_containers`] は数千本と比べるので、
 /// 1 本ごとに 2 万コミットの索引を作り直さない）。
 #[allow(clippy::too_many_arguments)]
@@ -825,9 +906,35 @@ fn file_key(rest: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        first_contained, parse_candidates, signature, ContainerFailure, ContainerSearch, Containment,
-        ContainmentOutcome,
+        first_contained, parse_candidates, signature, CheckResult, ContainerFailure,
+        ContainerSearch, Containment, ContainmentOutcome,
     };
+
+    /// まとめて返す 1 本ぶん（T-45）。**画面の `CheckResult` と同じ形**であることを固定する
+    /// （形が違うと、画面は全部を「まだ調べていない」と読んで頼み直し続ける）。
+    #[test]
+    fn a_batch_result_has_the_shape_the_screen_reads() {
+        let failed = serde_json::to_value(CheckResult::Failed {
+            reason: "だめ".into(),
+        })
+        .unwrap();
+        assert_eq!(failed, serde_json::json!({ "kind": "failed", "reason": "だめ" }));
+
+        let done = serde_json::to_value(CheckResult::Done {
+            outcome: ContainmentOutcome {
+                branch: "refs/heads/a".into(),
+                target: "refs/heads/main".into(),
+                branch_tip: "1".repeat(40),
+                target_tip: "2".repeat(40),
+                containment: Containment::Ancestor,
+                elapsed_ms: 3,
+            },
+        })
+        .unwrap();
+        assert_eq!(done["kind"], "done");
+        assert_eq!(done["outcome"]["branchTip"], "1".repeat(40));
+        assert_eq!(done["outcome"]["containment"]["kind"], "ancestor");
+    }
 
     #[test]
     fn finds_the_first_contained_commit_by_bisecting() {

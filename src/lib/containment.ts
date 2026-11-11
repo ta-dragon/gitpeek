@@ -7,7 +7,7 @@
  *
  * **グラフとレーンには触らない**（CLAUDE.md §3）。印はブランチ一覧とチップにだけ付ける。
  */
-import type { ContainmentOutcome, RefEntry } from "./ipc";
+import type { BatchCheckResult, ContainmentOutcome, RefEntry } from "./ipc";
 
 /* ---------- 相手 ---------- */
 
@@ -49,9 +49,8 @@ export function autoCheckBranches(refs: readonly RefEntry[], target: string | nu
 /* ---------- 覚え方 ---------- */
 
 /** 調べた結果。**失敗も覚える**（覚えないと、同じブランチを延々と調べ直す）。 */
-export type CheckResult =
-  | { kind: "done"; outcome: ContainmentOutcome }
-  | { kind: "failed"; reason: string };
+/** 1 本ぶんの結果。**Rust がまとめて返す形（`BatchCheckResult`）とそのまま同じ**（T-45）。 */
+export type CheckResult = BatchCheckResult;
 
 export type ResultCache = ReadonlyMap<string, CheckResult>;
 
@@ -97,13 +96,60 @@ export function nextToCheck(
   target: string | null,
   refs: readonly RefEntry[],
 ): string | null {
-  if (target === null) return null;
+  return nextBatch(queue, cache, target, refs, 1)[0]?.branch ?? null;
+}
+
+/**
+ * 1 回で Rust に頼む本数（T-45。docs/DESIGN.md §7.6.2）。
+ *
+ * 下準備（ref の確かめ・オブジェクトの置き場所・索引）が 1 回 0.1 秒ほどかかり、判定の本体は
+ * たいてい git を呼ばずに決まる。**まとめるほど下準備の割合は減るが、印は頼んだぶんが終わるまで出ない**
+ * （`merge-tree` まで進むものは onyx で 1 本 0.2〜0.4 秒）。8 本で両方の釣り合いを取った（2026-11-11 に利用者が了承）。
+ */
+export const CHECK_BATCH = 8;
+
+/** まとめて頼む 1 本ぶん。**鍵は頼んだ時点の位置で作る**（画面が見ている先端と同じ組で覚えるため）。 */
+export type BatchItem = { branch: string; key: string };
+
+/**
+ * 列のうち、まだ結果が当たらないものを先頭から `size` 本まで。**列の順を保つ**ので、右クリックで
+ * 足したもの（列の先頭）が先に入る。消えたブランチ・相手そのもの・重複は飛ばす。
+ */
+export function nextBatch(
+  queue: readonly string[],
+  cache: ResultCache,
+  target: string | null,
+  refs: readonly RefEntry[],
+  size: number = CHECK_BATCH,
+): BatchItem[] {
+  if (target === null) return [];
+  const picked: BatchItem[] = [];
+  const seen = new Set<string>();
   for (const branch of queue) {
-    if (branch === target) continue;
+    if (picked.length >= size) break;
+    if (branch === target || seen.has(branch)) continue;
+    seen.add(branch);
     const key = keyFor(branch, target, refs);
-    if (key !== null && !cache.has(key)) return branch;
+    if (key !== null && !cache.has(key)) picked.push({ branch, key });
   }
-  return null;
+  return picked;
+}
+
+/**
+ * まとめて頼んだ結果を覚えに足す。**返ってきた数が頼んだ数と違えば、足りないぶんは失敗として覚える**
+ * （覚えないと、画面はまだ調べていないと読んで同じものを頼み続ける）。
+ */
+export function storeBatch(
+  cache: ResultCache,
+  items: readonly BatchItem[],
+  results: readonly CheckResult[],
+  missing: string,
+): Map<string, CheckResult> {
+  const next = new Map(cache);
+  items.forEach((item, at) => {
+    next.set(item.key, results[at] ?? { kind: "failed", reason: missing });
+  });
+  return next;
 }
 
 /** 進み具合。**消えたブランチは数えない**（分母が減らないと、いつまでも終わらない）。 */

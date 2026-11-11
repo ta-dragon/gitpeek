@@ -14,13 +14,14 @@
  */
 import { useSyncExternalStore } from "react";
 
+import { ja } from "../i18n/ja";
 import {
   checkProgress,
-  keyFor,
-  nextToCheck,
+  nextBatch,
+  storeBatch,
   type CheckResult,
 } from "../lib/containment";
-import { checkContainment, type RefEntry } from "../lib/ipc";
+import { checkContainmentBatch, type RefEntry } from "../lib/ipc";
 
 export type ContainmentState = {
   /** 結果がどのリポジトリのものか。**切り替えたら捨てる。** */
@@ -30,8 +31,8 @@ export type ContainmentState = {
   cache: ReadonlyMap<string, CheckResult>;
   /** 右クリックから足したブランチ（リモートブランチはここからしか入らない）。**自動の列より先に流す。** */
   extra: readonly string[];
-  /** いま調べているブランチ。 */
-  running: string | null;
+  /** いま調べているブランチ（まとめて頼んだぶん。T-45）。null なら何も走っていない。 */
+  running: readonly string[] | null;
   /** 自動の列 ＋ 足したぶんの進み具合。 */
   progress: { done: number; total: number };
   /** 「このブランチを取り込んでいる可能性があるブランチを調べる…」の対象。null なら閉じている。 */
@@ -73,9 +74,12 @@ export function useContainment(): ContainmentState {
 let generation = 0;
 
 /**
- * 列を 1 本ぶん進める。`App.tsx` の `ContainmentRunner` が、スナップショット・相手・
- * このストアのどれかが変わるたびに呼ぶ。**同時には 1 本しか走らせない**
- * （git の起動が重なると、大きなリポジトリで他の操作が詰まる）。
+ * 列を 1 まとまりぶん進める。`App.tsx` の `ContainmentRunner` が、スナップショット・相手・
+ * このストアのどれかが変わるたびに呼ぶ。**同時には 1 まとまりしか走らせず、中も 1 本ずつ順に
+ * 判定する**（git の起動が重なると、大きなリポジトリで他の操作が詰まる）。
+ *
+ * **何本かまとめて頼む**（`CHECK_BATCH`。T-45）。1 本ずつ頼むと、Rust がそのたびに ref の確かめと
+ * オブジェクトの置き場所を git に聞き直し、判定の本体より下準備のほうが長かった。
  */
 export function pump(
   repositoryId: string | null,
@@ -108,25 +112,24 @@ export function pump(
 
   const against = target;
   if (repositoryId === null || state.running !== null || against === null) return;
-  const branch = nextToCheck(queue, state.cache, against, refs);
-  if (branch === null) return;
-  // **鍵は頼んだ時点の位置で作る。** 画面が見ている先端と同じ組で覚えるため。
-  const key = keyFor(branch, against, refs);
-  if (key === null) return;
+  // **鍵は頼んだ時点の位置で作る**（`nextBatch`）。画面が見ている先端と同じ組で覚えるため。
+  const batch = nextBatch(queue, state.cache, against, refs);
+  if (batch.length === 0) return;
 
   const mine = generation;
-  setState({ running: branch });
+  const branches = batch.map((item) => item.branch);
+  setState({ running: branches });
   void (async () => {
-    let result: CheckResult;
+    let results: CheckResult[];
     try {
-      result = { kind: "done", outcome: await checkContainment(repositoryId, branch, against) };
+      results = await checkContainmentBatch(repositoryId, branches, against);
     } catch (error) {
-      result = { kind: "failed", reason: typeof error === "string" ? error : String(error) };
+      // まとめ全体が失敗した（フォルダが無い・スナップショットを読めない）。**全部に同じ理由を覚える。**
+      const reason = typeof error === "string" ? error : String(error);
+      results = branches.map(() => ({ kind: "failed", reason }));
     }
     if (mine !== generation) return;
-    const cache = new Map(state.cache);
-    cache.set(key, result);
-    setState({ cache, running: null });
+    setState({ cache: storeBatch(state.cache, batch, results, ja.containment.batchShort), running: null });
   })();
 }
 

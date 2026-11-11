@@ -14,7 +14,7 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-use gitpeek_lib::git::contained::{self, Containment, ContainmentOutcome};
+use gitpeek_lib::git::contained::{self, CheckResult, Containment, ContainmentOutcome};
 use gitpeek_lib::git::exec::Cancel;
 use gitpeek_lib::git::snapshot;
 use gitpeek_lib::model::RepositorySnapshot;
@@ -228,6 +228,97 @@ fn loose_objects(repo: &Path) -> u64 {
         .find_map(|line| line.strip_prefix("count: "))
         .and_then(|count| count.trim().parse().ok())
         .expect("count: の行があること")
+}
+
+/* ---------- まとめて調べる（T-45）---------- */
+
+fn refs_heads(names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| format!("refs/heads/{name}")).collect()
+}
+
+/// まとめて調べても、1 本ずつ調べたのと同じ答えが**渡した順のまま**返る。
+/// 中で `merge-tree` まで進むもの（unmerged / grown）も混ぜ、一時フォルダが残らないことも見る。
+#[test]
+fn checking_many_gives_the_same_answer_as_one_at_a_time() {
+    let snapshot = load();
+    let scratch = tempfile::tempdir().expect("一時ディレクトリ");
+    let names = ["merged-normally", "squashed", "unmerged", "grown"];
+
+    let many = contained::check_many_in(
+        &log(),
+        "git",
+        &repo(),
+        &snapshot,
+        &refs_heads(&names),
+        "refs/heads/main",
+        scratch.path(),
+    );
+
+    assert_eq!(many.len(), names.len());
+    for (name, got) in names.iter().zip(&many) {
+        let one = check_with(&snapshot, name, "main", scratch.path());
+        match got {
+            CheckResult::Done { outcome } => {
+                assert_eq!(outcome.branch, format!("refs/heads/{name}"), "順が崩れた");
+                assert_eq!(outcome.containment, one.containment, "{name}");
+                assert_eq!(outcome.branch_tip, one.branch_tip, "{name}");
+            }
+            CheckResult::Failed { reason } => panic!("{name} を調べられません: {reason}"),
+        }
+    }
+    let left = std::fs::read_dir(scratch.path()).expect("読めること").count();
+    assert_eq!(left, 0, "一時フォルダが残っている");
+}
+
+/// **1 本の失敗で残りを止めない。** 消えたブランチが混じっても、前後は調べる。
+#[test]
+fn one_failure_in_a_batch_does_not_stop_the_rest() {
+    let snapshot = load();
+    let scratch = tempfile::tempdir().expect("一時ディレクトリ");
+    let many = contained::check_many_in(
+        &log(),
+        "git",
+        &repo(),
+        &snapshot,
+        &refs_heads(&["squashed", "no-such-branch", "merged-normally"]),
+        "refs/heads/main",
+        scratch.path(),
+    );
+    assert!(matches!(many[0], CheckResult::Done { .. }), "{:?}", many[0]);
+    assert!(matches!(many[1], CheckResult::Failed { .. }), "{:?}", many[1]);
+    assert!(matches!(many[2], CheckResult::Done { .. }), "{:?}", many[2]);
+}
+
+/// **下準備は 1 回だけ。** 何本まとめても、オブジェクトの置き場所を git に聞くのは 1 回
+/// （1 本ずつ頼んでいたときは、本数ぶん聞いていた）。グラフだけで決まる 3 本なら、ほかに git は呼ばない。
+#[test]
+fn a_batch_asks_git_for_the_preparation_once() {
+    let snapshot = load();
+    let scratch = tempfile::tempdir().expect("一時ディレクトリ");
+    let sink = log();
+    let many = contained::check_many_in(
+        &sink,
+        "git",
+        &repo(),
+        &snapshot,
+        &refs_heads(&["merged-normally", "merged-normally", "merged-normally"]),
+        "refs/heads/main",
+        scratch.path(),
+    );
+    assert!(many.iter().all(|result| matches!(result, CheckResult::Done { .. })));
+    let calls: Vec<String> = sink.entries().iter().map(|entry| entry.args.join(" ")).collect();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(calls[0].contains("--git-path objects"), "{calls:?}");
+}
+
+/// 何も頼まれなければ git を呼ばない。
+#[test]
+fn an_empty_batch_calls_no_git() {
+    let snapshot = load();
+    let sink = log();
+    let many = contained::check_many(&sink, "git", &repo(), &snapshot, &[], "refs/heads/main");
+    assert!(many.is_empty());
+    assert!(sink.entries().is_empty());
 }
 
 /* ---------- 取り込んでいる可能性があるブランチを探す（T-38）---------- */

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   autoCheckBranches,
+  CHECK_BATCH,
   canCheckContainment,
   canFindContainers,
   checkProgress,
@@ -12,11 +13,13 @@ import {
   containmentView,
   keyFor,
   mergeProgress,
+  nextBatch,
   nextToCheck,
   refLabel,
   resultFor,
   squashJump,
   squashOf,
+  storeBatch,
   type CheckResult,
 } from "./containment";
 import type { Containment, ContainmentOutcome, RefEntry } from "./ipc";
@@ -208,6 +211,55 @@ describe("nextToCheck / checkProgress", () => {
   it("相手が決まらなければ何もしない", () => {
     expect(nextToCheck(queue, new Map(), null, refs)).toBeNull();
     expect(checkProgress(queue, new Map(), null, refs)).toEqual({ done: 0, total: 0 });
+  });
+});
+
+describe("nextBatch / storeBatch（T-45）", () => {
+  const many = [...refs, ref("refs/heads/a", "a1"), ref("refs/heads/b", "b1"), ref("refs/heads/c", "c1")];
+  const queue = ["refs/heads/feature", "refs/heads/squashed", "refs/heads/a", "refs/heads/b", "refs/heads/c"];
+
+  it("まだ当たらないものを、列の順のまま決めた本数まで取る", () => {
+    const batch = nextBatch(queue, new Map(), MAIN, many, 3);
+    expect(batch.map((item) => item.branch)).toEqual(queue.slice(0, 3));
+    // 鍵は頼んだ時点の位置で作る。
+    expect(batch[0].key).toBe(keyFor("refs/heads/feature", MAIN, many));
+  });
+
+  it("覚えているもの・消えたもの・相手そのもの・重複は飛ばして詰める", () => {
+    const cache = cacheWith([["refs/heads/feature", done("refs/heads/feature", { kind: "notContained" })]]);
+    const messy = ["refs/heads/gone", MAIN, "refs/heads/feature", "refs/heads/a", "refs/heads/a", "refs/heads/b"];
+    expect(nextBatch(messy, cache, MAIN, many, 8).map((item) => item.branch)).toEqual([
+      "refs/heads/a",
+      "refs/heads/b",
+    ]);
+  });
+
+  it("既定の本数は CHECK_BATCH", () => {
+    const lots = Array.from({ length: CHECK_BATCH + 3 }, (_, i) => ref(`refs/heads/x${i}`, `x${i}`));
+    const names = lots.map((entry) => entry.name);
+    expect(nextBatch(names, new Map(), MAIN, [...refs, ...lots])).toHaveLength(CHECK_BATCH);
+  });
+
+  it("相手が決まらなければ何も取らない", () => {
+    expect(nextBatch(queue, new Map(), null, many)).toEqual([]);
+  });
+
+  it("nextToCheck は 1 本ぶんの nextBatch と同じ", () => {
+    expect(nextToCheck(queue, new Map(), MAIN, many)).toBe(nextBatch(queue, new Map(), MAIN, many, 1)[0].branch);
+  });
+
+  it("返ってきた結果を頼んだ鍵で覚え、足りないぶんは失敗として覚える（頼み続けない）", () => {
+    const batch = nextBatch(queue, new Map(), MAIN, many, 3);
+    const first = done("refs/heads/feature", { kind: "notContained" });
+    const cache = storeBatch(new Map(), batch, [first], "足りない");
+    expect(cache.get(batch[0].key)).toEqual(first);
+    expect(cache.get(batch[1].key)).toEqual({ kind: "failed", reason: "足りない" });
+    expect(cache.get(batch[2].key)?.kind).toBe("failed");
+    // 覚えたので、次はその先から取る。
+    expect(nextBatch(queue, cache, MAIN, many, 8).map((item) => item.branch)).toEqual([
+      "refs/heads/b",
+      "refs/heads/c",
+    ]);
   });
 });
 

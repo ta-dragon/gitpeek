@@ -817,19 +817,23 @@ async fn cancel_commit_search(state: State<'_, AppState>) -> Result<(), String> 
     Ok(())
 }
 
-/// ブランチが相手に取り込まれているか（T-37。docs/DESIGN.md §7.6）。
+/// ブランチが相手に取り込まれているか（T-37。docs/DESIGN.md §7.6）を、何本かまとめて調べる（T-45）。
 ///
-/// `branch` と `target` は**完全な ref 名**。SHA やパスはフロントから受け取らず、
+/// `branches` と `target` は**完全な ref 名**。SHA やパスはフロントから受け取らず、
 /// スナップショットの ref から引く（CLAUDE.md §4）。**リポジトリへは書かない** —
 /// `merge-tree` の書き込みは一時フォルダへ逸らす（CLAUDE.md §1 の 4 件目）。
+///
+/// **スナップショットの確かめ（git 3 回）とオブジェクトの置き場所（git 1 回）は 1 回で済ませる。**
+/// 1 本ずつ頼むと、これだけで 1 本 0.1 秒ほどかかっていた（docs/DESIGN.md §7.6.2）。
+/// 何本ずつ頼むかは画面が決める（`lib/containment.ts` の `CHECK_BATCH`）。
 #[tauri::command]
-async fn check_containment(
+async fn check_containment_batch(
     app: AppHandle,
     state: State<'_, AppState>,
     repository_id: String,
-    branch: String,
+    branches: Vec<String>,
     target: String,
-) -> Result<git::contained::ContainmentOutcome, String> {
+) -> Result<Vec<git::contained::CheckResult>, String> {
     let repository = state.store.repository(&repository_id)?;
     let program = git_program(&state);
     let log = state.log.clone();
@@ -851,7 +855,9 @@ async fn check_containment(
             false,
             &Reporting::silent(),
         )?;
-        git::contained::check(&sink, &program, &path, &snapshot, &branch, &target)
+        Ok(git::contained::check_many(
+            &sink, &program, &path, &snapshot, &branches, &target,
+        ))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -1958,7 +1964,7 @@ pub fn run() {
             load_commit_message,
             search_commits,
             cancel_commit_search,
-            check_containment,
+            check_containment_batch,
             find_containers,
             cancel_find_containers,
             load_changed_files,
