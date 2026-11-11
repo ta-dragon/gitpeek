@@ -1315,6 +1315,48 @@ async fn load_file_diff(
     .map_err(|error| error.to_string())?
 }
 
+/// 画像差分の片側を読む（T-46。docs/DESIGN.md §7.2.1）。**読むだけ**（CLAUDE.md §1）。
+///
+/// 返すのは **JSON の見出し 1 行 ＋ 改行 ＋ 生のバイト列**（`git::image::encode`）。画面は
+/// `src/lib/imageDiff.ts` の `parseImageResponse` で分ける。base64 にしないので依存も増えない。
+/// パスは差分と同じく変更ファイルの一覧から来たもので、作業ツリーの側は `..` を拒み symlink を辿らない。
+#[tauri::command]
+async fn load_image_side(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    repository_id: String,
+    source: DiffSource,
+    path: String,
+    old_path: Option<String>,
+    side: git::image::Side,
+) -> Result<tauri::ipc::Response, String> {
+    let repository = state.store.repository(&repository_id)?;
+    let program = git_program(&state);
+    let log = state.log.clone();
+    let handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo_path = PathBuf::from(&repository.path);
+        if !repo_path.is_dir() {
+            return Err(format!("フォルダが見つかりません: {}", repo_path.display()));
+        }
+        let sink = EmittingLog::new(&handle, &log);
+        let location = git::image::locate(
+            &sink,
+            &program,
+            &repo_path,
+            &source.revisions(),
+            &path,
+            old_path.as_deref(),
+            side,
+        )?;
+        let loaded = git::image::load(&sink, &program, &repo_path, &location)?;
+        Ok(tauri::ipc::Response::new(git::image::encode(&loaded)))
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// 登録済みリポジトリを素性付きで返す。パスが消えていれば `probe` は `null`。
 #[tauri::command]
 async fn list_repositories(
@@ -1969,6 +2011,7 @@ pub fn run() {
             cancel_find_containers,
             load_changed_files,
             load_file_diff,
+            load_image_side,
             load_working_tree,
             load_working_file,
             load_stash_list,

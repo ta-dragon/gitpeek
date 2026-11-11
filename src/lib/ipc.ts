@@ -919,6 +919,25 @@ export type DiffSource =
   | { kind: "range"; parent: string | null; sha: string; symmetric: boolean }
   | { kind: "workingTree"; staged: boolean };
 
+/** 画像差分のどちらの側か（T-46）。 */
+export type ImageSideName = "old" | "new";
+
+/**
+ * 画像差分の片側を読む（T-46。docs/DESIGN.md §7.2.1）。**読むだけ。**
+ *
+ * 返るのは **JSON の見出し 1 行 ＋ 改行 ＋ 生のバイト列**。分けるのは `lib/imageDiff.ts` の
+ * `parseImageResponse`（base64 にしないので、10 MB の画像でも文字列を作らない）。
+ */
+export function loadImageSide(options: {
+  repositoryId: string;
+  source: DiffSource;
+  path: string;
+  oldPath: string | null;
+  side: ImageSideName;
+}): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("load_image_side", options);
+}
+
 export function loadFileDiff(options: {
   repositoryId: string;
   source: DiffSource;

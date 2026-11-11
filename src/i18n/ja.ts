@@ -951,6 +951,17 @@ export const ja = {
     binarySize: (before: string, after: string) => `サイズ ${before} → ${after}`,
     sizeUnknown: "なし",
 
+    // 画像差分（T-46。docs/DESIGN.md §7.2.1）。**左右に並べるだけ**（重ね合わせは無い）。
+    imageBefore: "変更前",
+    imageAfter: "変更後",
+    imageAbsent: "なし",
+    imageTooLarge: (size: string) => `${size} あるので読み込みません（10 MB まで）`,
+    imageNotImage: "画像として読めません",
+    imageBroken: "画像を表示できません（壊れているか、表示できない形式です）",
+    // 縦横のピクセル数とバイト数。読み込む前は大きさだけ。
+    imageMeta: (width: number, height: number, size: string) => `${width} × ${height} px · ${size}`,
+    imageFailed: "画像を読み込めませんでした",
+
     // 大差分の折りたたみ（T-14）。
     collapsedTitle: "大きな差分です",
     collapsedDetail: (lines: number, size: string) =>

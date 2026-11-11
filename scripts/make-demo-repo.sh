@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # 「ブランチが取り込まれているか」（T-38）・「ファイルを変えたコミットを辿る」（T-40）・
-# 「ブランチ同士を比べる」（T-41）・「stash の一覧を見る」（T-42）を目視で確かめるためのリポジトリを作る。
+# 「ブランチ同士を比べる」（T-41）・「stash の一覧を見る」（T-42）・「画像差分」（T-46）を目視で確かめるためのリポジトリを作る。
 #
 #   scripts/make-demo-repo.sh [出力ディレクトリ]      既定は ~/gitpeek-demo
 #
@@ -14,6 +14,7 @@
 #   history-demo           ファイルの改名をまたぐ履歴（T-40）。これも GitPeek に登録する
 #   compare-demo           分かれたあと両側が進んだ枝とタグ 2 つ（T-41）。これも GitPeek に登録する
 #   stash-demo             stash が 4 つ（T-42）。これも GitPeek に登録する
+#   image-demo             画像の追加・描き直し・改名・削除と、作業ツリーの画像（T-46）。これも GitPeek に登録する
 #   確認手順.md            どのブランチに何が出れば正しいかの一覧
 #
 # Windows では **Git Bash で実行すること**。`npm run demo:repo` はどこから実行しても
@@ -339,8 +340,40 @@ printf '設定 3（未追跡と一緒に）\n' >>"$sdemo/設定.txt"
 printf 'まだ追跡していないメモ\n' >"$sdemo/メモ.txt"
 sstash -u -m "未追跡のファイルと一緒に退避"
 
+# --- image-demo: 画像差分（T-46）----------------------------------------------
+# 絵はこのリポジトリのアイコン（`src-tauri/icons`）を使う。`fake.png` は名前だけ画像のテキスト。
+icons=$(cd "$(dirname "$0")/../src-tauri/icons" && pwd)
+idemo=$out/image-demo
+rm -rf "$idemo"
+git_ init --quiet -b main "$idemo"
+
+icommit() {
+  tick
+  git_ -C "$idemo" add -A
+  git_ -C "$idemo" commit --quiet -m "$1"
+}
+
+cp "$icons/32x32.png" "$idemo/icon.png"
+cp "$icons/Square44x44Logo.png" "$idemo/logo.png"
+cp "$icons/icon.ico" "$idemo/app.ico"
+echo "名前だけ画像のテキスト" >"$idemo/fake.png"
+icommit "アイコンとロゴを足す"
+cp "$icons/128x128.png" "$idemo/icon.png"
+icommit "アイコンを大きくする"
+mkdir -p "$idemo/img"
+git_ -C "$idemo" mv logo.png img/logo.png
+icommit "ロゴを img へ移す"
+git_ -C "$idemo" rm --quiet fake.png
+icommit "名前だけ画像のファイルを消す"
+# 作業ツリー: index は 64×64、ディスクは 32×32。未追跡の画像と、上限を超える大きなファイル。
+cp "$icons/64x64.png" "$idemo/icon.png"
+git_ -C "$idemo" add icon.png
+cp "$icons/32x32.png" "$idemo/icon.png"
+cp "$icons/Square89x89Logo.png" "$idemo/new.png"
+truncate -s 11M "$idemo/huge.png"
+
 cat >"$out/確認手順.md" <<'GUIDE'
-# GitPeek の目視用リポジトリ（T-38 / T-40 / T-41 / T-42）
+# GitPeek の目視用リポジトリ（T-38 / T-40 / T-41 / T-42 / T-46）
 
 `containment-demo` を GitPeek に登録して開く。**ブランチ名が期待する結果になっている。**
 
@@ -440,6 +473,24 @@ cat >"$out/確認手順.md" <<'GUIDE'
 6. stash を作る・戻す・消すための項目が、右クリックを含めてどこにも無い
 7. `containment-demo` など stash の無いリポジトリでは、欄に「stash はありません」と出る
 
+## 7. 画像差分（T-46。`image-demo`）
+
+`image-demo` を GitPeek に登録して開く。
+
+1. 「アイコンを大きくする」の `icon.png` を選ぶ
+   - 差分ペインに「変更前」（32 × 32）と「変更後」（128 × 128）が左右に並ぶ。原寸で出ていて、拡大されていない
+   - 絵の下に縦横のピクセル数とバイト数が出る。透明な部分は市松模様が透けて見える
+2. 「アイコンとロゴを足す」を選ぶ
+   - `icon.png` / `logo.png` / `app.ico` は「変更前」が「なし」で、「変更後」に絵が出る
+   - `fake.png` は名前だけ画像のテキストなので、絵ではなくテキストの差分が出る
+3. 「ロゴを img へ移す」の `img/logo.png` は、左右に同じ絵が出る（名前だけ変えた）
+4. 「名前だけ画像のファイルを消す」の `fake.png` は、いまどおりテキストの差分（全行削除）
+5. 作業ツリーを開く
+   - ステージ済みの `icon.png` は 128 × 128 → 64 × 64、未ステージの `icon.png` は 64 × 64 → 32 × 32
+   - 未追跡の `new.png` は「変更前」が「なし」で、「変更後」に絵が出る
+   - 未追跡の `huge.png`（11 MB）は「変更後」に「11 MB あるので読み込みません」と出る
+6. ペインの幅を狭めると、左右が縦に積まれる。大きい絵はペインに収まるよう縮む
+
 ## 作り直し
 
 `npm run demo:repo` をもう一度実行すると作り直す（このフォルダごと上書きされる）。
@@ -452,4 +503,5 @@ echo "  リポジトリ  $(show "$clone")"
 echo "              $(show "$hist")"
 echo "              $(show "$cmp")"
 echo "              $(show "$sdemo")"
+echo "              $(show "$idemo")"
 echo "  確認手順    $(show "$out/確認手順.md")"

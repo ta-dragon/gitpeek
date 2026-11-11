@@ -32,6 +32,7 @@ import { CollapsedNotice } from "./CollapsedNotice";
 import { DiffBody } from "./DiffBody";
 import { DiffSearchBar } from "./DiffSearchBar";
 import { DiffToolbar } from "./DiffToolbar";
+import { ImageDiff } from "./ImageDiff";
 import { UntrackedFile } from "./UntrackedFile";
 
 type Props = {
@@ -392,14 +393,23 @@ function Body({
   if (diff === null || loading) return <p className="dpane__pending">{ja.diff.loading}</p>;
 
   if (diff.binary) {
+    // 画像なら左右に並べる（T-46）。**どちらも画像でなければ、いまどおりサイズの変化だけ。**
     return (
-      <div className="dpane__notice">
-        <p className="dpane__pending">{ja.diff.binaryBody}</p>
-        {/* 行数の代わりにサイズの変化を出す（docs/DESIGN.md §7.2）。 */}
-        <p className="dpane__detail">
-          {ja.diff.binarySize(sizeText(diff.oldSize), sizeText(diff.newSize))}
-        </p>
-      </div>
+      <ImageDiff
+        repositoryId={repositoryId}
+        source={source}
+        path={change.path}
+        oldPath={change.oldPath}
+        fallback={
+          <div className="dpane__notice">
+            <p className="dpane__pending">{ja.diff.binaryBody}</p>
+            {/* 行数の代わりにサイズの変化を出す（docs/DESIGN.md §7.2）。 */}
+            <p className="dpane__detail">
+              {ja.diff.binarySize(sizeText(diff.oldSize), sizeText(diff.newSize))}
+            </p>
+          </div>
+        }
+      />
     );
   }
 

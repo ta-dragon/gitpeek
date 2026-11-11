@@ -11,7 +11,11 @@ import { useEffect, useState } from "react";
 
 import { ja } from "../../i18n/ja";
 import { formatBytes } from "../../lib/diffRows";
-import { loadWorkingFile, type WorkingFile } from "../../lib/ipc";
+import { loadWorkingFile, type DiffSource, type WorkingFile } from "../../lib/ipc";
+import { ImageDiff } from "./ImageDiff";
+
+/** 未追跡の画像は作業ツリーの側だけを読む（T-46。変更前は聞くまでもなく無い）。 */
+const WORKING_TREE: DiffSource = { kind: "workingTree", staged: false };
 
 export function UntrackedFile({
   repositoryId,
@@ -52,20 +56,40 @@ export function UntrackedFile({
 
   if (file === null) return <p className="dpane__pending">{ja.diff.loading}</p>;
 
+  // **大きすぎる・バイナリのものは、画像なら絵で出す**（T-46）。全文を読む上限（512 KB）より
+  // 画像の上限（10 MB）のほうが大きいので、大きすぎる場合も画像として読めるか確かめる。
   if (file.tooLarge) {
     return (
-      <div className="dpane__notice">
-        <p className="dpane__pending">{ja.workingTree.tooLarge(formatBytes(file.size))}</p>
-      </div>
+      <ImageDiff
+        repositoryId={repositoryId}
+        source={WORKING_TREE}
+        path={path}
+        oldPath={null}
+        untracked
+        fallback={
+          <div className="dpane__notice">
+            <p className="dpane__pending">{ja.workingTree.tooLarge(formatBytes(file.size))}</p>
+          </div>
+        }
+      />
     );
   }
 
   if (file.binary || file.text === null) {
     return (
-      <div className="dpane__notice">
-        <p className="dpane__pending">{ja.diff.binaryBody}</p>
-        <p className="dpane__detail">{formatBytes(file.size)}</p>
-      </div>
+      <ImageDiff
+        repositoryId={repositoryId}
+        source={WORKING_TREE}
+        path={path}
+        oldPath={null}
+        untracked
+        fallback={
+          <div className="dpane__notice">
+            <p className="dpane__pending">{ja.diff.binaryBody}</p>
+            <p className="dpane__detail">{formatBytes(file.size)}</p>
+          </div>
+        }
+      />
     );
   }
 

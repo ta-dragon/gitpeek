@@ -467,6 +467,38 @@ echo "未追跡と一緒に" >>"$repo/a.txt"
 echo "未追跡のファイル" >"$repo/未追跡.txt"
 git_ -C "$repo" stash push --quiet -u -m "未追跡あり"
 
+# --- 画像（T-46）-------------------------------------------------------------
+# 画像のバイト列は **base64 から作る**（バックスラッシュのエスケープは道具を通るあいだに化けることがある）。
+# 1×1 の PNG 2 種と GIF。`fake.png` は名前だけ画像のテキスト（中身で見分けることを確かめる）。
+png_a=iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+png_b=iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==
+gif_a=R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7
+put_image() { echo "$2" | base64 -d >"$repo/$1"; }
+new_repo images
+put_image icon.png "$png_a"
+echo "名前だけ画像" >"$repo/fake.png"
+git_ -C "$repo" add -A
+git_ -C "$repo" commit --quiet -m "画像: 追加"
+put_image icon.png "$png_b"
+git_ -C "$repo" commit --quiet -am "画像: 描き直す"
+# マージベース起点の比較用。`other` では icon.png を GIF に差し替える。
+git_ -C "$repo" checkout --quiet -b other
+put_image icon.png "$gif_a"
+git_ -C "$repo" commit --quiet -am "画像: other で GIF にする"
+git_ -C "$repo" checkout --quiet main
+mkdir -p "$repo/img"
+git_ -C "$repo" mv icon.png img/icon.png
+git_ -C "$repo" commit --quiet -m "画像: 名前を変える"
+git_ -C "$repo" rm --quiet fake.png
+put_image anim.gif "$gif_a"
+git_ -C "$repo" add anim.gif
+git_ -C "$repo" commit --quiet -m "画像: GIF を足して偽物を消す"
+# 作業ツリー: index は png_a、ディスクは GIF。未追跡の画像も 1 つ。
+put_image img/icon.png "$png_a"
+git_ -C "$repo" add img/icon.png
+put_image img/icon.png "$gif_a"
+put_image new.png "$png_b"
+
 # --- bare -------------------------------------------------------------------
 git_ clone --quiet --bare "$root/linear" "$root/bare.git"
 
