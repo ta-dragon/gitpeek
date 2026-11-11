@@ -1202,6 +1202,13 @@ body {
   cursor: help;
 }
 
+/* 起動直後、フォルダの様子を確かめている間（T-44）。**押せる行なので淡くはしない。** */
+.repo__checking {
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: help;
+}
+
 /* ---------- コマンドパレット (Ctrl+P) ---------- */
 
 .palette__backdrop {

@@ -7,7 +7,9 @@
  *
  * 判定を `.tsx` に直書きするとテストが 1 つも当たらない（CLAUDE.md §8）。
  */
+import { ja } from "../i18n/ja";
 import type { RefEntry, RepositoryEntry } from "./ipc";
+import { repositoryState } from "./repositoryState";
 
 /** 押せるかどうかと、押せないときの理由。 */
 export type MenuAvailability = {
@@ -36,6 +38,10 @@ export function canFetch(
   const entry = find(entries, id);
   if (entry === null) return { enabled: false, reason: "この登録は見つかりません。" };
   if (busy) return { enabled: false, reason: "ほかの処理が動いています。" };
+  // 起動直後に名前だけ並べている間（T-44）。**待てば押せる**ので、リモートが無いとは言わない。
+  if (repositoryState(entry) === "checking") {
+    return { enabled: false, reason: ja.repositories.checkingNoFetch };
+  }
   if ((entry.probe?.remotes.length ?? 0) === 0) {
     return { enabled: false, reason: "リモートが登録されていないので取得先がありません。" };
   }
@@ -51,7 +57,8 @@ export function canFetch(
 export function canReveal(entries: RepositoryEntry[], id: string): MenuAvailability {
   const entry = find(entries, id);
   if (entry === null) return { enabled: false, reason: "この登録は見つかりません。" };
-  if (entry.probe === null) {
+  // **確かめている途中は押せる**（無いものは最初から確かめ終えた扱い。T-44）。
+  if (repositoryState(entry) === "missing") {
     return { enabled: false, reason: "フォルダが見つかりません。「再指定」で選び直せます。" };
   }
   return OK;

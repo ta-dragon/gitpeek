@@ -1325,13 +1325,16 @@ async fn list_repositories(
 
     tauri::async_runtime::spawn_blocking(move || {
         let sink = EmittingLog::new(&handle, &log);
+        // **リポジトリごとに並列で調べる**（T-44）。逐次だと登録数に比例して起動が遅くなる。
+        let paths: Vec<PathBuf> = repositories
+            .iter()
+            .map(|settings| PathBuf::from(&settings.path))
+            .collect();
+        let probes = git::repo::probe_all(&sink, &program, &paths, git::repo::probe_workers());
         repositories
             .into_iter()
-            .map(|settings| {
-                let path = PathBuf::from(&settings.path);
-                let probe = path
-                    .is_dir()
-                    .then(|| git::repo::probe(&sink, &program, &path));
+            .zip(probes)
+            .map(|(settings, probe)| {
                 // **判定はここ 1 箇所。** フロントで日数を数え直さない。
                 let fetch_stale = probe.as_ref().is_some_and(|probe| {
                     git::ops::is_stale(
@@ -1344,6 +1347,7 @@ async fn list_repositories(
                 RepositoryEntry {
                     settings,
                     probe,
+                    checked: true,
                     fetch_stale,
                 }
             })
@@ -1351,6 +1355,23 @@ async fn list_repositories(
     })
     .await
     .map_err(|error| error.to_string())
+}
+
+/// 登録の一覧を **git を呼ばずに**返す（T-44）。起動直後に名前だけ先に並べるためのもの。
+///
+/// 中身は `checked: false` で、調べた結果は続けて呼ぶ `list_repositories` が埋める。
+/// フォルダが無いかどうかだけはここで分かる（`git::repo::registered_entry`）。
+#[tauri::command]
+fn list_registered(state: State<'_, AppState>) -> Result<Vec<RepositoryEntry>, String> {
+    Ok(state
+        .store
+        .repositories()?
+        .into_iter()
+        .map(|settings| {
+            let exists = Path::new(&settings.path).is_dir();
+            git::repo::registered_entry(settings, exists)
+        })
+        .collect())
 }
 
 /// `settings.json` を読む。壊れていた場合は退避の記録が `recovered` に入る。
@@ -1929,6 +1950,7 @@ pub fn run() {
             add_repository,
             remove_repository,
             list_repositories,
+            list_registered,
             load_repository_snapshot,
             compute_lane_layout,
             compute_branch_status,

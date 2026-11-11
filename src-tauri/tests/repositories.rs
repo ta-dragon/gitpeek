@@ -5,7 +5,7 @@
 mod common;
 
 use gitpeek_lib::git::repo::{
-    probe, scan, HeadState, RepositoryProbe, DEFAULT_EXCLUDED, DEFAULT_MAX_DEPTH,
+    probe, probe_all, scan, HeadState, RepositoryProbe, DEFAULT_EXCLUDED, DEFAULT_MAX_DEPTH,
 };
 
 use common::{fixtures, log};
@@ -108,6 +108,55 @@ fn reports_an_index_lock_without_removing_it() {
 
     // 後続のテストへ影響させない。
     std::fs::remove_file(&lock).unwrap();
+}
+
+/// まとめて調べる（T-44）。**並列に終わっても、渡した順のまま返す。**
+///
+/// `merges` は index.lock のテストが使うので入れない（テストは並列に走る）。
+fn probe_all_targets() -> Vec<std::path::PathBuf> {
+    ["linear", "does-not-exist", "detached", "bare.git", "empty", "japanese"]
+        .iter()
+        .map(|name| fixtures().join(name))
+        .collect()
+}
+
+/// 比べやすい形にする（ブランチ名・detached・bare・無い、の 4 つで足りる）。
+fn summary(probe: &Option<RepositoryProbe>) -> String {
+    match probe {
+        None => "無い".to_string(),
+        Some(probe) => format!(
+            "repo={} bare={} head={:?}",
+            probe.is_repository, probe.is_bare, probe.head
+        ),
+    }
+}
+
+#[test]
+fn probes_all_in_the_given_order() {
+    let paths = probe_all_targets();
+    let probes = probe_all(&log(), "git", &paths, 4);
+
+    assert_eq!(probes.len(), paths.len());
+    // 1 件ずつ調べたものと、同じ位置に同じ結果が来ること。**フォルダが無いものは git を呼ばず None。**
+    for (path, got) in paths.iter().zip(&probes) {
+        let expected = path.is_dir().then(|| probe(&log(), "git", path));
+        assert_eq!(summary(got), summary(&expected), "{}", path.display());
+    }
+    assert!(probes[1].is_none(), "無いフォルダは None");
+    assert!(probes[3].as_ref().is_some_and(|probe| probe.is_bare), "4 件目は bare");
+}
+
+#[test]
+fn probes_all_the_same_with_one_worker() {
+    let paths = probe_all_targets();
+    let one: Vec<String> = probe_all(&log(), "git", &paths, 1).iter().map(summary).collect();
+    let many: Vec<String> = probe_all(&log(), "git", &paths, 8).iter().map(summary).collect();
+    assert_eq!(one, many);
+}
+
+#[test]
+fn probes_nothing_when_nothing_is_registered() {
+    assert!(probe_all(&log(), "git", &[], 8).is_empty());
 }
 
 #[test]

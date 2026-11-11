@@ -8,6 +8,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use serde::Serialize;
 
@@ -71,12 +73,83 @@ pub struct RepositoryEntry {
     #[serde(flatten)]
     pub settings: RepositorySettings,
     /// パスが消えているリポジトリは `None`。UI 側でグレーアウトする。
+    ///
+    /// **`checked` が `false` の間は、`None` でもフォルダが無いとは限らない**（まだ調べていない）。
     pub probe: Option<RepositoryProbe>,
+    /// 調べ終えたか（T-44）。起動直後は git を呼ばずに名前だけ先に並べるので `false` で返る。
+    ///
+    /// **フォルダが無いと分かっているものは最初から `true`** — 調べるまでもなく「見つからない」と
+    /// 出せる（`registered_entry`）。
+    pub checked: bool,
     /// しばらく fetch していないか（docs/DESIGN.md §8.3）。
     ///
     /// **判定は `git::ops::is_stale` の 1 箇所だけ。** フロントで日数を数え直すと、
     /// 「リモートが無ければ警告しない」「閾値 0 で無効」といった条件が二重管理になる。
     pub fetch_stale: bool,
+}
+
+/// git を呼ばずに作る一覧の 1 行（T-44）。**起動直後に名前だけ先に並べる**ためのもの。
+///
+/// フォルダがあるかどうかだけはファイルシステムで分かるので、無いものは調べ終えた扱いにする
+/// （前回選んでいたものが消えていたら、いまどおり選ばない）。
+pub fn registered_entry(settings: RepositorySettings, path_exists: bool) -> RepositoryEntry {
+    RepositoryEntry {
+        settings,
+        probe: None,
+        checked: !path_exists,
+        fetch_stale: false,
+    }
+}
+
+/// 一覧を調べるときに同時に走らせる本数の上限（T-44）。
+///
+/// 1 件は git を 5 回起動して待つだけで、時間の大半は起動の待ち。12 件を手元で測ると
+/// 逐次 2.0 秒 → 4 本 0.74 秒 → 8 本 0.58 秒で、8 本より先はほとんど縮まない（DESIGN.md §13.1.1）。
+pub const MAX_PROBE_WORKERS: usize = 8;
+
+/// [`probe_all`] に渡す本数。機械の並列度に合わせ、[`MAX_PROBE_WORKERS`] で頭打ちにする。
+pub fn probe_workers() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().min(MAX_PROBE_WORKERS))
+        .unwrap_or(1)
+        .max(1)
+}
+
+/// 登録をまとめて調べる（T-44）。**結果は渡した順のまま返す**（終わる順は揃わない）。
+///
+/// フォルダが無いものは git を呼ばずに `None`。**1 本で回しても同じ結果になる**ことは
+/// 結合テストで見ている。
+pub fn probe_all(
+    log: &(dyn LogSink + Sync),
+    program: &str,
+    paths: &[PathBuf],
+    workers: usize,
+) -> Vec<Option<RepositoryProbe>> {
+    let slots: Vec<Mutex<Option<RepositoryProbe>>> = paths.iter().map(|_| Mutex::new(None)).collect();
+    let next = AtomicUsize::new(0);
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers.clamp(1, paths.len().max(1)) {
+            scope.spawn(|| loop {
+                let at = next.fetch_add(1, Ordering::Relaxed);
+                let Some(path) = paths.get(at) else {
+                    return;
+                };
+                if !path.is_dir() {
+                    continue;
+                }
+                let result = probe(log, program, path);
+                if let Ok(mut slot) = slots[at].lock() {
+                    *slot = Some(result);
+                }
+            });
+        }
+    });
+
+    slots
+        .into_iter()
+        .map(|slot| slot.into_inner().ok().flatten())
+        .collect()
 }
 
 impl RepositoryProbe {
@@ -321,9 +394,28 @@ fn walk(dir: &Path, depth: usize, max_depth: usize, excluded: &[&str], found: &m
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_rev_parse_flags, scan, HeadState, DEFAULT_EXCLUDED, DEFAULT_MAX_DEPTH};
+    use super::{
+        parse_rev_parse_flags, registered_entry, scan, HeadState, DEFAULT_EXCLUDED,
+        DEFAULT_MAX_DEPTH,
+    };
+    use crate::store::settings::RepositorySettings;
     use std::fs;
     use std::path::Path;
+
+    /// 名前だけ先に並べる 1 行（T-44）。**フォルダが無いものだけは最初から調べ終えた扱い。**
+    #[test]
+    fn a_registered_entry_is_unchecked_only_when_the_folder_exists() {
+        let settings = RepositorySettings::new("id".into(), Path::new("C:/repo"), 0);
+
+        let present = registered_entry(settings.clone(), true);
+        assert!(!present.checked, "フォルダがあれば、まだ調べていない");
+        assert!(present.probe.is_none());
+        assert!(!present.fetch_stale, "調べるまで放置警告は出さない");
+
+        let missing = registered_entry(settings, false);
+        assert!(missing.checked, "無いものは調べるまでもなく「見つからない」");
+        assert!(missing.probe.is_none());
+    }
 
     /// `.git` を持つだけの偽リポジトリ。scan は git を呼ばないのでこれで足りる。
     fn fake_repo(path: &Path) {

@@ -4,6 +4,7 @@ import { ja } from "../../i18n/ja";
 import type { RepositoryEntry } from "../../lib/ipc";
 import { ContextMenu } from "../common/ContextMenu";
 import { canFetch, canReveal } from "../../lib/repositoryMenu";
+import { noSelectionText, repositoryState } from "../../lib/repositoryState";
 
 export type SortMode = "manual" | "recent";
 
@@ -18,6 +19,7 @@ export type SortMode = "manual" | "recent";
  */
 export function RepositoryList({
   entries,
+  loaded,
   selectedId,
   sortMode,
   busy,
@@ -35,6 +37,8 @@ export function RepositoryList({
   onClone,
 }: {
   entries: RepositoryEntry[];
+  /** 一覧を読み終えたか（T-44）。**読み終えるまで「登録されていません」と出さない。** */
+  loaded: boolean;
   selectedId: string | null;
   sortMode: SortMode;
   busy: boolean;
@@ -151,7 +155,7 @@ export function RepositoryList({
       </div>
 
       {entries.length === 0 ? (
-        <p className="repos__empty">{ja.repositories.empty}</p>
+        <p className="repos__empty">{noSelectionText(loaded, 0)}</p>
       ) : (
         <ul className="repos__list">
           {entries.map((entry) => (
@@ -260,8 +264,10 @@ function RepositoryRow({
   onRemove: (id: string) => void;
   onRelocate: (id: string) => void;
 }) {
-  const missing = entry.probe === null;
-  const notRepository = entry.probe !== null && !entry.probe.isRepository;
+  // **`probe === null` を直に見ない**（確かめている途中も null。T-44）。
+  const state = repositoryState(entry);
+  const missing = state === "missing";
+  const notRepository = state === "notRepository";
 
   return (
     <div
@@ -299,7 +305,15 @@ function RepositoryRow({
 
       <div className="repo__marks">
         {/* ahead/behind の場所を確保しておく（T-17 で ref の更新までは入った）。 */}
-        <span className="repo__badges">{entry.probe && <ProbeBadges entry={entry} />}</span>
+        <span className="repo__badges">
+          {state === "checking" ? (
+            <span className="repo__checking" title={ja.repositories.checkingHint}>
+              {ja.repositories.checking}
+            </span>
+          ) : (
+            entry.probe && <ProbeBadges entry={entry} />
+          )}
+        </span>
       </div>
 
       {(missing || notRepository) && (

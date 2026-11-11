@@ -29,6 +29,7 @@ function entry(overrides: Partial<RepositoryEntry> = {}): RepositoryEntry {
     defaultLlmProfileId: null,
     repoSkills: { trusted: false, hashes: {} },
     probe: probe(),
+    checked: true,
     fetchStale: false,
     ...overrides,
   };
@@ -44,6 +45,11 @@ describe("canReveal", () => {
     const result = canReveal([entry({ probe: null })], "r1");
     expect(result.enabled).toBe(false);
     expect(result.reason).toContain("再指定");
+  });
+
+  // 確かめている途中でもフォルダはある（無いものは最初から確かめ終えた扱い。T-44）。
+  it("確かめている途中でも押せる", () => {
+    expect(canReveal([entry({ checked: false, probe: null })], "r1").enabled).toBe(true);
   });
 
   it("登録そのものが無いときは、フォルダの話にしない", () => {
@@ -84,6 +90,14 @@ describe("canFetch", () => {
 
   it("probe が取れていないリポジトリは fetch できない", () => {
     expect(canFetch([entry({ probe: null })], "r1", false).enabled).toBe(false);
+  });
+
+  // 起動直後に名前だけ並べている間（T-44）。**待てば押せるようになる**ので、リモートが無いとは言わない。
+  it("確かめている途中は押せず、リモートが無いのとは別の理由を出す", () => {
+    const checking = canFetch([entry({ checked: false, probe: null })], "r1", false);
+    const noRemote = canFetch([entry({ probe: probe({ remotes: [] }) })], "r1", false);
+    expect(checking.enabled).toBe(false);
+    expect(checking.reason).not.toBe(noRemote.reason);
   });
 });
 

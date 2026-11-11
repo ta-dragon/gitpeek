@@ -87,7 +87,15 @@ export type RepositoryProbe = {
 
 /** 登録内容に実際の状態を添えたもの。`probe` が null ならパスが消えている。 */
 export type RepositoryEntry = RepositorySettings & {
+  /**
+   * パスが消えているものは null。
+   *
+   * **`checked` が false の間は、null でもフォルダが無いとは限らない**（まだ調べていない。T-44）。
+   * 読み分けは `lib/repositoryState.ts` を通す。
+   */
   probe: RepositoryProbe | null;
+  /** 調べ終えたか（T-44）。起動直後の `listRegistered` は false で返す。 */
+  checked: boolean;
   /**
    * しばらく fetch していないか（docs/DESIGN.md §8.3）。
    *
@@ -96,6 +104,15 @@ export type RepositoryEntry = RepositorySettings & {
    */
   fetchStale: boolean;
 };
+
+/**
+ * 登録の一覧を **git を呼ばずに**取る（T-44）。起動直後に名前だけ先に並べるためのもの。
+ *
+ * 中身は `checked: false`（フォルダが無いものだけ true）。続けて `listRepositories` で埋める。
+ */
+export function listRegistered(): Promise<RepositoryEntry[]> {
+  return invoke<RepositoryEntry[]>("list_registered");
+}
 
 export function probeRepository(path: string): Promise<RepositoryProbe> {
   return invoke<RepositoryProbe>("probe_repository", { path });

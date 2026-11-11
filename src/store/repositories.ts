@@ -9,12 +9,14 @@ import { useSyncExternalStore } from "react";
 
 import {
   addRepository,
+  listRegistered,
   listRepositories,
   removeRepository,
   scanRepositories,
   type RepositoryEntry,
   type VisibleRefs,
 } from "../lib/ipc";
+import { canRestore } from "../lib/repositoryState";
 import { refreshSettings, updateSettings } from "./settings";
 // 名前が衝突するので別名で入れる（このファイルの `snapshot` はリポジトリ一覧の状態）。
 import * as history from "./snapshot";
@@ -91,11 +93,33 @@ export async function initRepositories(): Promise<void> {
   if (initialized) return;
   initialized = true;
 
-  await refresh();
+  // **名前だけ先に並べ、前回のものを選ぶ**（T-44）。git を呼ばないので一瞬で返る。
+  // 選べばグラフの読み込みが始まるので、**ほかの登録を確かめ終えるのを待たない。**
+  // 失敗しても下の `refresh` が理由を出すので、ここでは黙る。
+  try {
+    const entries = await listRegistered();
+    setSnapshot({ entries, loaded: true, error: null });
+    restoreLast();
+  } catch {
+    // 下で読み直す。
+  }
 
+  // フォルダの様子を確かめる（Rust 側でリポジトリごとに並列）。
+  await refresh();
+  // 名前だけの一覧が取れなかったときは、ここで初めて選ぶ。
+  restoreLast();
+}
+
+/**
+ * 前回選んでいたものを選び直す。**フォルダが消えていれば選ばない**（`canRestore`）。
+ *
+ * **もう何か選ばれていれば触らない** — 確かめている間に利用者が選んだものを上書きしない。
+ */
+function restoreLast(): void {
+  if (snapshot.selectedId !== null) return;
   const lastId = currentUiState().lastRepositoryId;
   const last = snapshot.entries.find((entry) => entry.id === lastId);
-  if (last && last.probe !== null) {
+  if (last && canRestore(last)) {
     setSnapshot({ selectedId: last.id });
   }
 }

@@ -61,6 +61,7 @@ import { stashBaseJump, stashReview } from "./lib/stash";
 import { findingsFor, newLines, type LineLookup } from "./lib/reviewFindings";
 import { crashSummary, logHint } from "./lib/crashNotice";
 import { windowTitle } from "./lib/appVersion";
+import { noSelectionText, repositoryState } from "./lib/repositoryState";
 import { bindingOf, isTyping, matches } from "./lib/shortcuts";
 import { defaultSelection, initialProfile } from "./lib/reviewPlan";
 import { selectionForSource, type TargetContext } from "./lib/reviewTarget";
@@ -465,6 +466,7 @@ export default function App() {
                 repositories={
                   <RepositoryList
                     entries={sorted}
+                    loaded={repos.loaded}
                     selectedId={repos.selectedId}
                     sortMode={sortMode}
                     busy={repos.busy}
@@ -509,6 +511,7 @@ export default function App() {
               ) : (
                 <RepositoryPanel
                   entry={selected}
+                  placeholder={noSelectionText(repos.loaded, repos.entries.length)}
                   dataDir={dataDir}
                   jumpTo={jumpTo}
                   onRevealCommit={revealCommit}
@@ -888,6 +891,7 @@ const EMPTY_OUTCOME = { ok: false, message: "", details: [], refused: null };
  */
 function RepositoryPanel({
   entry,
+  placeholder,
   dataDir,
   jumpTo,
   onRevealCommit,
@@ -898,6 +902,8 @@ function RepositoryPanel({
   onNotice,
 }: {
   entry: RepositoryEntry | null;
+  /** 何も選ばれていないときの 1 行（`noSelectionText`。T-44）。 */
+  placeholder: string;
   /** `%APPDATA%\com.tatsu.gitpeek`。**履歴 0 件のときに保存先を出す**のに使う。 */
   dataDir: string;
   jumpTo: { sha: string; nonce: number } | null;
@@ -920,7 +926,7 @@ function RepositoryPanel({
   const settings = useSettings();
 
   if (entry === null) {
-    return <p className="app__loading">{ja.repositories.empty}</p>;
+    return <p className="app__loading">{placeholder}</p>;
   }
 
   const data = snapshot.data;
@@ -941,7 +947,7 @@ function RepositoryPanel({
             <dt>{ja.repositories.path}</dt>
             <dd>{entry.path}</dd>
             <dt>{ja.repositories.head}</dt>
-            <dd>{describeHead(probe)}</dd>
+            <dd>{describeHead(entry)}</dd>
           </dl>
           {probe?.indexLockPresent === true && (
             <p className="ready__note">{ja.repositories.indexLockDetail}</p>
@@ -1738,7 +1744,10 @@ function phaseLabel(phase: LoadPhase): string {
   }
 }
 
-function describeHead(probe: RepositoryEntry["probe"]): string {
+function describeHead(entry: RepositoryEntry): string {
+  const probe = entry.probe;
+  // 確かめている途中も probe は null（T-44）。**「見つかりません」と出さない。**
+  if (repositoryState(entry) === "checking") return ja.repositories.checking;
   if (probe === null) return ja.repositories.missing;
   if (!probe.isRepository) return probe.error ?? ja.repositories.notRepository;
   switch (probe.head?.kind) {
