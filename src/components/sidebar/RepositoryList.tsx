@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { ja } from "../../i18n/ja";
 import type { RepositoryEntry } from "../../lib/ipc";
+import { CollapseButton } from "../common/CollapsedBar";
 import { ContextMenu } from "../common/ContextMenu";
 import { canFetch, canReveal } from "../../lib/repositoryMenu";
 import { noSelectionText, repositoryState } from "../../lib/repositoryState";
@@ -35,6 +36,7 @@ export function RepositoryList({
   onFetch,
   onFetchAll,
   onClone,
+  onCollapse,
 }: {
   entries: RepositoryEntry[];
   /** 一覧を読み終えたか（T-44）。**読み終えるまで「登録されていません」と出さない。** */
@@ -58,6 +60,8 @@ export function RepositoryList({
   onFetchAll: () => void;
   /** URL から clone（T-19）。**空状態からも押せること**（`EmptyState`）。 */
   onClone: () => void;
+  /** 左を畳む（T-47）。 */
+  onCollapse: () => void;
 }) {
   // 一括 fetch の相手はリモートを持つ登録だけ。**1 つも無ければボタンを押させない**
   // （押せるのに何も起きないボタンになる）。
@@ -133,6 +137,7 @@ export function RepositoryList({
         >
           {ja.repositories.fetchAll}
         </button>
+        <CollapseButton pane="sidebar" onCollapse={onCollapse} />
       </header>
 
       <div className="repos__sort">

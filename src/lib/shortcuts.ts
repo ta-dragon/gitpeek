@@ -33,6 +33,9 @@ export type Action =
   | "fileNext"
   | "filePrev"
   | "focusDiff"
+  | "toggleSidebar"
+  | "toggleCommitInfo"
+  | "toggleDiff"
   | "close";
 
 /**
@@ -85,6 +88,10 @@ export const SHORTCUTS: Binding[] = [
   { action: "filePrev", keys: ["ArrowUp"], alt: true, label: "Alt+↑" },
   { action: "fileNext", keys: ["ArrowDown"], alt: true, label: "Alt+↓" },
   { action: "focusDiff", keys: ["Enter"], label: "Enter" },
+  // ペインを畳む / 開く（T-47）。VS Code のサイドバー・右のサイドバー・下のパネルと同じキー。
+  { action: "toggleSidebar", keys: ["b"], ctrl: true, label: "Ctrl+B" },
+  { action: "toggleCommitInfo", keys: ["b"], ctrl: true, alt: true, label: "Ctrl+Alt+B" },
+  { action: "toggleDiff", keys: ["j"], ctrl: true, label: "Ctrl+J" },
   { action: "close", keys: ["Escape"], label: "Esc" },
 ];
 

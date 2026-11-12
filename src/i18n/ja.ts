@@ -1395,8 +1395,24 @@ export const ja = {
     childCommit: "子のコミットへ（複数なら選ぶ）",
     fileNext: "次のファイルへ",
     filePrev: "前のファイルへ",
-    focusDiff: "差分へフォーカスを移す",
+    focusDiff: "差分へフォーカスを移す（畳んでいれば開く）",
+    toggleSidebar: "左（リポジトリとブランチ）を畳む / 開く",
+    toggleCommitInfo: "右（コミット情報）を畳む / 開く",
+    toggleDiff: "中央下（差分）を畳む / 開く",
     close: "開いているものを閉じる",
+  },
+
+  // ペインを畳む（T-47。docs/DESIGN.md §6.1.1）。**畳んでも細い帯で残す**（無いのか畳んだのか分かるように）。
+  panes: {
+    sidebar: "リポジトリ",
+    commitInfo: "コミット情報",
+    diff: "差分",
+    collapse: "畳む",
+    collapseHint: (name: string, key: string) => `${name}を畳みます（${key}）。細い帯を押すと開きます。`,
+    expandHint: (name: string, key: string) => `${name}を開きます（${key}）`,
+    // 差分を畳んでいる間に選んでいるファイル。**自動では開かない**（Enter で開く）。
+    diffSelected: (path: string) => `選んでいるファイル: ${path}`,
+    diffNothing: "ファイルを選んでいません",
   },
 
   /**

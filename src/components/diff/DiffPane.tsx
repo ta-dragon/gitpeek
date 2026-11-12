@@ -28,6 +28,7 @@ import {
   type TextEncoding,
   type UiSettings,
 } from "../../lib/ipc";
+import { CollapseButton } from "../common/CollapsedBar";
 import { CollapsedNotice } from "./CollapsedNotice";
 import { DiffBody } from "./DiffBody";
 import { DiffSearchBar } from "./DiffSearchBar";
@@ -74,6 +75,8 @@ type Props = {
    */
   onDiffLoaded: (diff: FileDiff | null) => void;
   onUiChange: (change: Partial<UiSettings>) => void;
+  /** 中央下を畳む（T-47）。 */
+  onCollapse: () => void;
 };
 
 export function DiffPane({
@@ -88,6 +91,7 @@ export function DiffPane({
   jumpTo,
   onDiffLoaded,
   onUiChange,
+  onCollapse,
 }: Props) {
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [loading, setLoading] = useState(false);
@@ -245,8 +249,10 @@ export function DiffPane({
   return (
     // `tabIndex` は `Enter` でここへフォーカスを移すため（キーボードだけで差分へ入れる）。
     <div className="dpane" ref={focusRef} tabIndex={-1}>
-      {change !== null && (
-        <header className="dpane__head">
+      {/* 見出しは**いつも出す**（「畳む」をファイルを選ぶ前から押せるように。T-47）。 */}
+      <header className="dpane__head">
+        {change !== null && (
+          <>
           <span className="dpane__path">{change.path}</span>
           <span className="dpane__aside">{ja.diff.statusName[change.status]}</span>
           {change.oldPath !== null && (
@@ -259,8 +265,12 @@ export function DiffPane({
               {ja.diff.modeChanged(change.oldMode, change.newMode)}
             </span>
           )}
-        </header>
-      )}
+          </>
+        )}
+        <span className="dpane__collapse">
+          <CollapseButton pane="diff" onCollapse={onCollapse} />
+        </span>
+      </header>
 
       {source !== null && change !== null && (
         <DiffToolbar

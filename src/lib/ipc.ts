@@ -1109,6 +1109,12 @@ export type PaneRatios = {
   /** 右のコミット情報ペイン（詳細 ＋ 変更ファイル一覧）の幅（px）。 */
   commitInfoWidth: number;
   reviewDrawerWidth: number;
+  /** 左（リポジトリ一覧とブランチ一覧）を畳んでいるか（T-47）。幅は残す。 */
+  sidebarCollapsed: boolean;
+  /** 右のコミット情報の列を畳んでいるか（T-47）。AI レビューのドロワーは畳まない。 */
+  commitInfoCollapsed: boolean;
+  /** 中央下の差分を畳んでいるか（T-47）。比率は残す。 */
+  diffCollapsed: boolean;
 };
 
 export type ColumnWidths = {

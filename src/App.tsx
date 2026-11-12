@@ -34,6 +34,15 @@ import {
 import { LoadProgress } from "./components/common/LoadProgress";
 import { NoticeBar } from "./components/common/NoticeBar";
 import { SplitPane } from "./components/common/SplitPane";
+import { CollapseButton, CollapsedBar } from "./components/common/CollapsedBar";
+import {
+  commitInfoShownCollapsed,
+  diffBarDetail,
+  opensDiffOnEnter,
+  setCollapsed,
+  togglePane,
+  type CollapsiblePane,
+} from "./lib/panes";
 import { ContainersDialog } from "./components/common/ContainersDialog";
 import { RefTree } from "./components/sidebar/RefTree";
 import { RepositoryList, type SortMode } from "./components/sidebar/RepositoryList";
@@ -107,6 +116,7 @@ import { autoCheckBranches, squashJump } from "./lib/containment";
 import * as snapshots from "./store/snapshot";
 import { useSnapshot } from "./store/snapshot";
 import {
+  currentUiState,
   DEFAULT_REPOSITORY_UI_STATE,
   initUiState,
   updateRepositoryUiState,
@@ -337,6 +347,16 @@ export default function App() {
         return;
       }
 
+      // 左を畳む / 開く（T-47）。右と中央下は `CommitWorkspace` が受ける（ドロワーの開閉を知っている側）。
+      if (matches(event, "toggleSidebar")) {
+        event.preventDefault();
+        updateUiState((current) => ({
+          ...current,
+          paneRatios: togglePane(current.paneRatios, "sidebar", false),
+        }));
+        return;
+      }
+
       // **`Ctrl+R` は WebView のページ再読込に取られる。** 必ず握り潰すこと。
       // **`Ctrl+Shift+R` とは別の動作**なので、修飾キーごと見る（対応表が判定する）。
       if (matches(event, "fetchAll")) {
@@ -455,6 +475,14 @@ export default function App() {
             size={uiState.paneRatios.sidebarWidth}
             min={SIDEBAR_MIN}
             max={SIDEBAR_MAX}
+            collapsed={uiState.paneRatios.sidebarCollapsed ? "first" : null}
+            collapsedBar={
+              <CollapsedBar
+                pane="sidebar"
+                orientation="vertical"
+                onExpand={() => setPaneCollapsed("sidebar", false)}
+              />
+            }
             onSizeChange={(width) =>
               updateUiState((current) => ({
                 ...current,
@@ -484,6 +512,7 @@ export default function App() {
                     onFetch={fetchOne}
                     onFetchAll={() => askAll(fetchTargets)}
                     onClone={cloning.show}
+                    onCollapse={() => setPaneCollapsed("sidebar", true)}
                   />
                 }
                 refs={
@@ -889,6 +918,14 @@ const EMPTY_OUTCOME = { ok: false, message: "", details: [], refused: null };
  * 履歴を読み終えていればコミットリストを、そうでなければ素性と読み込み状態の
  * カードを出す。読み終わっていれば 3 ペイン（`CommitWorkspace`）を描く。
  */
+/** ボタンと帯から畳む / 開く（T-47）。**幅と比率は残す**（`lib/panes.ts`）。 */
+function setPaneCollapsed(pane: CollapsiblePane, collapsed: boolean): void {
+  updateUiState((current) => ({
+    ...current,
+    paneRatios: setCollapsed(current.paneRatios, pane, collapsed),
+  }));
+}
+
 function RepositoryPanel({
   entry,
   placeholder,
@@ -1237,6 +1274,8 @@ function CommitWorkspace({
 
   const review = useReview(entry.id);
   const [reviewOpen, setReviewOpen] = useState(false);
+  /** `Enter` で差分を開いたあとにフォーカスを移す先（`useCommitFiles` が持つ差分ペインの外枠）。 */
+  const focusDiff = files.focusRef;
   const [profileId, setProfileId] = useState<string | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<string[]>([]);
   /** 指摘から飛ぶ先。**`nonce` は押した回数**（同じ行をもう一度押しても飛べるように）。 */
@@ -1326,11 +1365,29 @@ function CommitWorkspace({
       if (matches(event, "close") && reviewOpen) {
         event.preventDefault();
         setReviewOpen(false);
+        return;
+      }
+      // 右と中央下を畳む / 開く（T-47）。**右はドロワーを開いている間は何もしない**（`togglePane`）。
+      if (matches(event, "toggleCommitInfo") || matches(event, "toggleDiff")) {
+        event.preventDefault();
+        const pane = matches(event, "toggleDiff") ? "diff" : "commitInfo";
+        updateUiState((current) => ({
+          ...current,
+          paneRatios: togglePane(current.paneRatios, pane, reviewOpen),
+        }));
+        return;
+      }
+      // `Enter`（差分へ移る）は、**差分を畳んでいれば先に開く**。差分ペインがまだ無いので、
+      // 描き終わってからフォーカスを移す（`useFileNavigation` は差分ペインが無いと何もしない）。
+      if (matches(event, "focusDiff") && opensDiffOnEnter(currentUiState().paneRatios)) {
+        event.preventDefault();
+        setPaneCollapsed("diff", false);
+        requestAnimationFrame(() => focusDiff.current?.focus());
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [openReview, reviewOpen]);
+  }, [openReview, reviewOpen, focusDiff]);
 
   const runReview = () => {
     if (reviewSource === null || profileId === null) return;
@@ -1447,6 +1504,15 @@ function CommitWorkspace({
       }
       min={COMMIT_INFO_MIN}
       max={COMMIT_INFO_MAX}
+      // **畳むのはコミット情報の列だけ。** ドロワーを開いている間は畳まない（T-47）。
+      collapsed={commitInfoShownCollapsed(uiState.paneRatios, reviewOpen) ? "second" : null}
+      collapsedBar={
+        <CollapsedBar
+          pane="commitInfo"
+          orientation="vertical"
+          onExpand={() => setPaneCollapsed("commitInfo", false)}
+        />
+      }
       onSizeChange={(width) =>
         updateUiState((current) => ({
           ...current,
@@ -1462,6 +1528,16 @@ function CommitWorkspace({
           size={uiState.paneRatios.graphDiffSplit}
           min={0.15}
           max={0.85}
+          collapsed={uiState.paneRatios.diffCollapsed ? "second" : null}
+          collapsedBar={
+            <CollapsedBar
+              pane="diff"
+              orientation="horizontal"
+              // **自動では開かない**ので、何を選んでいるかを帯に出す（T-47）。
+              detail={diffBarDetail(diffChange?.path ?? workingEntry?.path ?? null)}
+              onExpand={() => setPaneCollapsed("diff", false)}
+            />
+          }
           onSizeChange={(ratio) =>
             updateUiState((current) => ({
               ...current,
@@ -1529,6 +1605,7 @@ function CommitWorkspace({
                   ui: { ...current.ui, ...change },
                 }))
               }
+              onCollapse={() => setPaneCollapsed("diff", true)}
             />
           }
         />
@@ -1574,6 +1651,7 @@ function CommitWorkspace({
               >
                 {ja.review.open}
               </button>
+              <CollapseButton pane="commitInfo" onCollapse={() => setPaneCollapsed("commitInfo", true)} />
             </div>
             {stashEntry !== null ? (
               <StashInfo

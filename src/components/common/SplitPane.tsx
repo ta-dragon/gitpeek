@@ -8,6 +8,10 @@ import { useCallback, useRef, type ReactNode } from "react";
  *
  * `anchor` は **`size` がどちらのペインの寸法か**を決める。右側に固定幅のペインを
  * 置くときは `anchor="second"`（残りを左が取る）。
+ *
+ * `collapsed` で片側を**細い帯（`collapsedBar`）に畳む**（T-47）。畳んでいる間は境界を出さず、
+ * もう片側が残りを全部取る。**`size` は触らない**ので、開けば元の幅・比率に戻る。
+ * 畳んだ側の中身は描かない（差分を畳んでいる間に git を呼ばない）。
  */
 export function SplitPane({
   direction,
@@ -16,6 +20,8 @@ export function SplitPane({
   min,
   max,
   anchor = "first",
+  collapsed = null,
+  collapsedBar = null,
   onSizeChange,
   first,
   second,
@@ -26,6 +32,10 @@ export function SplitPane({
   min: number;
   max: number;
   anchor?: "first" | "second";
+  /** 畳んでいる側。null なら畳まない。 */
+  collapsed?: "first" | "second" | null;
+  /** 畳んだ側に代わりに出す帯（`CollapsedBar`）。 */
+  collapsedBar?: ReactNode;
   onSizeChange: (next: number) => void;
   first: ReactNode;
   second: ReactNode;
@@ -67,26 +77,35 @@ export function SplitPane({
       ? { flex: `0 0 ${size}px` }
       : { flex: `0 0 ${(size * 100).toFixed(3)}%` };
 
+  /** その側の置き方。**畳んでいれば帯なり、相手が畳んでいれば残りを全部取る。** */
+  const paneOf = (side: "first" | "second", content: ReactNode) => {
+    if (collapsed === side) {
+      return <div className="split__pane split__pane--collapsed">{collapsedBar}</div>;
+    }
+    const rest = collapsed !== null || anchor !== side;
+    return (
+      <div
+        className={`split__pane${rest ? " split__pane--rest" : ""}`}
+        style={rest ? undefined : fixed}
+      >
+        {content}
+      </div>
+    );
+  };
+
   return (
     <div ref={containerRef} className={`split split--${direction}`}>
-      <div
-        className={`split__pane${anchor === "second" ? " split__pane--rest" : ""}`}
-        style={anchor === "first" ? fixed : undefined}
-      >
-        {first}
-      </div>
-      <div
-        className={`split__handle split__handle--${direction}`}
-        role="separator"
-        aria-orientation={direction === "row" ? "vertical" : "horizontal"}
-        onPointerDown={handlePointerDown}
-      />
-      <div
-        className={`split__pane${anchor === "first" ? " split__pane--rest" : ""}`}
-        style={anchor === "second" ? fixed : undefined}
-      >
-        {second}
-      </div>
+      {paneOf("first", first)}
+      {/* 畳んでいる間は境界を出さない（引っ張っても動かせないものを見せない）。 */}
+      {collapsed === null && (
+        <div
+          className={`split__handle split__handle--${direction}`}
+          role="separator"
+          aria-orientation={direction === "row" ? "vertical" : "horizontal"}
+          onPointerDown={handlePointerDown}
+        />
+      )}
+      {paneOf("second", second)}
     </div>
   );
 }

@@ -64,6 +64,12 @@ pub struct PaneRatios {
     /// 右のコミット情報ペイン（詳細 ＋ 変更ファイル一覧）の幅（px）。
     pub commit_info_width: f64,
     pub review_drawer_width: f64,
+    /// 左（リポジトリ一覧とブランチ一覧）を畳んでいるか（T-47）。**畳んでも幅は残す**（開いたら戻す）。
+    pub sidebar_collapsed: bool,
+    /// 右のコミット情報の列を畳んでいるか（T-47）。**AI レビューのドロワーは畳まない**（閉じるボタンがある）。
+    pub commit_info_collapsed: bool,
+    /// 中央下の差分を畳んでいるか（T-47）。**比率は残す**。
+    pub diff_collapsed: bool,
 }
 
 impl Default for PaneRatios {
@@ -73,6 +79,9 @@ impl Default for PaneRatios {
             graph_diff_split: 0.55,
             commit_info_width: 380.0,
             review_drawer_width: 420.0,
+            sidebar_collapsed: false,
+            commit_info_collapsed: false,
+            diff_collapsed: false,
         }
     }
 }
@@ -328,6 +337,23 @@ mod tests {
         save(&paths, &state).unwrap();
 
         assert_eq!(load(&paths), state);
+    }
+
+    /// **T-47 より前に書かれた `paneRatios` を読めること。** 畳む欄が無ければ開いたまま（`false`）で、
+    /// 幅は捨てない。フロントが書く綴りも固定する（綴りが違うと、畳んでも次の起動で開いている）。
+    #[test]
+    fn reads_pane_ratios_written_before_collapsing() {
+        let old: super::PaneRatios =
+            serde_json::from_str(r#"{ "sidebarWidth": 300 }"#).expect("古い形を読めること");
+        assert_eq!(old.sidebar_width, 300.0);
+        assert!(!old.sidebar_collapsed && !old.commit_info_collapsed && !old.diff_collapsed);
+
+        let written: super::PaneRatios = serde_json::from_str(
+            r#"{ "sidebarCollapsed": true, "commitInfoCollapsed": true, "diffCollapsed": true }"#,
+        )
+        .expect("フロントの綴りを読めること");
+        assert!(written.sidebar_collapsed && written.commit_info_collapsed && written.diff_collapsed);
+        assert_eq!(written.sidebar_width, 260.0, "書いていない幅は既定");
     }
 
     /// **T-36 より前に書かれた `state.json` を読めること。** 欄が無ければ既定（`None`）で、
